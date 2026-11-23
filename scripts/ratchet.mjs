@@ -91,12 +91,17 @@ for (const source of policy.all('ratchets.suppression')) {
   }
 }
 
-// Lint configs: per rule, the sum of its severities over the file.
+// Lint configs. Two readings: per rule, the sum of its severities over the file (a rule lowered or
+// dropped), and the entries that switch something off (an analyzer error set to ignore, a rule set
+// to false or off, an excluded path), of which a new one loosens even when the rule it silences is
+// inherited from an include and was never written in the file.
 const ESLINT_RANK = {off: 0, warn: 1, error: 2, 0: 0, 1: 1, 2: 2};
 const DART_RANK = {ignore: 0, info: 1, warning: 2, error: 3, false: 0, true: 1};
-function severities(file, text) {
-  const out = new Map();
-  const bump = (rule, rank) => out.set(rule, (out.get(rule) ?? 0) + rank);
+const unquote = v => v.trim().replace(/^["']|["']$/g, '');
+function readLint(file, text) {
+  const ranks = new Map();
+  const off = new Set();
+  const bump = (rule, rank) => ranks.set(rule, (ranks.get(rule) ?? 0) + rank);
   if (/\.ya?ml$/.test(file)) {
     let top = '';
     let second = '';
@@ -104,39 +109,57 @@ function severities(file, text) {
       if (/^\s*(#|$)/.test(line)) continue;
       const indent = line.match(/^ */)[0].length;
       const key = /^\s*([\w./:-]+):\s*(.*)$/.exec(line);
-      const item = /^\s*-\s*([\w./:-]+)\s*$/.exec(line);
+      const item = /^\s*-\s*(\S.*?)\s*$/.exec(line);
       if (indent === 0 && key) {
         top = key[1];
         second = '';
-        if (top === 'include' && key[2]) bump(`include ${key[2].trim()}`, 1);
+        if (top === 'include' && key[2]) bump(`include ${unquote(key[2])}`, 1);
         continue;
       }
       if (indent <= 2 && key && !key[2]) {
         second = key[1];
         continue;
       }
+      const value = key ? unquote(key[2]) : '';
       if (top === 'linter' && second === 'rules') {
         if (item) bump(item[1], 1);
-        else if (key) bump(key[1], DART_RANK[key[2].trim()] ?? 1);
+        else if (key) {
+          bump(key[1], DART_RANK[value] ?? 1);
+          if (value === 'false' || value === 'off') off.add(`rules ${key[1]}: ${value}`);
+        }
       } else if (top === 'analyzer' && second === 'errors' && key) {
-        bump(`errors ${key[1]}`, DART_RANK[key[2].trim()] ?? 0);
+        bump(`errors ${key[1]}`, DART_RANK[value] ?? 0);
+        if (value === 'ignore') off.add(`errors ${key[1]}: ignore`);
+      } else if (top === 'analyzer' && second === 'exclude' && item) {
+        off.add(`exclude ${unquote(item[1])}`);
       }
     }
-    return out;
+    return {ranks, off};
   }
   const re = /['"]([@\w/-]+)['"]\s*:\s*\[?\s*['"]?(error|warn|off|0|1|2)['"]?(?=\s*[,\]}\n])/g;
-  for (const [, rule, level] of (text ?? '').matchAll(re)) bump(rule, ESLINT_RANK[level]);
-  return out;
+  for (const [, rule, level] of (text ?? '').matchAll(re)) {
+    bump(rule, ESLINT_RANK[level]);
+    if (level === 'off' || level === '0') off.add(`${rule}: ${level}`);
+  }
+  const ignores = /ignores\s*:\s*\[([^\]]*)\]/g;
+  for (const [, list] of (text ?? '').matchAll(ignores)) {
+    for (const [, entry] of list.matchAll(/['"]([^'"]+)['"]/g)) off.add(`ignores ${entry}`);
+  }
+  return {ranks, off};
 }
 const lintNames = policy.all('ratchets.lintConfig');
 for (const [file, was] of staged) {
   if (!lintNames.some(name => file === name || path.basename(file) === name)) continue;
-  const old = before(was);
-  if (old === null) continue;
-  const now = severities(file, after(file));
-  for (const [rule, sum] of severities(file, old)) {
-    if ((now.get(rule) ?? 0) < sum) {
+  const old = readLint(file, before(was) ?? '');
+  const now = readLint(file, after(file));
+  for (const [rule, sum] of old.ranks) {
+    if ((now.ranks.get(rule) ?? 0) < sum) {
       add(`${file}: lowers or drops ${rule}`, 'every file the rule covered can regress without a signal', 'fix the findings, or exclude only the files that need it, each with its reason');
+    }
+  }
+  for (const entry of now.off) {
+    if (!old.off.has(entry)) {
+      add(`${file}: switches off ${entry}`, 'what it silences stops being reported, in every file it covers', 'fix the findings; an exclusion that must stay names its reason in the pull request');
     }
   }
 }

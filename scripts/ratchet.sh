@@ -12,7 +12,9 @@
 #
 # What loosens, read by scripts/ratchet.mjs: a suppression of [ratchets] suppression added (net over
 # the change's code files), a test of [ratchets] testFile deleted (a rename is not), a rule of a
-# [ratchets] lintConfig file lowered or dropped, the default model of .claude/settings.json raised or
+# [ratchets] lintConfig file lowered or dropped, or a new entry there that switches something off
+# (an analyzer error set to ignore, a rule set to false or off, inherited ones included, an excluded
+# path, an ESLint rule off or ignored path), the default model of .claude/settings.json raised or
 # a hook dropped, a limit or a frozen size of [hygiene] raised (a size frozen for the first time is
 # not a rise; lowering is free), keepRef, namedElsewhere or mustNotLoad grown, a [ratchets] list
 # shortened.

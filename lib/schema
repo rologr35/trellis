@@ -58,8 +58,7 @@ ratchets.suppression|multi|eslint-disable
 ratchets.suppression|multi|@ts-ignore
 ratchets.suppression|multi|@ts-expect-error
 ratchets.suppression|multi|\b(?:it|test|describe)\.(?:skip|only|todo)\(
-ratchets.suppression|multi|// ignore:
-ratchets.suppression|multi|// ignore_for_file:
+ratchets.suppression|multi|//\s*ignore(?:_for_file)?:
 ratchets.suppression|multi|\bskip:\s*(?:true|['"])
 ratchets.suppression|multi|\bsolo:\s*true
 ratchets.testFile|multi|_test\.dart$

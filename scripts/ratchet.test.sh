@@ -30,6 +30,12 @@ reset
 printf '// ignore_for_file: x\n' > lib/b.dart && git add -A
 tl_eq 'an ignore_for_file in a new file is refused' '1' "$(judge)"
 reset
+printf '//ignore: unused\nvoid main() {}\n' > lib/main.dart && git add -A
+tl_eq 'an //ignore: without a space is refused' '1' "$(judge)"
+reset
+printf '//ignore_for_file: x\n' > lib/b.dart && git add -A
+tl_eq 'an //ignore_for_file: without a space is refused' '1' "$(judge)"
+reset
 printf 'void main() {}\n' > lib/b.dart && git add -A
 tl_eq 'a clean change passes' '0' "$(judge)"
 reset
@@ -57,6 +63,19 @@ tl_eq 'a lowered severity is refused' '1' "$(judge)"
 reset
 printf 'linter:\n  rules:\n    - avoid_print\n    - always_declare_return_types\n    prefer_const_constructors: true\nanalyzer:\n  errors:\n    unused_import: error\n' > analysis_options.yaml && git add -A
 tl_eq 'an added rule passes' '0' "$(judge)"
+reset
+printf 'linter:\n  rules:\n    - avoid_print\n    prefer_const_constructors: true\nanalyzer:\n  errors:\n    unused_import: error\n    dead_code: ignore\n' > analysis_options.yaml && git add -A
+tl_eq 'a new errors: <code>: ignore is refused' '1' "$(judge)"
+reset
+printf 'linter:\n  rules:\n    - avoid_print\n    prefer_const_constructors: true\n    inherited_rule: false\nanalyzer:\n  errors:\n    unused_import: error\n' > analysis_options.yaml && git add -A
+tl_eq 'a new rules: <rule>: false for an inherited rule is refused' '1' "$(judge)"
+reset
+printf 'linter:\n  rules:\n    - avoid_print\n    prefer_const_constructors: true\nanalyzer:\n  exclude:\n    - lib/generated/**\n  errors:\n    unused_import: error\n' > analysis_options.yaml && git add -A
+tl_eq 'a new analyzer: exclude: path is refused' '1' "$(judge)"
+reset
+printf 'export default [{rules: {"no-console": "error"}}];\n' > eslint.config.mjs && git add -A && git commit -q --no-verify -m 'chore: eslint (#7)'
+printf 'export default [{rules: {"no-console": "error", "no-debugger": "off"}}];\n' > eslint.config.mjs && git add -A
+tl_eq 'a new ESLint rule set to off is refused' '1' "$(judge)"
 reset
 
 printf '\nsettings\n'
