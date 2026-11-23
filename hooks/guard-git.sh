@@ -26,7 +26,12 @@
 # "ask": an auto-mode session resolves an "ask" on its own.
 #
 # Reads the branches from the trellis.config of the repository each segment runs in, after its
-# `cd <dir>` or `git -C <dir>`, through lib/config.sh. Works with bash 3.2.
+# `cd <dir>` or `git -C <dir>`, through lib/config.sh. The directory is expanded without running
+# anything: quotes (a path with a space), `~`, `~/x`, and `$NAME` / `${NAME}` for HOME and for the
+# variables the command assigns literally (`REPO=/x; cd $REPO`). A directory that needs the shell
+# (`~user`, `cd -`, `$(pwd)`, a backtick, a variable set elsewhere) is the session's own: the
+# config of the session's repository judges the command, and with none there is no opinion. Works
+# with bash 3.2.
 
 set -uo pipefail
 
@@ -203,36 +208,149 @@ guard_gh_merge() {
   fi
 }
 
+# The words of every segment (a line of stdin) as the shell reads them, without running anything:
+# single and double quotes group and are removed ("main" and 'HEAD:main' are main), a backslash
+# escapes the next character (between double quotes, only $ ` " and \). One record per line: "w" and
+# the word, "e" at the end of a segment. In node because bash 3.2 takes quadratic time over a long line.
+split_segments() {
+  node -e '
+    const out = [];
+    for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
+      let cur = "", have = false, quote = "";
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (quote) {
+          if (c === quote) quote = "";
+          else if (c === "\\" && quote === "\"" && "$`\"\\".includes(line[i + 1] || " ")) cur += line[++i];
+          else cur += c;
+        } else if (c === "\"" || c === "\x27") {
+          quote = c;
+          have = true;
+        } else if (c === "\\") {
+          cur += line[++i] || "";
+          have = true;
+        } else if (c === " " || c === "\t") {
+          if (have) out.push("w" + cur);
+          cur = "";
+          have = false;
+        } else {
+          cur += c;
+          have = true;
+        }
+      }
+      if (have) out.push("w" + cur);
+      out.push("e");
+    }
+    process.stdout.write(out.join("\n") + "\n");
+  '
+}
+
+# The words of the next segment, from file descriptor 3, in `words`.
+next_segment() {
+  local record
+  words=()
+  while IFS= read -r record <&3; do
+    [ "$record" = 'e' ] && return 0
+    words+=("${record#w}")
+  done
+  return 1
+}
+
+# Variables assigned literally in the command itself (`REPO=/x; cd $REPO`), as GV_<name>. A value
+# that needs the shell to run something is not recorded, so the name stays unresolved.
+record_assignment() {
+  local name="${1%%=*}" value="${1#*=}"
+  if expand_word "$value"; then printf -v "GV_$name" '%s' "$EXPANDED"; else unset "GV_$name"; fi
+}
+
+# The word with `~`, `~/x`, `$NAME` and `${NAME}` expanded from what the command assigned (and
+# HOME), in EXPANDED. Status 1 when it needs the shell: `~user`, `-`, an unknown variable, `$(...)`,
+# a backtick.
+expand_word() {
+  local w="$1" out='' name rest ref
+  EXPANDED=''
+  [ "$w" = '-' ] && return 1
+  case "$w" in *'`'*) return 1 ;; esac
+  case "$w" in
+    '~') w="$HOME" ;;
+    '~/'*) w="$HOME/${w#\~/}" ;;
+    '~'*) return 1 ;;
+  esac
+  while [[ "$w" == *'$'* ]]; do
+    out="$out${w%%\$*}"
+    w="${w#*\$}"
+    if [[ "$w" =~ ^\{([A-Za-z_][A-Za-z0-9_]*)\}(.*)$ ]] || [[ "$w" =~ ^([A-Za-z_][A-Za-z0-9_]*)(.*)$ ]]; then
+      name="${BASH_REMATCH[1]}"
+      rest="${BASH_REMATCH[2]}"
+      ref="GV_$name"
+      if [ -n "${!ref+x}" ]; then
+        out="$out${!ref}"
+      elif [ "$name" = 'HOME' ]; then
+        out="$out$HOME"
+      else
+        return 1
+      fi
+      w="$rest"
+    else
+      return 1
+    fi
+  done
+  EXPANDED="$out$w"
+}
+
+# Where a segment runs after `cd <word>` or `git -C <word>`. A word that cannot be expanded
+# without the shell leaves the session's own directory: its repository's config judges the command.
+move_to() {
+  if expand_word "$1"; then
+    case "$EXPANDED" in
+      /*) DIR="$EXPANDED" ;;
+      *) DIR="$DIR/$EXPANDED" ;;
+    esac
+  else
+    DIR="$CWD"
+  fi
+}
+
 # One tool call can chain several commands; every segment is judged on its own.
 CHAINED="${COMMAND//&&/$'\n'}"
 CHAINED="${CHAINED//||/$'\n'}"
 CHAINED="${CHAINED//|/$'\n'}"
 CHAINED="${CHAINED//;/$'\n'}"
-DIR="$CWD"
+# Where the shell stands; DIR is where one segment runs, which its own `git -C` moves.
+SHELL_DIR="$CWD"
 
-while IFS= read -r segment; do
-  words=()
-  read -ra words <<< "$segment"
+while next_segment; do
+  DIR="$SHELL_DIR"
   count=${#words[@]}
-  # Quotes are the shell's, not part of a branch name: "main" and 'HEAD:main' are main.
-  k=0
-  while [ "$k" -lt "$count" ]; do
-    words[k]="${words[k]//\"/}"
-    words[k]="${words[k]//\'/}"
-    k=$((k + 1))
-  done
   i=0
   while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
     i=$((i + 1))
   done
+  # A segment of assignments alone sets them for the next ones (`export` too); in front of a command
+  # they belong to that command only.
+  first=-1
+  if [ "$i" -eq "$count" ]; then
+    first=0
+  elif [ "${words[i]}" = 'export' ]; then
+    first=$((i + 1))
+  fi
+  if [ "$first" -ge 0 ]; then
+    k=$first
+    while [ "$k" -lt "$count" ]; do
+      [[ "${words[k]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && record_assignment "${words[k]}"
+      k=$((k + 1))
+    done
+  fi
   [ "$i" -lt "$count" ] || continue
 
   # `cd <dir>` moves where the later segments run.
-  if [ "${words[i]}" = 'cd' ] && [ $((i + 1)) -lt "$count" ]; then
-    case "${words[i + 1]}" in
-      /*) DIR="${words[i + 1]}" ;;
-      *) DIR="$DIR/${words[i + 1]}" ;;
-    esac
+  if [ "${words[i]}" = 'cd' ]; then
+    i=$((i + 1))
+    while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^-(-|[LPe@]+)$ ]]; do
+      i=$((i + 1))
+    done
+    [ "$i" -lt "$count" ] && move_to "${words[i]}"
+    SHELL_DIR="$DIR"
     continue
   fi
 
@@ -251,7 +369,7 @@ while IFS= read -r segment; do
   # Options between git and its subcommand: git -C dir push, git -c key=value push.
   while [ "$i" -lt "$count" ] && [[ "${words[i]}" == -* ]]; do
     case "${words[i]}" in
-      -C) [ $((i + 1)) -lt "$count" ] && case "${words[i + 1]}" in /*) DIR="${words[i + 1]}" ;; *) DIR="$DIR/${words[i + 1]}" ;; esac; i=$((i + 2)) ;;
+      -C) [ $((i + 1)) -lt "$count" ] && move_to "${words[i + 1]}"; i=$((i + 2)) ;;
       -c | --git-dir | --work-tree | --namespace | --exec-path) i=$((i + 2)) ;;
       *) i=$((i + 1)) ;;
     esac
@@ -335,6 +453,6 @@ while IFS= read -r segment; do
       deny "A push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec and open a pull request; a person pushes to $target."
     fi
   done
-done <<< "$CHAINED"
+done 3< <(split_segments <<< "$CHAINED")
 
 exit 0

@@ -74,7 +74,45 @@ tl_eq '-C into the project from a directory without config' 'deny' "$(verdict "g
 tl_eq 'cd into the project from a directory without config' 'deny' "$(verdict "cd $repo && git push origin main" "$plain")"
 tl_eq 'cd out of the project into one without config' 'allow' "$(verdict "cd $elsewhere && git push origin main")"
 
+printf '\na directory that needs the shell to expand it\n'
+home="$TL_TMP/home"
+mkdir -p "$home"
+ln -s "$repo" "$home/proj"
+spaced="$TL_TMP/my dir"
+mkdir -p "$spaced"
+cp -R "$repo" "$spaced/proj"
+tl_eq 'a variable assigned in the same command' 'deny' "$(verdict "REPO=$repo; cd \$REPO && git push origin main" "$plain")"
+tl_eq 'a variable in -C, braced and quoted' 'deny' "$(verdict "R=$repo && git -C \"\${R}\" push origin main" "$plain")"
+tl_eq 'a variable with a quoted literal value' 'deny' "$(verdict "REPO='$repo'; cd \"\$REPO\" && git push origin main" "$plain")"
+tl_eq 'a variable built from an earlier one' 'deny' "$(verdict "BASE=$TL_TMP; REPO=\$BASE/$(basename "$repo"); cd \$REPO && git push origin main" "$plain")"
+tl_eq 'export of a variable' 'deny' "$(verdict "export REPO=$repo; cd \$REPO && git push origin main" "$plain")"
+tl_eq '~ in cd' 'deny' "$(HOME="$home" verdict 'cd ~/proj && git push origin main' "$plain")"
+tl_eq '~ in -C' 'deny' "$(HOME="$home" verdict 'git -C ~/proj push origin main' "$plain")"
+tl_eq 'a quoted path with a space in cd' 'deny' "$(verdict "cd \"$spaced/proj\" && git push origin main" "$plain")"
+tl_eq 'a single-quoted path with a space in -C' 'deny' "$(verdict "git -C '$spaced/proj' push origin main" "$plain")"
+tl_eq 'an expanded directory without a push of a protected branch' 'allow' "$(verdict "REPO=$repo; cd \$REPO && git push origin 4-thing" "$plain")"
+tl_eq 'a variable assigned for one command only is not set for the next' 'allow' "$(verdict "REPO=$repo true; cd \$REPO && git push origin main" "$plain")"
+tl_eq 'an unresolved directory falls back to the session repository (cd)' 'deny' "$(verdict 'cd "$UNSET/x" && git push origin main')"
+tl_eq 'an unresolved directory falls back to the session repository (-C)' 'deny' "$(verdict 'git -C "$(pwd)/x" push origin main')"
+tl_eq 'an unresolved directory falls back to the session repository (cd -)' 'deny' "$(verdict 'cd - && git push origin main')"
+tl_eq 'an unresolved directory, an issue branch' 'allow' "$(verdict 'cd "$UNSET/x" && git push origin 4-thing')"
+tl_eq 'an unresolved directory with no config in the session either has no opinion' 'allow' "$(verdict 'cd "$UNSET/x" && git push origin main' "$plain")"
+tl_eq 'a variable the command does not assign has no opinion from a bare session' 'allow' "$(verdict 'D=$(pwd); cd $D && git push origin main' "$plain")"
+
+git -C "$repo" worktree add -q -b 16-words "$TL_TMP/on-issue-branch" develop
+tl_eq 'an escaped quote does not swallow the refspec' 'deny' "$(verdict 'git push -o "a\"b" origin main' "$TL_TMP/on-issue-branch")"
+tl_eq 'two escaped quotes do not swallow the refspec' 'deny' "$(verdict 'git push -o "say \"hi\"" origin main' "$TL_TMP/on-issue-branch")"
+tl_eq '-C belongs to its own command' 'deny' "$(verdict "git -C $elsewhere status && git push origin main")"
+tl_eq '-C into the project does not stay for the next command' 'allow' "$(verdict "git -C $repo status && git push origin main" "$plain")"
+tl_eq 'cd -- into the project' 'deny' "$(verdict "cd -- $repo && git push origin main" "$plain")"
+tl_eq 'cd -P into the project' 'deny' "$(verdict "cd -P $repo && git push origin main" "$plain")"
+long="$(head -c 60000 /dev/zero | tr '\0' 'a')"
+started=$SECONDS
+tl_eq 'a push after a long line' 'deny' "$(verdict "gh issue create --body \"$long\" && git push origin main")"
+tl_eq 'a long line is split in linear time' 'fast' "$([ $((SECONDS - started)) -le 10 ] && echo fast || echo slow)"
+
 printf '\nbranch switch on the main checkout\n'
+
 tl_eq 'to an issue branch' 'deny' "$(verdict 'git switch -c 4-thing')"
 tl_eq 'checkout -b to an issue branch' 'deny' "$(verdict 'git checkout -b 4-thing origin/develop')"
 tl_eq 'to another branch' 'allow' "$(verdict 'git switch main')"
