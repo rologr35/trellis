@@ -79,3 +79,7 @@ The scripts run with bash 3.2 (the macOS one): no `mapfile`, no associative arra
 ## Version
 
 `version` of `.claude-plugin/plugin.json` and a tag per version. A consumer pins the sha, not the tag.
+
+## License
+
+MIT, in `LICENSE`.
