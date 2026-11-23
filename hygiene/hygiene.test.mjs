@@ -106,7 +106,7 @@ test('narrative in Spanish fails in an es project and passes in an en one', () =
 });
 
 test('the es narrative catches a word between "antes" and the verb, and "ahora" as a contrast', () => {
-  for (const line of ['Antes esto usaba Provider.', 'Antes aquello era un singleton.', 'Antes Provider estaba en core.', 'El estado ahora vive en Bloc.', 'Ahora usa Bloc.']) {
+  for (const line of ['Antes esto usaba Provider.', 'Antes aquello era un singleton.', 'Antes Provider estaba en core.', 'Antes esto usaba Provider, ahora usa Bloc.', 'Esto era un singleton y ahora es un servicio.', 'Usaba Provider, pero ahora usa Bloc.']) {
     const p = project();
     p.write('app/CLAUDE.md', `# App\n\n${line}\n`);
     p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
@@ -114,7 +114,20 @@ test('the es narrative catches a word between "antes" and the verb, and "ahora" 
     fails(p, 'app/CLAUDE.md: line 3 narrates history');
   }
   const p = project();
-  p.write('app/CLAUDE.md', '# App\n\nAntes de ejecutar, lee el plan.\nAntes de proponer algo, busca lo que existe.\nEjecuta antes una alternativa barata.\n');
+  const legitimate = [
+    'Antes de ejecutar, lee el plan.',
+    'Antes de proponer algo, busca lo que existe.',
+    'Ejecuta antes una alternativa barata.',
+    'Por ahora el escalón está apagado.',
+    'Ahora mismo no hay caché.',
+    'A partir de ahora, cada PR lleva su issue.',
+    'Ahora, ejecuta el análisis.',
+    'Comprueba antes qué había en la rama.',
+    'Mira antes si había cambios sin commit.',
+    'Pregunta antes si estaba aprobado.',
+    'Mira antes de la rama lo que había.',
+  ];
+  p.write('app/CLAUDE.md', `# App\n\n${legitimate.join('\n')}\n`);
   p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
   p.trellis('sync');
   passes(p);

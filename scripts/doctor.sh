@@ -18,7 +18,9 @@
 # branch, the release branch nor an issue branch; a [command] secretScan configured and missing;
 # a [toolchain] envFile missing.
 # warn: a rung with pr = true that no file under .github/workflows/ runs (it holds the command's
-# run text, or its ci text when set); no secret scanner configured; uncommitted changes, unpushed
+# run text, or its ci text when set: a plain substring search, so a folded `run: >-`, a comment or
+# a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
+# parser); no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail
@@ -27,7 +29,7 @@ TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
 
-CLAUDE_MIN='2.1.324'
+CLAUDE_MIN='2.1.330'
 
 fail_count=0
 warn_count=0
@@ -134,7 +136,7 @@ if [ -z "$claude_version" ]; then
 elif version_ge "$claude_version" "$CLAUDE_MIN"; then
   ok "Claude Code $claude_version (>= $CLAUDE_MIN)"
 else
-  fail "Claude Code $claude_version is older than $CLAUDE_MIN (the pinned marketplace needs it)"
+  fail "Claude Code $claude_version is older than $CLAUDE_MIN (the pinned marketplace and `--scope local` need it)"
 fi
 plugin_installed=false
 if grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
@@ -169,12 +171,18 @@ unrun=''
 checked=0
 for rung in $(tc_subsections rung); do
   [ "$(tc_get "rung.$rung.pr")" = false ] && continue
-  name="$(tc_get "rung.$rung.command")"
-  [ -n "$name" ] || continue
-  text="$(tc_get "command.$name.ci")"
-  [ -n "$text" ] || text="$(tc_get "command.$name.run")"
-  [ -n "$text" ] || continue
   checked=$((checked + 1))
+  name="$(tc_get "rung.$rung.command")"
+  text=''
+  if [ -n "$name" ]; then
+    text="$(tc_get "command.$name.ci")"
+    [ -n "$text" ] || text="$(tc_get "command.$name.run")"
+  fi
+  if [ -z "$text" ]; then
+    warn "rung $rung has pr = true but its command has no text to look for in .github/workflows/"
+    unrun=1
+    continue
+  fi
   if ! grep -rqF -- "$text" .github/workflows 2>/dev/null; then
     warn "rung $rung has pr = true but no workflow under .github/workflows/ runs $text: the project's CI owns the rungs, so add the step or set pr = false"
     unrun=1

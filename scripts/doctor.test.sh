@@ -83,6 +83,8 @@ git config -f trellis.config --unset-all toolchain.require
 printf '\nclaude code, plugin, node\n'
 stub claude '2.1.300 (Claude Code)'
 tl_eq 'an old Claude Code fails' '1' "$(doctor)"
+stub claude '2.1.324 (Claude Code)'
+tl_eq 'Claude Code below the verified --scope local fails' '1' "$(doctor)"
 stub claude '2.1.330 (Claude Code)'
 mv "$HOME/.claude/plugins/installed_plugins.json" "$TL_TMP/plugins.json"
 tl_eq 'the plugin not installed fails' '1' "$(doctor)"
@@ -132,6 +134,12 @@ tl_lacks 'a rung with pr = false is not asked for a workflow' 'rung unit has pr 
 git config -f trellis.config --remove-section rung.unit
 git config -f trellis.config --remove-section command.unit
 rmdir .github/workflows .github
+
+git config -f trellis.config rung.ghost.command nowhere
+doctor > /dev/null
+tl_lacks 'a pr = true rung with no command text is not "no rung with pr = true"' 'no rung with pr = true' "$(out)"
+tl_has 'and is said to have nothing to look for' 'rung ghost has pr = true but its command has no text to look for' "$(out)"
+git config -f trellis.config --remove-section rung.ghost
 
 printf '\nbranch\n'
 
