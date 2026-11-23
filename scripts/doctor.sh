@@ -8,9 +8,10 @@
 # never fetches: the repository state is read from local refs. Env files are checked for presence
 # and never read.
 #
-# FAIL: a key of trellis.config outside lib/schema, a value outside the accepted ones of an enum key
-# of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), or a command name that names no [command]; a
-# tool of [toolchain] require missing or older than its minimum; core.hooksPath unset; the plugin
+# FAIL: a key of trellis.config outside lib/schema, a value outside the accepted ones of an enum
+# key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), workspace.kind =
+# other without [hygiene] namedExt, or a command name that names no [command]; a tool of
+# [toolchain] require missing or older than its minimum; core.hooksPath unset; the plugin
 # not installed or Claude Code older than the minimum; node missing while hooks are active;
 # ANTHROPIC_API_KEY exported (the subscription stops being used and every token is billed as API
 # usage, silently, so it is a FAIL and not a warning); a branch that is neither the integration
@@ -67,6 +68,9 @@ else
     while IFS= read -r key; do
       fail "trellis.config: unknown key $key (lib/schema lists the keys)"
     done <<< "$unknown"
+  fi
+  if [ "$(tc_get workspace.kind)" = other ] && [ -z "$(tc_all hygiene.namedExt)" ]; then
+    fail 'trellis.config: workspace.kind = other: declare [hygiene] namedExt, the extensions a rule names files by; without them the rule-loading check checks nothing'
   fi
   invalid="$(tc_invalid)"
   if [ -z "$invalid" ]; then

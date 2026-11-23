@@ -57,6 +57,12 @@ git config -f trellis.config --unset tracker.kind
 git config -f trellis.config workspace.kind python
 tl_eq 'workspace.kind outside the schema fails' '1' "$(doctor)"
 tl_has 'naming the value and the accepted ones' 'workspace.kind = python is not one of flutter, dart, node' "$(out)"
+git config -f trellis.config workspace.kind other
+tl_eq 'workspace.kind = other without namedExt fails' '1' "$(doctor)"
+tl_has 'saying to declare the extensions' 'workspace.kind = other: declare [hygiene] namedExt' "$(out)"
+git config -f trellis.config hygiene.namedExt py
+tl_eq 'workspace.kind = other with namedExt passes' '0' "$(doctor)"
+git config -f trellis.config --unset-all hygiene.namedExt
 git config -f trellis.config --unset workspace.kind
 git config -f trellis.config rung.unit.agent maybe
 tl_eq 'a subsection enum fails too' '1' "$(doctor)"
