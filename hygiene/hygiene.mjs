@@ -13,8 +13,9 @@
 //   - every `paths:` glob of a rule matches a file; a file a rule names (extensions of
 //     [hygiene] namedExt, by default those of workspace.kind) loads that rule, unless
 //     [hygiene] namedElsewhere lists it; a rule does not load what [hygiene] mustNotLoad lists;
-//   - sizes in bytes: the root, each nested file, each rule, each agent (4 KB, fixed) and all the
-//     rules together under their [hygiene] limits; skills, docs/ and TESTING.md under their
+//   - sizes in bytes: the root, each nested file and TESTING.md (whose rungs block sync rewrites,
+//     so it carries the nested limit and is not frozen), each rule, each agent (4 KB, fixed) and
+//     all the rules together under their [hygiene] limits; skills and docs/ under their
 //     [hygiene] frozen size plus 2%, every one of them frozen;
 //   - every [workspace] package has its CLAUDE.md;
 //   - the orientation block lists every nested file and every rule;
@@ -184,7 +185,7 @@ export function hygiene(root, {staged = false} = {}) {
     if (size > max) fail(file, `${size} bytes, over its limit of ${max}: ${advice}`);
   };
   for (const file of rootFile) over(file, limit('rootLimit'), 'move a domain to a nested CLAUDE.md or a rule with paths:');
-  for (const file of nested) over(file, limit('nestedLimit'), 'move a section to a rule with paths:');
+  for (const file of [...nested, ...testing]) over(file, limit('nestedLimit'), 'move a section to a rule with paths:');
   for (const file of rules) over(file, limit('ruleLimit'), 'split it by subdomain, each half with the globs of its own files');
   for (const file of agents) over(file, AGENT_LIMIT_BYTES, 'a subagent does one check; what it needs is in the files it reads');
   if (!staged) {
@@ -192,7 +193,7 @@ export function hygiene(root, {staged = false} = {}) {
     if (total > limit('rulesTotalLimit')) fail('.claude/rules', `the rules add up to ${total} bytes, over ${limit('rulesTotalLimit')}: rewrite what grew to its current state before adding`);
   }
   const frozen = new Map(config.all('hygiene.frozen').map(v => v.trim().split(/\s+/)).map(([file, size]) => [file, Number(size)]));
-  for (const file of [...skills, ...docs, ...testing]) {
+  for (const file of [...skills, ...docs]) {
     if (!frozen.has(file)) {
       fail(file, 'has no frozen size: trellis hygiene --freeze records it in [hygiene] frozen');
       continue;
@@ -247,7 +248,7 @@ export function freeze(root) {
   const tree = projectTree(root);
   const config = loadConfig({cwd: root});
   const was = new Map(config.all('hygiene.frozen').map(v => v.trim().split(/\s+/)).map(([file, size]) => [file, Number(size)]));
-  const files = tree.files.filter(f => /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f) || /^docs\/.*\.md$/.test(f) || f === 'TESTING.md');
+  const files = tree.files.filter(f => /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f) || /^docs\/.*\.md$/.test(f));
   const file = path.join(root, 'trellis.config');
   const git = (...args) => execFileSync('git', ['config', '-f', file, ...args], {stdio: ['ignore', 'pipe', 'ignore']});
   try {

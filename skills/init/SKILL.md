@@ -6,7 +6,17 @@ disable-model-invocation: true
 
 # init
 
-Corre en el checkout principal del proyecto, en una rama de issue, con el árbol limpio. Las plantillas viven en el plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis)")/.." && pwd)"`, y `$PLUGIN/templates/`.
+Las plantillas viven en el plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis)")/.." && pwd)"`, y `$PLUGIN/templates/`.
+
+## 0. Un worktree para init
+
+El checkout principal se queda en la rama de integración, limpio: en cuanto existe `trellis.config`, `guard-git` impide volver a ella desde una rama de issue abierta. Como todavía no hay config, el worktree se crea con git plano, desde el checkout principal y en líneas simples:
+
+1. `<n>` es la issue que pide la adopción de trellis; sin tracker, un número que elige la persona.
+2. `printf '.claude/worktrees/\n' >> .git/info/exclude`, para que el checkout principal no vea el worktree antes de que `.gitignore` lo diga.
+3. `git fetch origin`
+4. `git worktree add .claude/worktrees/<n>-trellis-init -b <n>-trellis-init origin/<integración>`
+5. `EnterWorktree` con la ruta absoluta de ese worktree. Todo lo que sigue se escribe allí.
 
 ## 1. Leer antes de preguntar
 
@@ -38,4 +48,4 @@ Una pregunta por tema, con la respuesta deducida como opción por defecto:
 
 ## 4. Cerrar
 
-En este orden: `trellis setup`, `trellis sync`, `trellis hygiene --freeze`, `trellis hygiene` y `trellis doctor`. Lo que quede en FAIL se arregla o se le dice a la persona con su causa. Después, un commit en la rama (`chore(trellis): init (#n)`), y el resumen: qué se escribió, qué se dedujo y qué se preguntó, qué queda en aviso, y que los `CLAUDE.md` de paquete esperan revisión humana.
+En este orden: `trellis setup`, `trellis sync`, `trellis hygiene --freeze`, `trellis hygiene` y `trellis doctor`. Lo que quede en FAIL se arregla o se le dice a la persona con su causa. Después, un commit en la rama del worktree (`chore(trellis): init (#n)`), el push con refspec explícito (`git push origin <n>-trellis-init`), `ExitWorktree` con `keep`, y el resumen: qué se escribió, qué se dedujo y qué se preguntó, qué queda en aviso, y que los `CLAUDE.md` de paquete esperan revisión humana.

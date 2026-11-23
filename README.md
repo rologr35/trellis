@@ -40,6 +40,14 @@ Base, el módulo de este repositorio, solo necesita git y node. Los módulos Cic
 - **Merge**: solo `guard-git` juzga la base de un pull request. Un `deny` de `gh pr merge` bloquearía todos los merges o ninguno, porque una regla de permisos no ve la base y un `deny` gana a todo `allow`. Donde el plugin no carga, el merge queda sin guarda; Base no lanza sesiones en la nube.
 - **Escáner de secretos**: una herramienta externa elegida en `init` (gitleaks por defecto). Sin ninguno configurado, `doctor` avisa; configurado y ausente, FAIL.
 
+## `trellis doctor`
+
+Solo lectura: nunca escribe ni hace fetch. Sale con 1 si hay algún FAIL.
+
+- **FAIL**: una clave de `trellis.config` fuera del esquema, un nombre de comando sin `[command "<nombre>"] run`, o un `trellis.config` que no parsea (el doctor lo informa y sigue diagnosticando; los demás subcomandos paran con él); una herramienta de `[toolchain] require` ausente o más vieja que su mínimo; `core.hooksPath` sin fijar o distinto de `.githooks`; el plugin no instalado o Claude Code por debajo de 2.1.324; node ausente con hooks activos; `ANTHROPIC_API_KEY` exportada (la suscripción deja de usarse y cada token se cobra como uso de API, en silencio); una rama que no es la de integración, la de release ni una rama de issue; un `[command] secretScan` configurado cuyo escáner falta; un fichero de `[toolchain] envFile` ausente (solo presencia, nunca se lee).
+- **Aviso**: ningún escáner de secretos configurado, cambios sin commit, commits sin push, worktrees de ramas que ya no están en origin.
+- **Info**: lo que espera la release.
+
 ## Lo que el marco no hace, y por qué
 
 - **Subagentes ejecutores que releen el repositorio.** Un subagente arranca sin el contexto de la sesión y lo reconstruye leyendo, lo que cuesta cupo cada vez. Base usa un solo subagente, `plan-reviewer`, porque un contexto limpio es justo lo que su comprobación necesita.

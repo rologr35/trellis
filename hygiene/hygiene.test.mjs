@@ -176,6 +176,19 @@ test('a docs file joins the frozen ones', () => {
   fails(p, 'docs/domain.md: has no frozen size');
 });
 
+test('TESTING.md is not frozen: a new rung needs no setback, the nested limit holds it', () => {
+  const p = project();
+  assert.doesNotMatch(p.read('trellis.config'), /frozen = TESTING\.md/);
+  p.git('config', '-f', 'trellis.config', 'command.unit.run', 'flutter test');
+  p.git('config', '-f', 'trellis.config', 'rung.unit.command', 'unit');
+  p.git('config', '-f', 'trellis.config', 'rung.unit.proves', 'the logic, without widgets or network, in every package');
+  p.trellis('sync');
+  passes(p);
+  p.git('config', '-f', 'trellis.config', 'hygiene.nestedLimit', '40');
+  p.trellis('sync');
+  fails(p, 'TESTING.md:');
+});
+
 test('a package without CLAUDE.md fails', () => {
   const p = project();
   p.git('config', '-f', 'trellis.config', '--add', 'workspace.package', 'core');
