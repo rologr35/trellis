@@ -10,7 +10,7 @@
 # The plugin is cloned at that sha outside the workspace, so the project's hygiene never sees it.
 # The ratchet compares HEAD with the pull request's base over the full history (fetch-depth 0): a
 # shallow clone gives false results. It runs with --allow-loosen only when the body carries a valid
-# **Retroceso**, so an accepted setback is written where the person reviews it.
+# **Setback** (**Retroceso** in es), so an accepted setback is written where the person reviews it.
 
 name: trellis consumer check
 

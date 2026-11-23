@@ -6,6 +6,7 @@ import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
+import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 
 const [, , baseRef, branchArg, escaped] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
@@ -242,14 +243,15 @@ if (configWas !== null) {
 }
 
 if (findings.length === 0) process.exit(0);
+const setback = PR_SECTIONS[localeOf(newConfig)].setback;
 const list = findings.map(f => `  - ${f.what}\n      cost: ${f.cost}\n      alternative: ${f.alternative}`).join('\n');
 if (escaped === 'true') {
-  console.error(`ratchet: warning, ${branch || 'this change'} loosens ratchets with the person's confirmation (the pull request carries **Retroceso**):\n${list}`);
+  console.error(`ratchet: warning, ${branch || 'this change'} loosens ratchets with the person's confirmation (the pull request carries **${setback}**):\n${list}`);
   process.exit(0);
 }
 const escape = branch ? `git config branch.${branch}.ratchet-loosened true` : 'git config branch.<branch>.ratchet-loosened true';
 console.error(`ratchet: this change loosens a ratchet:
 ${list}
 Before going on, tell the person what regresses, its cost and the alternative that does not regress, and wait.
-Only with their confirmation: ${escape}, and the pull request carries a **Retroceso** section.`);
+Only with their confirmation: ${escape}, and the pull request carries a **${setback}** section.`);
 process.exit(1);

@@ -8,7 +8,7 @@
 #   trellis ratchet --base <ref>             HEAD against its merge base with <ref> (CI, full history:
 #                                            a shallow clone gives false results)
 #   trellis ratchet ... --allow-loosen       findings become a warning (CI, when the pull request
-#                                            body carries a valid **Retroceso** section)
+#                                            body carries a valid **Setback** section)
 #
 # What loosens, read by scripts/ratchet.mjs: a suppression of [ratchets] suppression added (net over
 # the change's code files), a test of [ratchets] testFile deleted (a rename is not), a rule of a
@@ -22,7 +22,8 @@
 # The local escape, set only after the person confirmed knowing the cost:
 #   git config branch.<branch>.ratchet-loosened true
 # It turns the findings into a warning, and `trellis pr-check` then asks the pull request for a
-# **Retroceso** section. A merge in progress is not judged: what it brings was judged on its branch.
+# **Setback** section (**Retroceso** in es). A merge in progress is not judged: what it brings was
+# judged on its branch.
 
 set -uo pipefail
 
