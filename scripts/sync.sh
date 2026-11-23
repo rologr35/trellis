@@ -5,7 +5,7 @@
 #   trellis sync
 #
 #   - the blocks `<!-- trellis:<id> -->` of the root CLAUDE.md (method, orientation, commands,
-#     gates) and of TESTING.md (rungs), from method/base.md, the config and the tree;
+#     gates) and of TESTING.md (rungs), from method/<project.locale>.md, the config and the tree;
 #   - in .claude/settings.json, the deny of each rung with agent = false and of each push to a
 #     branch of git.protected: defense in depth, and the only push guard in a cloud session, where
 #     the plugin may not load. A push entry of a branch no longer protected is removed. A merge has

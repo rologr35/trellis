@@ -14,7 +14,7 @@ cat > trellis.config <<'CFG'
 	protected = staging
 [command "analyze"]
 	run = flutter analyze
-	description = El análisis estático.
+	description = The static analysis.
 [command "golden"]
 	run = flutter test --tags golden
 [command]
@@ -23,14 +23,17 @@ cat > trellis.config <<'CFG'
 	command = golden
 	agent = false
 	pr = false
-	proves = Las capturas.
+	proves = The screenshots.
 	offUntil = 2027-01-15
 [gate "payments"]
 	paths = app/lib/payments/**
-	reason = mueve dinero
+	reason = moves money
 CFG
 cat > CLAUDE.md <<'MD'
 # Project
+
+<!-- trellis:method -->
+<!-- /trellis:method -->
 
 <!-- trellis:orientation -->
 stale
@@ -50,14 +53,16 @@ printf '{\n  "permissions": {\n    "deny": ["Bash(rm -rf *)", "Bash(git push * d
 out="$("$TRELLIS" sync 2>&1)"
 tl_eq 'sync exits 0' '0' "$?"
 claude_md="$(cat CLAUDE.md)"
-tl_has 'orientation lists the nested file' '| `app/CLAUDE.md` | al leer un fichero de `app/` | App package |' "$claude_md"
+tl_has 'orientation lists the nested file' '| `app/CLAUDE.md` | when a file under `app/` is read | App package |' "$claude_md"
 tl_has 'orientation lists the rule with its globs' '| `.claude/rules/widgets.md` | `app/lib/**/*.dart` | Widgets |' "$claude_md"
 tl_lacks 'the stale content is gone' 'stale' "$claude_md"
-tl_has 'commands lists check' '`trellis check` corre en orden: `analyze`.' "$claude_md"
-tl_has 'commands lists a command' '- `analyze`: `flutter analyze`. El análisis estático.' "$claude_md"
-tl_has 'gates' '- **payments** (`app/lib/payments/**`): mueve dinero' "$claude_md"
+tl_has 'commands lists check' '`trellis check` runs, in order: `analyze`.' "$claude_md"
+tl_has 'commands lists a command' '- `analyze`: `flutter analyze`. The static analysis.' "$claude_md"
+tl_has 'gates' '- **payments** (`app/lib/payments/**`): moves money' "$claude_md"
+tl_has 'the method of the default locale, en' '## Working method' "$claude_md"
+tl_lacks 'without the principle ids' '<!-- p:' "$claude_md"
 tl_has 'hand-written text stays' 'Hand-written text stays.' "$claude_md"
-tl_has 'rungs table' '| golden | `flutter test --tags golden` | no | no | Las capturas. | 2027-01-15 |' "$(cat TESTING.md)"
+tl_has 'rungs table' '| golden | `flutter test --tags golden` | no | no | The screenshots. | 2027-01-15 |' "$(cat TESTING.md)"
 deny="$(node -e 'console.log(require("./.claude/settings.json").permissions.deny.join("\n"))')"
 tl_has 'the deny keeps what a person wrote' 'Bash(rm -rf *)' "$deny"
 tl_has 'the deny of a rung Claude must not run' 'Bash(flutter test --tags golden*)' "$deny"
@@ -70,5 +75,12 @@ tl_eq 'the copy of find-trellis.sh' "$(cat "$TRELLIS_ROOT/lib/find-trellis.sh")"
 
 out="$("$TRELLIS" sync 2>&1)"
 tl_eq 'a second run changes nothing' 'sync: nothing to change' "$out"
+
+git config -f trellis.config project.locale es
+"$TRELLIS" sync >/dev/null 2>&1
+claude_md="$(cat CLAUDE.md)"
+tl_has 'with locale es, the es method' '## Método de trabajo' "$claude_md"
+tl_has 'and the es labels' '| `app/CLAUDE.md` | al leer un fichero de `app/` | App package |' "$claude_md"
+tl_has 'and the es rungs table' '| Escalón | Comando | Lo corre Claude |' "$(cat TESTING.md)"
 
 tl_done
