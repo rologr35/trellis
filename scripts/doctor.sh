@@ -17,8 +17,9 @@
 # usage, silently, so it is a FAIL and not a warning); a branch that is neither the integration
 # branch, the release branch nor an issue branch; a [command] secretScan configured and missing;
 # a [toolchain] envFile missing.
-# warn: no secret scanner configured; uncommitted changes, unpushed commits, worktrees of branches
-# missing from origin. info: what the release is waiting for.
+# warn: a rung with pr = true that no file under .github/workflows/ runs (it holds the command's
+# run text, or its ci text when set); no secret scanner configured; uncommitted changes, unpushed
+# commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail
 
@@ -158,6 +159,31 @@ elif [ "$plugin_installed" = true ] || [ -n "$hooks_path" ]; then
   fail 'node not found while hooks are active: guard-git has no opinion and the git hooks skip their checks'
 else
   warn 'node not found (trellis hygiene, ratchet and pr-check need it)'
+fi
+
+# ------------------------------------------------------------------------------------------------
+# pr = true means the project's own CI runs the rung's command on every pull request: the consumer
+# workflow never runs rungs, because it does not install a stack's toolchain.
+section 'rungs a pull request runs'
+unrun=''
+checked=0
+for rung in $(tc_subsections rung); do
+  [ "$(tc_get "rung.$rung.pr")" = false ] && continue
+  name="$(tc_get "rung.$rung.command")"
+  [ -n "$name" ] || continue
+  text="$(tc_get "command.$name.ci")"
+  [ -n "$text" ] || text="$(tc_get "command.$name.run")"
+  [ -n "$text" ] || continue
+  checked=$((checked + 1))
+  if ! grep -rqF -- "$text" .github/workflows 2>/dev/null; then
+    warn "rung $rung has pr = true but no workflow under .github/workflows/ runs $text: the project's CI owns the rungs, so add the step or set pr = false"
+    unrun=1
+  fi
+done
+if [ "$checked" -eq 0 ]; then
+  info 'no rung with pr = true'
+elif [ -z "$unrun" ]; then
+  ok 'every rung with pr = true is run by a workflow of the project'
 fi
 
 # ------------------------------------------------------------------------------------------------

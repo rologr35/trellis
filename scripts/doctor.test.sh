@@ -108,7 +108,33 @@ tl_eq 'a missing env file fails' '1' "$(doctor)"
 touch .env
 tl_eq 'a present env file passes' '0' "$(doctor)"
 
+printf '\nrungs that a pull request runs\n'
+git config -f trellis.config command.unit.run 'flutter test --coverage'
+git config -f trellis.config command.unit.ci 'flutter test --coverage --no-pub'
+git config -f trellis.config rung.unit.command unit
+tl_eq 'a rung with pr = true and no workflow passes with a warning' '0' "$(doctor)"
+tl_has 'naming the rung and the command' 'rung unit has pr = true but no workflow under .github/workflows/ runs flutter test --coverage --no-pub' "$(out)"
+mkdir -p .github/workflows
+printf 'jobs:\n  t:\n    steps:\n      - run: flutter test --coverage\n' > .github/workflows/ci.yml
+doctor > /dev/null
+tl_has 'the run text is not the ci text, so it still warns' 'rung unit has pr = true but' "$(out)"
+printf 'jobs:\n  t:\n    steps:\n      - run: flutter test --coverage --no-pub\n' > .github/workflows/ci.yml
+doctor > /dev/null
+tl_lacks 'a workflow naming the ci text does not warn' 'rung unit has pr = true but' "$(out)"
+git config -f trellis.config --unset command.unit.ci
+printf 'jobs:\n  t:\n    steps:\n      - run: flutter test --coverage\n' > .github/workflows/ci.yml
+doctor > /dev/null
+tl_lacks 'a workflow naming the run text does not warn' 'rung unit has pr = true but' "$(out)"
+rm .github/workflows/ci.yml
+git config -f trellis.config rung.unit.pr false
+doctor > /dev/null
+tl_lacks 'a rung with pr = false is not asked for a workflow' 'rung unit has pr = true but' "$(out)"
+git config -f trellis.config --remove-section rung.unit
+git config -f trellis.config --remove-section command.unit
+rmdir .github/workflows .github
+
 printf '\nbranch\n'
+
 git switch -q -c feature/x
 tl_eq 'a branch out of the shapes fails' '1' "$(doctor)"
 git switch -q -c 3-thing

@@ -33,7 +33,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 | Configuration | the project's `trellis.config` | git-config format, read with `git config -f`; `lib/schema` holds the keys and their defaults. |
 | Guards | `hooks/guard-git.sh` | Pushes to protected branches, branch switches in the main checkout, issues without a prior search, merges outside the allowed bases. |
 | Git hooks | `templates/githooks/` | Ratchet, hygiene, commit message and branch name, in the clone. |
-| Consumer CI | `.github/workflows/consumer-check.yml` | Hygiene, ratchet, `pr-check` and the secret scanner on every pull request. |
+| Consumer CI | `.github/workflows/consumer-check.yml` | Hygiene, ratchet, `pr-check` and the secret scanner on every pull request. It runs no rung: a rung with `pr = true` is run by the project's own CI. |
 | Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`. |
 | Agent | `agents/plan-reviewer.md` | Checks a plan against the repository, in a clean context. |
 
@@ -58,7 +58,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 Read-only: it never writes or fetches. It exits 1 when there is any FAIL.
 
 - **FAIL**: a `trellis.config` key outside the schema, a value outside the accepted ones of an enum key of `lib/schema` (`project.locale`, `tracker.kind`, `workspace.kind`, `rung.*.agent`, `rung.*.pr`), `workspace.kind = other` without `[hygiene] namedExt` (the extensions to declare for a stack beyond flutter, dart and node), a command name without `[command "<name>"] run`, or a `trellis.config` that does not parse (the doctor reports it and goes on diagnosing; the other subcommands stop on it); a tool of `[toolchain] require` missing or older than its minimum; `core.hooksPath` unset or other than `.githooks`; the plugin not installed or Claude Code below 2.1.324; node missing with hooks active; `ANTHROPIC_API_KEY` exported (the subscription stops being used and every token is billed as API usage, silently); a branch that is not the integration branch, the release branch or an issue branch; a configured `[command] secretScan` whose scanner is missing; a file of `[toolchain] envFile` missing (presence only, it is never read).
-- **Warning**: no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
+- **Warning**: a rung with `pr = true` that no file under `.github/workflows/` runs (it must contain the command's `run` text, or its `ci` text when set: `pr = true` means the project's own CI runs the rung on every pull request, because the consumer workflow never runs rungs and does not install a stack's toolchain), no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
 - **Info**: what the release is waiting for.
 
 ## What the framework does not do, and why

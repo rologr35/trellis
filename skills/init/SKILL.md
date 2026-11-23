@@ -30,7 +30,7 @@ One question per topic, with the deduced answer as the default option. The langu
 2. **Stack and workspace**: `workspace.kind` (flutter, dart, node), the packages (`workspace.package`) and the tools with their minimum version (`toolchain.require`).
 3. **Branches**: release, integration, the shape of an issue branch and the protected ones.
 4. **Tracker**: `github` or `none`.
-5. **Commands**: analysis, formatting, tests per rung, installing dependencies. For each rung: whether Claude may run it (`agent`), whether it runs on every pull request (`pr`) and what it proves.
+5. **Commands**: analysis, formatting, tests per rung, installing dependencies. For each rung: whether Claude may run it (`agent`), whether it runs on every pull request (`pr`) and what it proves. Explain `pr` when asking: `pr = true` means the project's own CI runs that rung's command on every pull request, in a file under `.github/workflows/`; the trellis workflow never runs rungs, because it does not install a stack's toolchain. Where no such CI exists, the answer is `pr = false` (or the person adds the step), and `trellis doctor` warns while a `pr = true` rung has no workflow naming its command.
 6. **What is irreversible**: migrations, messages to users, payments, deploys. Each one becomes a line of the **Never** section of the root `CLAUDE.md` and, if it has its own files, a `[gate]`.
 7. **Secret scanner**: gitleaks by default (`gitleaks protect --staged --redact` locally, `gitleaks git --redact` in CI with `ci =`), another one, or none (the doctor warns).
 8. **Models**: the project's default `model`, `effortLevel` and `autoCompactWindow`.
