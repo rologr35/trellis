@@ -1,0 +1,31 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # /bin/bash on purpose: on macOS it is bash 3.2, the shell a Mac runs the scripts with, while
+      # `env bash` on a runner can resolve to a newer bash and hide what 3.2 rejects.
+      - name: shell tests
+        run: |
+          status=0
+          for t in lib/*.test.sh scripts/*.test.sh hooks/*.test.sh; do
+            [ -f "$t" ] || continue
+            echo "::group::$t"
+            /bin/bash "$t" || status=1
+            echo "::endgroup::"
+          done
+          exit $status

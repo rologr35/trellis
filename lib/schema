@@ -1,0 +1,74 @@
+# The keys trellis.config accepts, one per line: <key>|<kind>|<default>.
+#
+# kind is single (one value) or multi (a list, written as the key repeated). A key whose middle part
+# is * belongs to a named subsection: [command "analyze"] run = ... is command.analyze.run. A multi
+# key with defaults repeats the line once per default value; setting the key in the config replaces
+# all of them. Any key of trellis.config that is not here is a FAIL of `trellis doctor`.
+#
+# This file is the one source of the keys and their defaults: lib/config.sh reads it, and so does
+# everything that reads the config through `trellis config`.
+
+project.name|single|
+project.locale|single|es
+
+trellis.upstream|single|rologr35/trellis
+
+git.releaseBranch|single|main
+git.integrationBranch|single|develop
+git.issueBranch|single|^[0-9]+-[a-z0-9-]+$
+git.protected|multi|main
+git.protected|multi|develop
+git.assistantMayMergeInto|multi|develop
+
+tracker.kind|single|github
+
+workspace.kind|single|flutter
+workspace.package|multi|
+
+toolchain.require|multi|
+toolchain.envFile|multi|
+
+command.check|multi|
+command.secretScan|single|
+command.install|single|
+command.*.run|single|
+command.*.description|single|
+
+rung.*.command|single|
+rung.*.agent|single|true
+rung.*.pr|single|true
+rung.*.proves|single|
+rung.*.offUntil|single|
+
+gate.*.paths|multi|
+gate.*.reason|single|
+
+hygiene.rootLimit|single|24576
+hygiene.nestedLimit|single|20480
+hygiene.ruleLimit|single|24576
+hygiene.rulesTotalLimit|single|102400
+hygiene.keepRef|multi|
+hygiene.namedElsewhere|multi|
+hygiene.mustNotLoad|multi|
+hygiene.namedExt|multi|
+hygiene.frozen|multi|
+
+ratchets.suppression|multi|eslint-disable
+ratchets.suppression|multi|@ts-ignore
+ratchets.suppression|multi|@ts-expect-error
+ratchets.suppression|multi|\b(?:it|test|describe)\.(?:skip|only|todo)\(
+ratchets.suppression|multi|// ignore:
+ratchets.suppression|multi|// ignore_for_file:
+ratchets.suppression|multi|\bskip:\s*(?:true|['"])
+ratchets.suppression|multi|\bsolo:\s*true
+ratchets.testFile|multi|_test\.dart$
+ratchets.testFile|multi|\.(?:test|spec|itest)\.(?:ts|tsx|js|jsx|mjs|cjs)$
+ratchets.testFile|multi|\.test\.sh$
+ratchets.lintConfig|multi|analysis_options.yaml
+ratchets.lintConfig|multi|eslint.config.mjs
+ratchets.lintConfig|multi|eslint.config.js
+ratchets.lintConfig|multi|eslint.config.cjs
+
+models.model|single|
+models.effortLevel|single|
+models.autoCompactWindow|single|

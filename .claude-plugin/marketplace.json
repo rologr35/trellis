@@ -1,0 +1,13 @@
+{
+  "name": "trellis",
+  "owner": {
+    "name": "rologr35"
+  },
+  "plugins": [
+    {
+      "name": "trellis",
+      "source": "./",
+      "description": "A replicable agentic harness for Claude Code: always-loaded method, git guards, instruction hygiene, ratchets and project templates."
+    }
+  ]
+}
