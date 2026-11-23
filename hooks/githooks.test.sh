@@ -37,6 +37,14 @@ tl_eq 'a narrative line in a CLAUDE.md is refused by the hygiene' '1' "$(commit 
 tl_has 'and named' 'narrates history' "$(cat "$TL_TMP/out.txt")"
 git rm -q --cached -r app && rm -rf app
 
+cp trellis.config "$TL_TMP/good.config"
+printf '[git\n' > trellis.config
+printf 'w\n' > w.txt && git add w.txt
+tl_eq 'a config that does not parse refuses the commit' '1' "$(commit -m 'chore: w (#1)')"
+tl_has 'naming the parse error' 'does not parse' "$(cat "$TL_TMP/out.txt")"
+cp "$TL_TMP/good.config" trellis.config
+git rm -q --cached w.txt && rm w.txt
+
 printf '\ncommit-msg\n'
 printf 'x\n' > a.txt && git add -A
 tl_eq 'an AI attribution is refused' '1' "$(commit -m 'feat: a (#1)' -m 'Co-Authored-By: Claude <noreply@anthropic.com>')"

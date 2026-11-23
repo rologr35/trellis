@@ -35,6 +35,16 @@ usage() {
 sub="$1"
 shift
 
+# A config that does not parse stops every subcommand but the doctor, which reports it.
+case "$sub" in
+  doctor | -h | --help | help) ;;
+  *)
+    # shellcheck source=../lib/config.sh
+    . "$TRELLIS_ROOT/lib/config.sh"
+    tc_check || exit 3
+    ;;
+esac
+
 case "$sub" in
   config)
     # shellcheck source=../lib/config.sh

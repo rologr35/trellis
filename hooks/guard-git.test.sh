@@ -114,6 +114,16 @@ tl_eq 'without naming the pull request' 'deny' "$(verdict 'gh pr merge --merge')
 tl_eq 'with an unreadable base' 'deny' "$(verdict 'gh pr merge 99')"
 tl_eq 'from a cloud session' 'deny' "$(CLAUDE_CODE_REMOTE=1 verdict 'gh pr merge 12')"
 
+printf '\na config that does not parse\n'
+cp trellis.config "$TL_TMP/good.config"
+printf '[git\n' > trellis.config
+out="$(node -e 'console.log(JSON.stringify({tool_input: {command: "git push origin 4-thing"}, cwd: process.argv[1]}))' "$repo" | bash "$HOOK")"
+tl_has 'refuses any push' '"deny"' "$out"
+tl_has 'naming the parse error' 'does not parse' "$out"
+tl_eq 'refuses a merge' 'deny' "$(verdict 'gh pr merge 12')"
+tl_eq 'has no opinion on the rest' 'allow' "$(verdict 'git status')"
+cp "$TL_TMP/good.config" trellis.config
+
 printf '\nno opinion\n'
 tl_eq 'a repository without trellis.config' 'allow' "$(verdict 'git push origin main' "$(tl_repo)")"
 tl_eq 'a payload that does not parse' 'allow' "$(printf 'not json' | bash "$HOOK" | grep -c deny | sed 's/^0$/allow/')"

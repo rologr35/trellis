@@ -51,6 +51,7 @@ TRANSCRIPT="$(field transcript_path)"
 # opinion. Loaded once per repository.
 LOADED_TOP=''
 HAS_CONFIG=false
+CONFIG_ERROR=''
 load_config() {
   local top
   top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 1
@@ -60,6 +61,7 @@ load_config() {
     [ -f "$top/trellis.config" ] || return 1
     HAS_CONFIG=true
     export TRELLIS_CONFIG="$top/trellis.config"
+    CONFIG_ERROR="$(tc_check 2>&1)"
     PROTECTED="$(tc_all git.protected)"
     MERGE_INTO="$(tc_all git.assistantMayMergeInto)"
     ISSUE_REGEX="$(tc_get git.issueBranch)"
@@ -93,6 +95,13 @@ refspec_target() {
     spec="$(git -C "$dir" branch --show-current 2>/dev/null)"
   fi
   printf '%s' "$spec"
+}
+
+# A config that does not parse would answer the schema's defaults, which may not name the project's
+# protected branches: a push or a merge is refused until it parses.
+fail_closed() {
+  [ -n "$CONFIG_ERROR" ] || return 0
+  deny "${CONFIG_ERROR#trellis: } A push or a merge is refused until it parses again (git config -f trellis.config --list shows where)."
 }
 
 # The main checkout, not a linked worktree: a worktree's git dir differs from the common dir.
@@ -158,6 +167,7 @@ guard_gh_issue() {
 
 guard_gh_merge() {
   [ "${1:-}" = 'pr' ] && [ "${2:-}" = 'merge' ] || return 0
+  fail_closed
   local dir="$DIR" target='' repo='' word base allowed
   if [ -n "${CLAUDE_CODE_REMOTE:-}" ]; then
     deny 'A cloud session never merges a pull request: the run that writes a change is not the one that merges it. A person merges.'
@@ -288,6 +298,7 @@ while IFS= read -r segment; do
   fi
 
   [ "${words[i]}" = 'push' ] || continue
+  fail_closed
   i=$((i + 1))
   # After push: the first non-flag word is the remote, every further one a refspec.
   remote_seen=false

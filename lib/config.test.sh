@@ -45,4 +45,22 @@ tl_eq 'a doubled backslash reads as one' '\bTODO\b' "$("$TRELLIS" config all rat
 tl_eq 'unknown key reported' 'bogus.key' "$("$TRELLIS" config unknown)"
 tl_eq 'TRELLIS_CONFIG points elsewhere' 'develop' "$(TRELLIS_CONFIG="$repo/none" "$TRELLIS" config get git.integrationBranch)"
 
+printf '\na config that does not parse fails closed\n'
+printf '[git\n\tprotected = main\n' > trellis.config
+out="$("$TRELLIS" config get git.integrationBranch 2>&1)"
+tl_eq 'config get fails' '3' "$?"
+tl_has 'and names the parse error' 'trellis.config does not parse' "$out"
+tl_lacks 'instead of answering the default' 'develop' "$out"
+for cmd in check 'pr-check --body body.md' hygiene ratchet sync; do
+  [ "$cmd" = ratchet ] && git add trellis.config
+  printf 'x\n' > body.md
+  # shellcheck disable=SC2086
+  out="$("$TRELLIS" $cmd 2>&1)"
+  tl_eq "$cmd fails" '3' "$?"
+  tl_has "$cmd names the parse error" 'trellis.config does not parse' "$out"
+done
+out="$(bash "$TRELLIS_ROOT/scripts/doctor.sh" 2>&1)"
+tl_has 'doctor reports it' 'trellis.config does not parse' "$out"
+tl_has 'and keeps diagnosing' 'billing' "$out"
+
 tl_done

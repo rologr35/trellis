@@ -12,6 +12,11 @@
 #   tc_all <key>            every value of a multi key, one per line, or its defaults
 #   tc_subsections <sect>   the names of the subsections of a section, e.g. the commands
 #   tc_unknown              the keys of the file that the schema does not know
+#   tc_check                exit status 3 and the parse error on stderr when the file exists and
+#                           does not parse; bin/trellis runs it before every subcommand but doctor
+#
+# A config that does not parse fails closed: every reader but the doctor stops on tc_check instead
+# of answering the schema's defaults, which would quietly unprotect the branches the file names.
 #
 # Works with bash 3.2: no associative arrays, no mapfile.
 
@@ -25,6 +30,15 @@ tc_config_file() {
   local top
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || top="$(pwd -P)"
   printf '%s/trellis.config\n' "$top"
+}
+
+tc_check() {
+  local file error
+  file="$(tc_config_file)"
+  [ -f "$file" ] || return 0
+  error="$(git config -f "$file" --list 2>&1 >/dev/null)" && return 0
+  printf 'trellis: trellis.config does not parse: %s\n' "$(printf '%s' "$error" | head -n 1)" >&2
+  return 3
 }
 
 # The raw key=value lines of the file, nothing when it is missing or does not parse.

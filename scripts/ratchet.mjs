@@ -49,15 +49,29 @@ const staged = new Map(changed.map(c => [c.file, c.was]));
 
 // The config on both sides, read through the one reader from temporary copies.
 const scratch = mkdtempSync(path.join(tmpdir(), 'trellis-ratchet-'));
-const configAt = (text, name) => {
+const configAt = (text, name, label) => {
   const file = path.join(scratch, name);
   if (text !== null) writeFileSync(file, text);
-  return loadConfig({file});
+  try {
+    return loadConfig({file, label, throws: true});
+  } catch (error) {
+    return error;
+  }
 };
-const configWas = before('trellis.config');
-const oldConfig = configAt(configWas, 'before.config');
-const newConfig = configAt(after('trellis.config'), 'after.config');
+// The config after the change fails closed when it does not parse; one that did not parse before
+// is replaced by the change's own, so the change that repairs it can pass.
+let configWas = before('trellis.config');
+const newConfig = configAt(after('trellis.config'), 'after.config', `trellis.config (${afterRev ? afterRev : 'staged'})`);
+let oldConfig = configAt(configWas, 'before.config', `trellis.config (${beforeRev})`);
 rmSync(scratch, {recursive: true, force: true});
+if (newConfig instanceof Error) {
+  console.error(newConfig.message);
+  process.exit(3);
+}
+if (oldConfig instanceof Error) {
+  configWas = null;
+  oldConfig = newConfig;
+}
 // The policy is the one in force before the change, so a change cannot exempt itself.
 const policy = configWas === null ? newConfig : oldConfig;
 

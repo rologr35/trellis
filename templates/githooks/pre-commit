@@ -20,6 +20,8 @@ if [ -z "$trellis" ]; then
   echo 'pre-commit: trellis not found (PATH or the installed plugin), checks skipped' >&2
   exit 0
 fi
+# A config that does not parse stops the hook with its error (trellis exits 3).
+"$trellis" config list >/dev/null || exit 1
 
 branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
 release="$("$trellis" config get git.releaseBranch)"

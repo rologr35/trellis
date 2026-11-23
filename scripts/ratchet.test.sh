@@ -103,6 +103,17 @@ git config -f trellis.config --add hygiene.keepRef 'CLAUDE.md: #4 | reason' && g
 tl_eq 'a grown allowlist is refused' '1' "$(judge)"
 reset
 
+printf '[hygiene\n' > "$TL_TMP/broken.config"
+cp trellis.config "$TL_TMP/good.config"
+cp "$TL_TMP/broken.config" trellis.config && git add trellis.config && cp "$TL_TMP/good.config" trellis.config
+tl_eq 'a staged config that does not parse fails closed' '3' "$(judge)"
+tl_has 'naming it' 'trellis.config (staged) does not parse' "$(cat "$OUT")"
+reset
+cp "$TL_TMP/broken.config" trellis.config && git add trellis.config && git commit -q --no-verify -m 'chore: broken (#7)'
+cp "$TL_TMP/good.config" trellis.config && git add trellis.config
+tl_eq 'the commit that repairs it passes' '0' "$(judge)"
+git commit -q --no-verify -m 'chore: repaired (#7)'
+
 printf '\nescape, merge and base\n'
 printf '// ignore: x\n' >> lib/main.dart && git add -A
 git config branch.7-work.ratchet-loosened true

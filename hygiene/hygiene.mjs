@@ -101,7 +101,7 @@ export function hygiene(root, {staged = false} = {}) {
     const file = path.join(scratch, 'trellis.config');
     const text = tree.read('trellis.config');
     if (text !== null) writeFileSync(file, text);
-    config = loadConfig({file, cwd: root});
+    config = loadConfig({file, cwd: root, label: 'trellis.config (staged)'});
     rmSync(scratch, {recursive: true, force: true});
   } else {
     config = loadConfig({cwd: root});

@@ -14,6 +14,8 @@ if [ -z "$trellis" ]; then
   echo 'pre-push: trellis not found (PATH or the installed plugin), check skipped' >&2
   exit 0
 fi
+# A config that does not parse stops the hook with its error (trellis exits 3).
+"$trellis" config list >/dev/null || exit 1
 
 regex="$("$trellis" config get git.issueBranch)"
 integration="$("$trellis" config get git.integrationBranch)"
