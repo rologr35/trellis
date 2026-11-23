@@ -22,7 +22,7 @@ The plugin is written in English. What it writes into a project follows `project
 - the pull request sections `pr-check` requires, defined in `lib/locale.mjs`: **Summary**, **Verification** and **Setback** in en; **Resumen**, **Verificación** and **Retroceso** in es;
 - the narrative phrases the hygiene checks: the list of the project's locale, and always the en one, because code comments are English.
 
-Each prose template is a file per locale rather than one file with per-locale strings: a template is mostly prose, and a file per locale keeps it readable as the text it produces. The tests keep the copies aligned: each principle of the method carries an id (`<!-- p:<id> -->`, stripped from the generated block) and both methods carry the same ids in the same order; both template folders hold the same files with the same blocks and the same `trellis.config` keys; and a project written from each locale's templates passes the hygiene.
+Each prose template is a file per locale rather than one file with per-locale strings: a template is mostly prose, and a file per locale keeps it readable as the text it produces. The tests keep the copies aligned: each principle of the method carries an id (`<!-- p:<id> -->`, stripped from the generated block) and both methods carry the same ids in the same order; both template folders hold the same files with the same blocks, the same `trellis.config` keys and the same placeholder names (`{{name}}`, `{{package}}` and the rest are the English ones in both; only the text around them and the free-text prompts are translated); and a project written from each locale's templates passes the hygiene.
 
 ## What is there
 

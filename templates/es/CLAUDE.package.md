@@ -1,4 +1,4 @@
-# {{paquete}}
+# {{package}}
 
 {{Una frase: qué hace este paquete y qué no.}}
 
