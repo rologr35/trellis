@@ -45,7 +45,7 @@ Base, el módulo de este repositorio, solo necesita git y node. Los módulos Cic
 Solo lectura: nunca escribe ni hace fetch. Sale con 1 si hay algún FAIL.
 
 - **FAIL**: una clave de `trellis.config` fuera del esquema, un nombre de comando sin `[command "<nombre>"] run`, o un `trellis.config` que no parsea (el doctor lo informa y sigue diagnosticando; los demás subcomandos paran con él); una herramienta de `[toolchain] require` ausente o más vieja que su mínimo; `core.hooksPath` sin fijar o distinto de `.githooks`; el plugin no instalado o Claude Code por debajo de 2.1.324; node ausente con hooks activos; `ANTHROPIC_API_KEY` exportada (la suscripción deja de usarse y cada token se cobra como uso de API, en silencio); una rama que no es la de integración, la de release ni una rama de issue; un `[command] secretScan` configurado cuyo escáner falta; un fichero de `[toolchain] envFile` ausente (solo presencia, nunca se lee).
-- **Aviso**: ningún escáner de secretos configurado, cambios sin commit, commits sin push, worktrees de ramas que ya no están en origin.
+- **Aviso**: ningún escáner de secretos configurado, cambios sin commit, commits sin push, worktrees de ramas que no están en origin.
 - **Info**: lo que espera la release.
 
 ## Lo que el marco no hace, y por qué
