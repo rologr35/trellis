@@ -10,6 +10,8 @@ The templates live in the plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis
 
 ## 0. A worktree for init
 
+The plugin is installed at the local scope (`claude plugin marketplace add <upstream>@<sha> --scope local`, then `claude plugin install trellis@trellis --scope local`; both write `.claude/settings.local.json`, which git ignores), so the main checkout has no uncommitted change. If it was installed at the project scope instead, `.claude/settings.json` has an uncommitted change there: section 3 writes the same keys in the worktree, and after the merge that change is the person's to discard (`git restore .claude/settings.json`, which the generated `deny` leaves to them), because the pull brings the same file.
+
 The main checkout stays on the integration branch, clean: as soon as `trellis.config` exists, `guard-git` prevents going back to it from an open issue branch. Since there is no config yet, the worktree is created with plain git, from the main checkout and in simple lines:
 
 1. `<n>` is the issue that asks for adopting trellis; without a tracker, a number the person picks.
@@ -43,7 +45,7 @@ Every file below is written in the chosen language, from `$PLUGIN/templates/<loc
 2. `CLAUDE.md` from `CLAUDE.root.md`: the layout, the anti-duplication and the conventions deduced from the code, and the **Never** section with what is irreversible. If one existed, its current content is spread over those sections.
 3. The `scaffold` skill for a `CLAUDE.md` per package.
 4. `TESTING.md` from its template, one section per rung.
-5. `.claude/settings.json` from `$PLUGIN/templates/settings.json`, merged with the existing one: `allow` and `deny` are joined, everything else of the person's is kept. The marketplace sha is the `gitCommitSha` of `trellis@trellis` in `~/.claude/plugins/installed_plugins.json`, in full (40 characters).
+5. `.claude/settings.json` from `$PLUGIN/templates/settings.json`, merged with the existing one: `allow` and `deny` are joined, everything else of the person's is kept. The marketplace sha is the `gitCommitSha` of `trellis@trellis` in `~/.claude/plugins/installed_plugins.json`, in full (40 characters); `extraKnownMarketplaces.trellis.source.ref` carries it, and `autoUpdate: false` sits beside `source`: `claude plugin marketplace add` does not write it.
 6. `.githooks/` from `$PLUGIN/templates/githooks/`, executable.
 7. The line of `$PLUGIN/templates/gitignore.fragment` in `.gitignore`, if missing.
 8. `.github/workflows/trellis.yml` from `$PLUGIN/templates/workflows/trellis.yml`, with the same sha, if the remote is GitHub.

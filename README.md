@@ -7,10 +7,17 @@ Base, the module of this repository, needs only git and node. The Cycle (issues,
 ## Install in a project
 
 1. Claude Code 2.1.324 or later (the marketplace pinned by sha needs it).
-2. In the project: `/plugin marketplace add rologr35/trellis` and `/plugin install trellis@trellis`. `enabledPlugins` in `settings.json` enables an installed plugin, it does not install it.
+2. In the project's main checkout, install the plugin at the **local** scope, pinned to a full sha of this repository (`<sha>` is the commit to adopt; `git ls-remote https://github.com/rologr35/trellis.git HEAD` prints the latest):
+
+   ```sh
+   claude plugin marketplace add rologr35/trellis@<sha> --scope local
+   claude plugin install trellis@trellis --scope local
+   ```
+
+   Both write to `.claude/settings.local.json`, which git ignores, so the main checkout stays clean: `init` asks for it clean, on the integration branch. The project scope (`--scope project`) would write `extraKnownMarketplaces` and `enabledPlugins` into `.claude/settings.json`, an uncommitted change in that checkout that the merge of `init` then collides with. `enabledPlugins` enables an installed plugin, it does not install it. `claude plugin marketplace add` does not write `autoUpdate: false`: a marketplace pinned by `owner/repo@<sha>` is not moved by an update, and `init` writes `autoUpdate: false` explicitly in the project's settings; by hand, it is the key `"autoUpdate": false` beside `source` in `extraKnownMarketplaces`.
 3. `/trellis:init`: an interview, then it writes the configuration and the templates, and ends with `trellis sync`, `trellis hygiene --freeze` and `trellis doctor`.
 
-`init` pins the marketplace in `.claude/settings.json` with the plugin's full sha and `autoUpdate: false`, and the CI workflow with the same sha. Updating the plugin is changing that sha in both places, in a pull request of its own.
+`init` works in a worktree and writes the project-scope keys there: `extraKnownMarketplaces` with the plugin's full sha (`ref`) and `autoUpdate: false`, and `enabledPlugins`, in `.claude/settings.json`, and the CI workflow with the same sha. The merge of that branch is the only place they land; the local entry of step 2 is then redundant (it names the same marketplace) and stays harmless, or goes with `claude plugin uninstall trellis@trellis --scope local`. Updating the plugin is changing that sha in both places, in a pull request of its own.
 
 ## Language
 
