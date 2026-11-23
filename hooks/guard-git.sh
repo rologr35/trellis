@@ -33,7 +33,11 @@
 # session's own: the config of the session's repository judges the command, and with none there is
 # no opinion. A variable is unresolved, never stale, when its assignment may not run or last (after
 # && || or a pipe, or on the left of one) or the resolver cannot follow it (`NAME+=`, a value from a
-# command, read, printf -v, for, export, declare, local, typeset, readonly, unset). Works with bash 3.2.
+# command, read, printf -v, for, export, declare, local, typeset, readonly, unset). A directory
+# with no config is judged by the config of every directory the command visited with `cd` and of the
+# session's. What the hook cannot parse it refuses: a command with `push` and a protected branch's
+# name, or with `gh` and `merge`, is denied unless every git and gh invocation in it was judged (see
+# `backstop`). Works with bash 3.2.
 
 set -uo pipefail
 
@@ -210,100 +214,257 @@ guard_gh_merge() {
   fi
 }
 
-# The words of every segment (a line of stdin) as the shell reads them, without running anything:
-# single and double quotes group and are removed ("main" and 'HEAD:main' are main), a backslash
-# escapes the next character (between double quotes, only $ ` " and \), and $'...' is ANSI-C
-# quoting, where a backslash escapes any character and \xHH, \nnn and \uHHHH spell one. A line that
-# ends with a quote still open is judged by every word whitespace splits it into, which fails closed.
-# A line that starts with \001 follows && or || (it may not run), with \002 follows a pipe (it runs in
-# a subshell, as does the line before it). One record per line: "c" (may not run), "w" and the word,
-# "p" (the segment is the left side of a pipe), "e" at the end of a segment. In node because bash 3.2
-# takes quadratic time over a long line.
+# The words of every segment of the command as the shell reads them, without running anything, in one
+# quote-aware pass over the whole command: single and double quotes group and are removed ("main" and
+# 'HEAD:main' are main), a backslash escapes the next character, $'...' is ANSI-C quoting (\xHH, \nnn,
+# \uHHHH spell one character), $(...), backticks and <(...) stay inside their word, a comment is
+# dropped, and a here-document's body is data. The operators ; & | && || ( ) { } and newline end a
+# segment, and a redirection (> >> < <<< 2>&1 &> and the word after it) is not a word, even glued to
+# one (main>/dev/null). A command that ends with a quote still open is judged by every word that
+# whitespace splits the rest of the segment into, which fails closed.
+# One record per line: "w" and the word (a newline in it is \001), "c" (the segment follows && or ||),
+# "x" (the segment does not last: it is on a side of a pipe or in the background), "(" and ")" around a
+# subshell, "f" and the flags of the segment's tokens (g git, h gh, k push, m merge, e a variable or
+# option that redirects git or gh), "e" at the end of a segment, and "n" and a name at the end for every
+# name a word could be a branch by. In node because bash 3.2 takes quadratic time over a long line.
 split_segments() {
   node -e '
+    const src = require("fs").readFileSync(0, "utf8");
+    const n = src.length;
     const ESC = {a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "\\": "\\", "\x27": "\x27", "\"": "\"", "?": "?"};
-    // The escape at line[i] === "\\" inside $x27...x27, and the index of its last character.
-    const ansi = (line, i) => {
-      const next = line[i + 1];
-      if (next === undefined) return ["\\", i];
+    const ansi = (i) => { // src[i] is the backslash; returns [text, index of the escape last character]
+      const rest = src.slice(i + 1, i + 12);
       let m;
-      if ((m = /^[0-7]{1,3}/.exec(line.slice(i + 1)))) return [String.fromCharCode(parseInt(m[0], 8) & 255), i + m[0].length];
-      if ((m = /^x[0-9a-fA-F]{1,2}/.exec(line.slice(i + 1)))) return [String.fromCharCode(parseInt(m[0].slice(1), 16)), i + m[0].length];
-      if ((m = /^u[0-9a-fA-F]{1,4}/.exec(line.slice(i + 1))) || (m = /^U[0-9a-fA-F]{1,8}/.exec(line.slice(i + 1)))) {
+      if (rest === "") return ["\\", i];
+      if ((m = /^[0-7]{1,3}/.exec(rest))) return [String.fromCharCode(parseInt(m[0], 8) & 255), i + m[0].length];
+      if ((m = /^x[0-9a-fA-F]{1,2}/.exec(rest))) return [String.fromCharCode(parseInt(m[0].slice(1), 16)), i + m[0].length];
+      if ((m = /^u[0-9a-fA-F]{1,4}/.exec(rest)) || (m = /^U[0-9a-fA-F]{1,8}/.exec(rest))) {
         const point = parseInt(m[0].slice(1), 16);
         return [point <= 0x10ffff ? String.fromCodePoint(point) : "", i + m[0].length];
       }
-      if (next === "c" && line[i + 2] !== undefined) return [String.fromCharCode(line.charCodeAt(i + 2) & 31), i + 2];
-      if (next in ESC) return [ESC[next], i + 1];
-      return ["\\" + next, i + 1];
+      if (rest[0] === "c" && rest.length > 1) return [String.fromCharCode(rest.charCodeAt(1) & 31), i + 2];
+      if (rest[0] in ESC) return [ESC[rest[0]], i + 1];
+      return ["\\" + rest[0], i + 1];
     };
-    const lines = require("fs").readFileSync(0, "utf8").split("\n").map(raw => {
-      const mark = raw[0] === "\x01" || raw[0] === "\x02" ? raw[0] : "";
-      return {mark, text: mark ? raw.slice(1) : raw};
-    });
-    const out = [];
-    lines.forEach(({mark, text: line}, n) => {
-      const words = [];
-      let cur = "", have = false, quote = "";
-      for (let i = 0; i < line.length; i++) {
-        const c = line[i];
-        if (quote === "\x27") {
-          if (c === "\x27") quote = ""; else cur += c;
-        } else if (quote === "\x27$") {
-          if (c === "\x27") quote = "";
-          else if (c === "\\") { const [text, end] = ansi(line, i); cur += text; i = end; }
-          else cur += c;
-        } else if (quote === "\"") {
-          if (c === "\"") quote = "";
-          else if (c === "\\" && "$`\"\\".includes(line[i + 1] || " ")) cur += line[++i];
-          else cur += c;
-        } else if (c === "$" && line[i + 1] === "\x27") {
-          quote = "\x27$";
-          have = true;
+    let unterminated = false;
+    // Index just after the ) that closes a $( opened before i (nested quotes, substitutions and here-documents).
+    const skipSubst = (i) => {
+      let depth = 1;
+      const heredocs = [];
+      while (i < n) {
+        const c = src[i];
+        if (c === "\\") { i += 2; continue; }
+        if (c === "\x27") { const j = src.indexOf("\x27", i + 1); if (j < 0) break; i = j + 1; continue; }
+        if (c === "\"") {
           i++;
-        } else if (c === "\"" || c === "\x27") {
-          quote = c;
-          have = true;
-        } else if (c === "\\") {
-          cur += line[++i] || "";
-          have = true;
-        } else if (c === " " || c === "\t") {
-          if (have) words.push(cur);
-          cur = "";
-          have = false;
-        } else {
-          cur += c;
-          have = true;
+          while (i < n && src[i] !== "\"") {
+            if (src[i] === "\\") i += 2;
+            else if (src[i] === "$" && src[i + 1] === "(") i = skipSubst(i + 2);
+            else i++;
+          }
+          i++;
+          continue;
         }
+        if (c === "`") { const j = src.indexOf("`", i + 1); if (j < 0) break; i = j + 1; continue; }
+        if (c === "$" && src[i + 1] === "(") { i = skipSubst(i + 2); continue; }
+        if (c === "(") depth++;
+        if (c === ")" && --depth === 0) return i + 1;
+        if (c === "<" && src[i + 1] === "<" && src[i + 2] !== "<") {
+          const m = /^<<(-?)[ \t]*(?:\x27([^\x27\n]*)\x27|"([^"\n]*)"|\\?([A-Za-z0-9_]+))/.exec(src.slice(i, i + 200));
+          if (m) { heredocs.push({delim: m[2] ?? m[3] ?? m[4], strip: m[1] === "-"}); i += m[0].length; continue; }
+        }
+        if (c === "\n" && heredocs.length) {
+          i++;
+          for (const h of heredocs.splice(0)) {
+            while (i < n) {
+              let e = src.indexOf("\n", i);
+              if (e < 0) e = n;
+              const line = h.strip ? src.slice(i, e).replace(/^\t+/, "") : src.slice(i, e);
+              i = Math.min(e + 1, n);
+              if (line === h.delim) break;
+            }
+          }
+          continue;
+        }
+        i++;
       }
-      if (quote) {
-        words.length = 0;
-        for (const w of line.split(/[ \t]+/)) if (w) words.push(w.replace(/[\x27"\\]/g, ""));
-      } else if (have) {
-        words.push(cur);
+      unterminated = true;
+      return n;
+    };
+    let pos = 0;
+    // One shell word from pos: its text, and whether any of it was quoted.
+    const readWord = () => {
+      let cur = "", quoted = false;
+      while (pos < n) {
+        const c = src[pos];
+        if (c === " " || c === "\t" || c === "\n" || c === ";" || c === "&" || c === "|" || c === "(" || c === ")" || c === "<" || c === ">") {
+          if ((c === "<" || c === ">") && src[pos + 1] === "(") { const j = skipSubst(pos + 2); cur += src.slice(pos, j); pos = j; continue; }
+          break;
+        }
+        if (c === "\\") {
+          if (src[pos + 1] === "\n") { pos += 2; continue; }
+          cur += src[pos + 1] ?? ""; pos += 2; quoted = true; continue;
+        }
+        if (c === "\x27") {
+          const j = src.indexOf("\x27", pos + 1);
+          if (j < 0) { unterminated = true; pos = n; return {text: cur, quoted: true}; }
+          cur += src.slice(pos + 1, j); pos = j + 1; quoted = true; continue;
+        }
+        if (c === "\"") {
+          pos++; quoted = true;
+          let closed = false;
+          while (pos < n) {
+            const d = src[pos];
+            if (d === "\"") { closed = true; pos++; break; }
+            if (d === "\\" && "$`\"\\\n".includes(src[pos + 1] ?? " ")) { if (src[pos + 1] !== "\n") cur += src[pos + 1]; pos += 2; continue; }
+            if (d === "$" && src[pos + 1] === "(") { const j = skipSubst(pos + 2); cur += src.slice(pos, j); pos = j; continue; }
+            if (d === "`") { const j = src.indexOf("`", pos + 1); const e = j < 0 ? n : j + 1; cur += src.slice(pos, e); pos = e; continue; }
+            cur += d; pos++;
+          }
+          if (!closed) { unterminated = true; return {text: cur, quoted: true}; }
+          continue;
+        }
+        if (c === "$" && src[pos + 1] === "\x27") {
+          pos += 2; quoted = true;
+          let closed = false;
+          while (pos < n) {
+            const d = src[pos];
+            if (d === "\x27") { closed = true; pos++; break; }
+            if (d === "\\") { const [text, end] = ansi(pos); cur += text; pos = end + 1; continue; }
+            cur += d; pos++;
+          }
+          if (!closed) { unterminated = true; return {text: cur, quoted: true}; }
+          continue;
+        }
+        if (c === "$" && src[pos + 1] === "(") { const j = skipSubst(pos + 2); cur += src.slice(pos, j); pos = j; continue; }
+        if (c === "`") { const j = src.indexOf("`", pos + 1); const e = j < 0 ? n : j + 1; if (j < 0) unterminated = true; cur += src.slice(pos, e); pos = e; continue; }
+        cur += c; pos++;
       }
-      if (mark) out.push("c");
-      for (const w of words) out.push("w" + w);
-      if (lines[n + 1] && lines[n + 1].mark === "\x02") out.push("p");
+      return {text: cur, quoted};
+    };
+    const out = [], names = new Set();
+    const ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_CONFIG[A-Z_0-9]*|GH_REPO|--git-dir|--work-tree)$/;
+    let seg = {words: [], atoms: [], c: false, x: false}, segStart = 0, pendingC = false, pendingX = false;
+    const heredocs = [];
+    const norm = (t) => {
+      const found = [t];
+      for (let part of t.split(":")) {
+        part = part.replace(/^\+/, "").replace(/^refs\/heads\//, "");
+        if (part) found.push(part);
+      }
+      return found;
+    };
+    const emit = () => {
+      let flags = "";
+      for (const atom of seg.atoms) {
+        for (const tok of atom.split(/[\s;&|()<>$`\x27"{}=,]+/)) {
+          if (!tok) continue;
+          const base = tok.replace(/^.*\//, "");
+          for (const t of [tok, base]) {
+            if (t === "git") flags += "g"; else if (t === "gh") flags += "h"; else if (t === "push") flags += "k"; else if (t === "merge") flags += "m";
+          }
+          if (ENV.test(tok)) flags += "e";
+          for (const name of norm(tok)) names.add(name);
+        }
+        for (const name of norm(atom)) names.add(name);
+      }
+      if (seg.c) out.push("c");
+      if (seg.x) out.push("x");
+      for (const w of seg.words) out.push("w" + w.replace(/\n/g, "\x01"));
+      out.push("f" + [...new Set(flags)].join(""));
       out.push("e");
-    });
+    };
+    // End the segment at an operator. An empty segment is dropped and leaves the pending marks.
+    const end = (op) => {
+      if (seg.words.length || seg.atoms.length) {
+        if (op === "|" || op === "&") seg.x = true;
+        emit();
+        pendingC = op === "&&" || op === "||";
+        pendingX = op === "|";
+      } else if (op === "&&" || op === "||") { pendingC = true; } else if (op === "|") { pendingX = true; }
+      seg = {words: [], atoms: [], c: pendingC, x: pendingX};
+      segStart = pos;
+    };
+    const fallback = () => { // a quote left open: whitespace words of the rest of the segment, quote marks removed
+      seg.words = [];
+      for (const w of src.slice(segStart).split(/[ \t\n]+/)) if (w) seg.words.push(w.replace(/[\x27"\\]/g, ""));
+      seg.atoms = seg.words.slice();
+      pos = n;
+    };
+    while (pos < n && !unterminated) {
+      const c = src[pos];
+      if (c === " " || c === "\t") { pos++; continue; }
+      if (c === "\n") {
+        pos++;
+        for (const h of heredocs.splice(0)) {
+          let body = "";
+          while (pos < n) {
+            let e = src.indexOf("\n", pos);
+            if (e < 0) e = n;
+            const line = src.slice(pos, e), cmp = h.strip ? line.replace(/^\t+/, "") : line;
+            pos = Math.min(e + 1, n);
+            if (cmp === h.delim) break;
+            body += line + "\n";
+          }
+          seg.atoms.push(body);
+        }
+        end("\n");
+        continue;
+      }
+      if (c === "#") { while (pos < n && src[pos] !== "\n") pos++; continue; }
+      if (c === ";") { pos++; if (src[pos] === ";" || src[pos] === "&") pos++; end(";"); continue; }
+      if (c === "&" && src[pos + 1] === "&") { pos += 2; end("&&"); continue; }
+      if (c === "&" && src[pos + 1] === ">") { pos += 2; if (src[pos] === ">") pos++; while (src[pos] === " " || src[pos] === "\t") pos++; seg.atoms.push(readWord().text); continue; }
+      if (c === "&") { pos++; end("&"); continue; }
+      if (c === "|") { pos++; if (src[pos] === "|") { pos++; end("||"); } else { if (src[pos] === "&") pos++; end("|"); } continue; }
+      if (c === "(") { pos++; end("("); out.push("("); continue; }
+      if (c === ")") { pos++; end(")"); out.push(")"); continue; }
+      let m = /^\d+(?=[<>])/.exec(src.slice(pos, pos + 12));
+      if (m) pos += m[0].length;
+      if (src[pos] === "<" || src[pos] === ">") {
+        m = /^(<<<|<<-|<<|<&|<>|<|>>|>&|>\||>)/.exec(src.slice(pos, pos + 3));
+        pos += m[0].length;
+        while (src[pos] === " " || src[pos] === "\t") pos++;
+        const target = readWord();
+        if (m[0] === "<<" || m[0] === "<<-") heredocs.push({delim: target.text, strip: m[0] === "<<-"});
+        seg.atoms.push(target.text);
+        continue;
+      }
+      if (seg.words.length === 0 && seg.atoms.length === 0) segStart = pos;
+      const word = readWord();
+      if (unterminated) break;
+      if (!word.quoted && (word.text === "{" || word.text === "}")) { end("{"); continue; }
+      if (word.text === "" && !word.quoted) { pos++; continue; }
+      seg.words.push(word.text);
+      seg.atoms.push(word.text);
+    }
+    if (unterminated) fallback();
+    end("\n");
+    for (const name of names) if (!/[\n\x01]/.test(name)) out.push("n" + name);
     process.stdout.write(out.join("\n") + "\n");
-  '
+  ' <<< "$COMMAND"
 }
 
-# The words of the next segment, from file descriptor 3, in `words`, and whether the segment may not
-# run (after && or ||, or after a pipe) or runs in a pipe's subshell (MAY_NOT_RUN, PIPED).
+# The next record of fd 3: SEG_KIND is "seg" (its words are in `words`, with MAY_NOT_RUN: it follows
+# && or ||; PIPED: it does not last, on a side of a pipe or in the background; FLAGS), "open" or
+# "close" for a subshell's parenthesis. The names at the end go to NAMES. Status 1 at the end.
 next_segment() {
   local record
   words=()
   MAY_NOT_RUN=false
   PIPED=false
+  FLAGS=''
+  SEG_KIND=seg
   while IFS= read -r record <&3; do
     case "$record" in
       e) return 0 ;;
       c) MAY_NOT_RUN=true ;;
-      p) PIPED=true ;;
-      *) words+=("${record#w}") ;;
+      x) PIPED=true ;;
+      f*) FLAGS="${record#f}" ;;
+      '(') SEG_KIND=open; return 0 ;;
+      ')') SEG_KIND=close; return 0 ;;
+      n*) NAMES="$NAMES"$'\n'"${record#n}" ;;
+      w*) record="${record#w}"; words+=("${record//$'\001'/$'\n'}") ;;
     esac
   done
   return 1
@@ -374,9 +535,11 @@ expand_word() {
   EXPANDED="$out$w"
 }
 
-# Where a segment runs after `cd <word>` or `git -C <word>`. A word that cannot be expanded
-# without the shell leaves the session's own directory: its repository's config judges the command.
+# Where a segment runs after `cd <word>` or `git -C <word>`, from DIR. A word that cannot be expanded
+# without the shell leaves the session's own directory (MOVE_UNRESOLVED): the config of the
+# directories the command visited and of the session's judges it.
 move_to() {
+  MOVE_UNRESOLVED=false
   if expand_word "$1"; then
     case "$EXPANDED" in
       /*) DIR="$EXPANDED" ;;
@@ -384,35 +547,252 @@ move_to() {
     esac
   else
     DIR="$CWD"
+    MOVE_UNRESOLVED=true
   fi
+  ALL_DIRS+=("$DIR")
+}
+
+# What the command stands on and what it names, for the backstop and the directory candidates.
+SHELL_DIRS=("$CWD") # where the shell may stand now (a cd that may not run adds a directory)
+VISITED=("$CWD")    # the session's directory and every one a cd named
+ALL_DIRS=("$CWD")   # and every one `git -C` named
+SUB_STACK=()        # SHELL_DIRS at each open subshell, its entries joined by \001
+SUB_DEPTH=0
+UNRES=false         # a cd needed the shell: the shell's directory is not known
+UNJUDGED=false      # a git or gh invocation the hook did not judge
+ENV_SEEN=false      # GIT_DIR, GH_REPO and kin, --git-dir, --work-tree
+ANY_PUSH=false
+ANY_MERGE=false
+NAMES=''
+
+# A directory's own config judges a segment in it. With none, the config of every directory the
+# command visited and of the session's judges it, and the strictest answer wins.
+candidates_do() {
+  local fn="$1" d found=false
+  for d in "${VISITED[@]}"; do
+    if load_config "$d"; then found=true; "$fn" "$d"; fi
+  done
+  [ "$found" = true ]
+}
+
+# Judges the push in `words` (refspecs in `refspecs`, NO_REFSPEC) against the config loaded for $1.
+push_check() {
+  local dir="$1" current upstream target spec
+  fail_closed
+  if [ "$NO_REFSPEC" = true ]; then
+    # Without a refspec git pushes the checked-out branch to its upstream: both are judged.
+    current="$(git -C "$dir" branch --show-current 2>/dev/null)"
+    upstream=''
+    [ -n "$current" ] && upstream="$(git -C "$dir" config --get "branch.$current.merge" 2>/dev/null)"
+    upstream="${upstream#refs/heads/}"
+    for target in "$current" "$upstream"; do
+      if [ -n "$target" ] && in_list "$target" "$PROTECTED"; then
+        deny "A push without refspec pushes $current to ${upstream:-$current}, and a push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec (git push origin <branch>) and open a pull request; a person pushes to $target."
+      fi
+    done
+    return 0
+  fi
+  for spec in "${refspecs[@]}"; do
+    target="$(refspec_target "$spec" "$dir")"
+    if in_list "$target" "$PROTECTED"; then
+      deny "A push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec and open a pull request; a person pushes to $target."
+    fi
+  done
+}
+
+merge_check() {
+  DIR="$1"
+  guard_gh_merge "${rest[@]}"
+}
+
+# One git invocation, in the directory $1 the shell may stand in: words[ci] is `git`.
+judge_git() {
+  DIR="$1"
+  local j=$((ci + 1)) sub spec word remote_seen=false created positional track is_switch k target
+  SEG_UNJUDGED=false
+  while [ "$j" -lt "$count" ] && [[ "${words[j]}" == -* ]]; do
+    case "${words[j]}" in
+      -C)
+        if [ $((j + 1)) -lt "$count" ]; then
+          move_to "${words[j + 1]}"
+          [ "$MOVE_UNRESOLVED" = true ] && SEG_UNJUDGED=true
+        fi
+        j=$((j + 2))
+        ;;
+      -c | --exec-path | --namespace) j=$((j + 2)) ;;
+      --git-dir | --work-tree) SEG_UNJUDGED=true; j=$((j + 2)) ;;
+      --git-dir=* | --work-tree=*) SEG_UNJUDGED=true; j=$((j + 1)) ;;
+      *) j=$((j + 1)) ;;
+    esac
+  done
+  [ "$j" -lt "$count" ] || return 0
+  sub="${words[j]}"
+  # A subcommand git does not have is an alias, or another program: a push may hide in it.
+  case "$sub" in
+    push | checkout | switch | add | am | apply | archive | bisect | blame | branch | bundle | cherry-pick | clean | clone | commit | config | describe | diff | fetch | format-patch | gc | grep | init | log | ls-files | ls-remote | ls-tree | merge | mv | notes | pull | rebase | reflog | remote | reset | restore | revert | rev-list | rev-parse | rm | shortlog | show | show-ref | stash | status | submodule | tag | worktree | cat-file | diff-tree | for-each-ref | symbolic-ref | update-ref | version | help | --version) ;;
+    *) case "$FLAGS" in *k*) SEG_UNJUDGED=true ;; esac ;;
+  esac
+
+  if [ "$sub" = 'push' ]; then
+    j=$((j + 1))
+    # After push: the first non-flag word is the remote, every further one a refspec.
+    refspecs=()
+    while [ "$j" -lt "$count" ]; do
+      word="${words[j]}"
+      if [[ "$word" == -* ]]; then
+        case "$word" in
+          -o | --push-option | --receive-pack | --exec) j=$((j + 2)) ;;
+          *) j=$((j + 1)) ;;
+        esac
+        continue
+      fi
+      if [ "$remote_seen" = false ]; then
+        remote_seen=true
+      elif expand_word "$word"; then
+        refspecs+=("$EXPANDED")
+      else
+        SEG_UNJUDGED=true
+        refspecs+=("$word")
+      fi
+      j=$((j + 1))
+    done
+    NO_REFSPEC=false
+    [ "${#refspecs[@]}" -eq 0 ] && NO_REFSPEC=true
+    if load_config "$DIR"; then push_check "$DIR"; else candidates_do push_check || true; fi
+    return 0
+  fi
+
+  load_config "$DIR" || return 0
+  # A branch switch: checkout or switch without `--` and not `checkout .` (those restore paths).
+  # The target is the name after -b/-B/-c/-C when a branch is created; with -t/--track and no name,
+  # the remote-tracking branch's name without its remote, which is what git creates.
+  if [ "$sub" = 'checkout' ] || [ "$sub" = 'switch' ]; then
+    is_switch=true
+    created=''
+    positional=''
+    track=false
+    k=$((j + 1))
+    while [ "$k" -lt "$count" ]; do
+      word="${words[k]}"
+      if [ "$word" = '--' ] || [ "$word" = '.' ]; then
+        is_switch=false
+        break
+      fi
+      case "$word" in
+        -b | -B | -c | -C | --create | --force-create)
+          [ $((k + 1)) -lt "$count" ] && [ -z "$created" ] && created="${words[k + 1]}"
+          k=$((k + 1))
+          ;;
+        -t | --track | --track=*) track=true ;;
+        -*) ;;
+        *) [ -z "$positional" ] && positional="$word" ;;
+      esac
+      k=$((k + 1))
+    done
+    target="$created"
+    if [ -z "$target" ]; then
+      target="$positional"
+      if [ "$track" = true ]; then
+        target="${target#refs/remotes/}"
+        target="${target#*/}"
+      fi
+    fi
+    [ "$is_switch" = true ] && guard_branch_switch "$DIR" "$target"
+  fi
+  return 0
+}
+
+# One gh invocation, in the directory $1 the shell may stand in: words[ci] is `gh`.
+judge_gh() {
+  DIR="$1"
+  rest=("${words[@]:ci+1}")
+  [ "${#rest[@]}" -gt 0 ] || return 0
+  local word
+  if [ "${rest[0]}" = 'pr' ] && [ "${rest[1]:-}" = 'merge' ]; then
+    if load_config "$DIR"; then
+      guard_gh_merge "${rest[@]}"
+    elif ! candidates_do merge_check; then
+      # Nothing here or in the session has a config, and gh reaches a repository by name.
+      for word in "${rest[@]}"; do
+        case "$word" in
+          -R | --repo | --repo=*) deny 'A merge into a repository named by -R, with no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository, without -R: cd <repo> && gh pr merge <n>.' ;;
+        esac
+      done
+      [ "$ENV_SEEN" = true ] && deny 'A merge with GH_REPO set, and no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository: cd <repo> && gh pr merge <n>.'
+    fi
+    return 0
+  fi
+  load_config "$DIR" || return 0
+  guard_gh_issue "${rest[@]}"
+}
+
+# Whether a git or gh invocation hides in a segment: its command is not git or gh itself, and its
+# words mention git, gh, push or merge. Programs that only print or move text do not count.
+INERT=' echo printf cat tee grep egrep fgrep rg head tail wc ls cp mv rm mkdir touch diff cmp sort uniq tr cut basename dirname test [ true false : pwd realpath stat file tree date sleep which type '
+INTERPRETERS=' sh bash zsh dash ksh eval source . '
+
+# A command that names branches and pushes, or merges, is refused unless every git and gh invocation
+# in it was judged. It runs after the segments are judged one by one.
+backstop() {
+  [ "$UNJUDGED" = true ] || return 0
+  local d protected_union='' hit=false name any_config=false
+  for d in "${ALL_DIRS[@]}"; do
+    if load_config "$d"; then any_config=true; protected_union="$protected_union"$'\n'"$PROTECTED"; fi
+  done
+  [ "$any_config" = true ] || return 0
+  if [ "$ANY_PUSH" = true ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      case "$NAMES" in *$'\n'"$name"$'\n'* | *$'\n'"$name") hit=true; break ;; esac
+    done <<< "$protected_union"
+  fi
+  [ "$ANY_MERGE" = true ] && hit=true
+  [ "$hit" = true ] || return 0
+  deny 'This command pushes to a protected branch or merges a pull request in a form the guard cannot judge (a wrapper such as env, sh -c, eval or xargs, GIT_DIR or --git-dir, a directory or branch only the shell could resolve, or a git alias), and what it cannot judge it refuses. Write it plainly, one invocation per command: git push origin <branch>, gh pr merge <n>.'
 }
 
 # One tool call can chain several commands; every segment is judged on its own.
-CHAINED="${COMMAND//&&/$'\n\001'}"
-CHAINED="${CHAINED//||/$'\n\001'}"
-CHAINED="${CHAINED// & /$'\n\001'}"
-CHAINED="${CHAINED//|/$'\n\002'}"
-CHAINED="${CHAINED//;/$'\n'}"
-# Where the shell stands; DIR is where one segment runs, which its own `git -C` moves.
-SHELL_DIR="$CWD"
-
 while next_segment; do
-  DIR="$SHELL_DIR"
+  case "$SEG_KIND" in
+    open)
+      SUB_STACK+=("$(IFS=$'\001'; printf '%s' "${SHELL_DIRS[*]}")")
+      SUB_DEPTH=$((SUB_DEPTH + 1))
+      continue
+      ;;
+    close)
+      if [ "$SUB_DEPTH" -gt 0 ]; then
+        last=$((${#SUB_STACK[@]} - 1))
+        IFS=$'\001' read -r -a SHELL_DIRS <<< "${SUB_STACK[last]}"
+        unset "SUB_STACK[$last]"
+        SUB_DEPTH=$((SUB_DEPTH - 1))
+      fi
+      continue
+      ;;
+  esac
   count=${#words[@]}
-  i=0
+  [ "$count" -gt 0 ] || continue
+  case "$FLAGS" in *k*) ANY_PUSH=true ;; esac
+  [[ "$FLAGS" == *h* && "$FLAGS" == *m* ]] && ANY_MERGE=true
+  case "$FLAGS" in *e*) ENV_SEEN=true; UNJUDGED=true ;; esac
+  # Reserved words before the command.
+  s=0
+  while [ "$s" -lt "$count" ]; do
+    case "${words[s]}" in '!' | if | then | else | elif | do | while | until | time) s=$((s + 1)) ;; *) break ;; esac
+  done
+  i=$s
   while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*\+?= ]]; do
     i=$((i + 1))
   done
   # Assignments alone set the variable for the next segments, when the segment runs and lasts. In
   # front of a command they belong to that command only. Whatever else the resolver cannot follow
-  # (`NAME+=`, a value from a command, a segment after && || or a pipe, read, printf -v, for,
-  # declare and its kin) leaves the name unresolved, never holding an old value.
-  k=0
+  # (`NAME+=`, a value from a command, a segment after && || or a pipe or in a subshell, read,
+  # printf -v, for, declare and its kin) leaves the name unresolved, never holding an old value.
+  k=$s
   while [ "$k" -lt "$i" ]; do
     name="${words[k]%%=*}"
     if [[ "$name" == *+ ]]; then
       forget "${name%+}"
-    elif [ "$i" -eq "$count" ] && [ "$MAY_NOT_RUN" = false ] && [ "$PIPED" = false ]; then
+    elif [ "$i" -eq "$count" ] && [ "$MAY_NOT_RUN" = false ] && [ "$PIPED" = false ] && [ "$SUB_DEPTH" -eq 0 ]; then
       record_assignment "${words[k]}"
     elif [ "$i" -eq "$count" ] || ! expand_word "${words[k]#*=}"; then
       forget "$name"
@@ -441,118 +821,89 @@ while next_segment; do
         ;;
     esac
   fi
-  [ "$i" -lt "$count" ] || continue
+  if [ "$i" -ge "$count" ]; then
+    # Only assignments: a command string kept in a variable is not judged.
+    [[ "$FLAGS" == *[ghkm]* ]] && UNJUDGED=true
+    continue
+  fi
+  ci=$i
+  cmd="${words[ci]}"
 
-  # `cd <dir>` moves where the later segments run.
-  if [ "${words[i]}" = 'cd' ]; then
-    i=$((i + 1))
+  # `cd <dir>` moves where the later segments run; one that may not run, or does not last, adds a
+  # place the shell may stand without taking the others away.
+  if [ "$cmd" = 'cd' ] || [ "$cmd" = 'pushd' ]; then
+    i=$((ci + 1))
     while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^-(-|[LPe@]+)$ ]]; do
       i=$((i + 1))
     done
-    [ "$i" -lt "$count" ] && move_to "${words[i]}"
-    SHELL_DIR="$DIR"
-    continue
-  fi
-
-  if [ "${words[i]}" = 'gh' ]; then
-    load_config "$DIR" || continue
-    rest=("${words[@]:i+1}")
-    if [ "${#rest[@]}" -gt 0 ]; then
-      guard_gh_merge "${rest[@]}"
-      guard_gh_issue "${rest[@]}"
-    fi
-    continue
-  fi
-
-  [ "${words[i]}" = 'git' ] || continue
-  i=$((i + 1))
-  # Options between git and its subcommand: git -C dir push, git -c key=value push.
-  while [ "$i" -lt "$count" ] && [[ "${words[i]}" == -* ]]; do
-    case "${words[i]}" in
-      -C) [ $((i + 1)) -lt "$count" ] && move_to "${words[i + 1]}"; i=$((i + 2)) ;;
-      -c | --git-dir | --work-tree | --namespace | --exec-path) i=$((i + 2)) ;;
-      *) i=$((i + 1)) ;;
-    esac
-  done
-  [ "$i" -lt "$count" ] || continue
-  load_config "$DIR" || continue
-
-  # A branch switch: checkout or switch without `--` and not `checkout .` (those restore paths).
-  # The target is the name after -b/-B/-c/-C when a branch is created; with -t/--track and no name,
-  # the remote-tracking branch's name without its remote, which is what git creates.
-  if [ "${words[i]}" = 'checkout' ] || [ "${words[i]}" = 'switch' ]; then
-    is_switch=true
-    created=''
-    positional=''
-    track=false
-    j=$((i + 1))
-    while [ "$j" -lt "$count" ]; do
-      word="${words[j]}"
-      if [ "$word" = '--' ] || [ "$word" = '.' ]; then
-        is_switch=false
-        break
-      fi
-      case "$word" in
-        -b | -B | -c | -C | --create | --force-create)
-          [ $((j + 1)) -lt "$count" ] && [ -z "$created" ] && created="${words[j + 1]}"
-          j=$((j + 1))
-          ;;
-        -t | --track | --track=*) track=true ;;
-        -*) ;;
-        *) [ -z "$positional" ] && positional="$word" ;;
-      esac
-      j=$((j + 1))
+    target='~'
+    [ "$i" -lt "$count" ] && target="${words[i]}"
+    moved=()
+    for sd in "${SHELL_DIRS[@]}"; do
+      DIR="$sd"
+      move_to "$target"
+      if [ "$MOVE_UNRESOLVED" = true ]; then UNRES=true; moved+=("$sd"); fi
+      moved+=("$DIR")
+      VISITED+=("$DIR")
     done
-    target="$created"
-    if [ -z "$target" ]; then
-      target="$positional"
-      if [ "$track" = true ]; then
-        target="${target#refs/remotes/}"
-        target="${target#*/}"
-      fi
+    if [ "$PIPED" = true ]; then
+      :
+    elif [ "$MAY_NOT_RUN" = true ] || [ "$UNRES" = true ]; then
+      SHELL_DIRS+=("${moved[@]}")
+    else
+      SHELL_DIRS=("${moved[@]}")
     fi
-    [ "$is_switch" = true ] && guard_branch_switch "$DIR" "$target"
+    continue
+  fi
+  if [ "$cmd" = 'popd' ]; then
+    UNRES=true
     continue
   fi
 
-  [ "${words[i]}" = 'push' ] || continue
-  fail_closed
-  i=$((i + 1))
-  # After push: the first non-flag word is the remote, every further one a refspec.
-  remote_seen=false
+  SEG_UNJUDGED=false
+  NO_REFSPEC=false
   refspecs=()
-  while [ "$i" -lt "$count" ]; do
-    word="${words[i]}"
-    if [[ "$word" == -* ]]; then
-      case "$word" in
-        -o | --push-option | --receive-pack | --exec) i=$((i + 2)) ;;
-        *) i=$((i + 1)) ;;
-      esac
-      continue
-    fi
-    if [ "$remote_seen" = false ]; then remote_seen=true; else refspecs+=("$word"); fi
-    i=$((i + 1))
-  done
-
-  # Without a refspec git pushes the checked-out branch to its upstream: both are judged.
-  if [ "${#refspecs[@]}" -eq 0 ]; then
-    current="$(git -C "$DIR" branch --show-current 2>/dev/null)"
-    upstream=''
-    [ -n "$current" ] && upstream="$(git -C "$DIR" config --get "branch.$current.merge" 2>/dev/null)"
-    upstream="${upstream#refs/heads/}"
-    for target in "$current" "$upstream"; do
-      if [ -n "$target" ] && in_list "$target" "$PROTECTED"; then
-        deny "A push without refspec pushes $current to ${upstream:-$current}, and a push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec (git push origin <branch>) and open a pull request; a person pushes to $target."
+  case "$cmd" in
+    git)
+      for sd in "${SHELL_DIRS[@]}"; do
+        judge_git "$sd"
+        [ "$SEG_UNJUDGED" = true ] && break
+      done
+      # The second pass must see every directory even after an unjudged form.
+      if [ "$SEG_UNJUDGED" = true ]; then
+        for sd in "${SHELL_DIRS[@]}"; do judge_git "$sd"; done
+        SEG_UNJUDGED=true
       fi
-    done
-    continue
-  fi
-  for spec in "${refspecs[@]}"; do
-    target="$(refspec_target "$spec" "$DIR")"
-    if in_list "$target" "$PROTECTED"; then
-      deny "A push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec and open a pull request; a person pushes to $target."
-    fi
-  done
-done 3< <(split_segments <<< "$CHAINED")
+      [ "$UNRES" = true ] && SEG_UNJUDGED=true
+      [ "$SEG_UNJUDGED" = true ] && UNJUDGED=true
+      ;;
+    gh)
+      for sd in "${SHELL_DIRS[@]}"; do judge_gh "$sd"; done
+      if [[ "$FLAGS" == *m* ]]; then
+        case "${words[ci + 1]:-} ${words[ci + 2]:-}" in
+          'pr merge') ;;
+          'pr view' | 'pr list' | 'pr create' | 'pr edit' | 'pr comment' | 'pr diff' | 'pr checks' | 'pr close' | 'pr reopen' | 'pr ready' | 'pr review' | 'pr status' | 'pr checkout' | 'issue '*) ;;
+          *) UNJUDGED=true ;;
+        esac
+        [ "$UNRES" = true ] && UNJUDGED=true
+      fi
+      ;;
+    *)
+      if [[ "$INTERPRETERS" == *" $cmd "* ]]; then
+        operands=0
+        for ((k = ci + 1; k < count; k++)); do [[ "${words[k]}" == -* ]] || operands=$((operands + 1)); done
+        { [[ "$FLAGS" == *[ghkm]* ]] || [ "$operands" -eq 0 ]; } && UNJUDGED=true
+      elif [[ "$FLAGS" == *[ghkm]* ]]; then
+        # A program that only prints text runs what a substitution in its words runs.
+        runs=false
+        for word in "${words[@]}"; do
+          case "$word" in *'$('* | *'`'* | *'<('* | *'>('*) runs=true ;; esac
+        done
+        { [ "$runs" = true ] || [[ "$INERT" != *" $cmd "* ]]; } && UNJUDGED=true
+      fi
+      ;;
+  esac
+done 3< <(split_segments)
 
+backstop
 exit 0
