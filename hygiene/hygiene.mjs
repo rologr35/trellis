@@ -18,7 +18,7 @@
 //     so it carries the nested limit and is not frozen), each rule, each agent (4 KB, fixed) and
 //     all the rules together under their [hygiene] limits; skills and docs/ under their
 //     [hygiene] frozen size plus 2%, every one of them frozen;
-//   - every [workspace] package has its CLAUDE.md;
+//   - every [workspace] package has its CLAUDE.md (a package at the root, `.`, is the root one);
 //   - the orientation block lists every nested file and every rule;
 //   - every generated block matches what `trellis sync` generates, the root carries the method
 //     block, the deny of .claude/settings.json keeps every entry sync generates, and
@@ -68,6 +68,11 @@ export const NARRATIVE = {
     /(?<![\p{L}])ya no(?![\p{L}])/iu,
     /(?<![\p{L}])sol[ií]a(?:n)?(?![\p{L}])/iu,
     /(?<![\p{L}])antes (?:era|eran|se|hab[ií]a|estaba|usaba)(?![\p{L}])/iu,
+    // `antes <word> <verb>`, the word not a function word (`antes qué había`, `antes si estaba` ask).
+    /(?<![\p{L}])antes (?!(?:de|que|qu[eé]|si|lo|la|los|las)(?![\p{L}]))\p{L}+ (?:era|eran|hab[ií]a|estaba|usaba)(?![\p{L}])/iu,
+    // `ahora` only as the contrast: a line that also holds `antes`, or `y ahora` / `pero ahora`.
+    /(?<![\p{L}])antes(?![\p{L}]).*(?<![\p{L}])ahora(?![\p{L}])/iu,
+    /(?<![\p{L}])(?:y|pero) ahora(?![\p{L}])/iu,
     /(?<![\p{L}])(?:se reemplaz[oó]|fue reemplazad[oa]|fueron reemplazad[oa]s)(?![\p{L}])/iu,
     /(?<![\p{L}])dej[oó] de(?![\p{L}])/iu,
     /(?<![\p{L}])(?:desde|hasta|a partir de) #\d/iu,
@@ -83,6 +88,18 @@ export const TRACKER_REF = /(?<![\w&/])#\d+\b/gu;
 
 /** The extensions a rule names files by, per workspace.kind. */
 const NAMED_EXT = {flutter: ['dart'], dart: ['dart'], node: ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']};
+
+/**
+ * A `workspace.package` value as a path from the project's root: `./x`, `x/` and `x//` are `x`, and
+ * `.` (or `./`) is the root, the empty string. The one reading of the key.
+ */
+export function packagePath(value) {
+  const normalized = path.posix.normalize(value.trim()).replace(/\/+$/u, '');
+  return normalized === '.' ? '' : normalized;
+}
+
+/** A file of a package: the package at the root has its files at the root. */
+export const inPackage = (pkg, file) => (pkg === '' ? file : `${pkg}/${file}`);
 
 /** The regular expression of a glob: `**` crosses folders, `*` stays inside one. */
 export function globToRegExp(glob) {
@@ -148,7 +165,7 @@ export function hygiene(root, {staged = false} = {}) {
   // Rules load where they speak.
   const kind = config.get('workspace.kind');
   const extensions = config.all('hygiene.namedExt').length ? config.all('hygiene.namedExt') : NAMED_EXT[kind] ?? [];
-  const packages = config.all('workspace.package');
+  const packages = [...new Set(config.all('workspace.package').map(packagePath))];
   const namedElsewhere = allowlist(config.all('hygiene.namedElsewhere'));
   const globsOf = new Map();
   for (const rule of rules) {
@@ -168,7 +185,7 @@ export function hygiene(root, {staged = false} = {}) {
     const named = new Set();
     const token = new RegExp(`\`([^\`\\s]+\\.(?:${extensions.join('|')}))\``, 'gu');
     for (const [, name] of text.matchAll(token)) {
-      const hit = [name, ...packages.map(p => `${p}/${name}`)].find(c => tree.has(c));
+      const hit = [name, ...packages.map(p => inPackage(p, name))].find(c => tree.has(c));
       if (hit) named.add(hit);
     }
     const name = path.posix.basename(rule);
@@ -217,7 +234,7 @@ export function hygiene(root, {staged = false} = {}) {
 
   // Packages, orientation and generated content.
   for (const pkg of packages) {
-    if (!tree.has(`${pkg}/CLAUDE.md`)) fail(pkg, 'is a [workspace] package without its CLAUDE.md (the scaffold skill drafts one)');
+    if (!tree.has(inPackage(pkg, 'CLAUDE.md'))) fail(pkg || '.', 'is a [workspace] package without its CLAUDE.md (the scaffold skill drafts one)');
   }
   const generated = generateBlocks(tree, config);
   for (const [file, ids] of Object.entries(BLOCK_FILES)) {

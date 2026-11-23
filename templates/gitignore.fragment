@@ -1,2 +1,4 @@
 # trellis: the worktrees of other sessions, one per issue.
 .claude/worktrees/
+# trellis: Claude Code's per-person settings, which the plugin install at the local scope writes.
+.claude/settings.local.json

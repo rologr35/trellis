@@ -6,11 +6,18 @@ Base, the module of this repository, needs only git and node. The Cycle (issues,
 
 ## Install in a project
 
-1. Claude Code 2.1.324 or later (the marketplace pinned by sha needs it).
-2. In the project: `/plugin marketplace add rologr35/trellis` and `/plugin install trellis@trellis`. `enabledPlugins` in `settings.json` enables an installed plugin, it does not install it.
+1. Claude Code 2.1.330 or later (the marketplace pinned by sha and the `--scope local` install need it).
+2. In the project's main checkout, install the plugin at the **local** scope, pinned to a full sha of this repository (`<sha>` is the commit to adopt; `git ls-remote https://github.com/rologr35/trellis.git HEAD` prints the latest):
+
+   ```sh
+   claude plugin marketplace add rologr35/trellis@<sha> --scope local
+   claude plugin install trellis@trellis --scope local
+   ```
+
+   Both write to `.claude/settings.local.json`, which git ignores, so the main checkout stays clean: `init` asks for it clean, on the integration branch. The project scope (`--scope project`) would write `extraKnownMarketplaces` and `enabledPlugins` into `.claude/settings.json`, an uncommitted change in that checkout that the merge of `init` then collides with. `enabledPlugins` enables an installed plugin, it does not install it. `claude plugin marketplace add` does not write `autoUpdate: false`: a marketplace pinned by `owner/repo@<sha>` is not moved by an update, and `init` writes `autoUpdate: false` explicitly in the project's settings; by hand, it is the key `"autoUpdate": false` beside `source` in `extraKnownMarketplaces`.
 3. `/trellis:init`: an interview, then it writes the configuration and the templates, and ends with `trellis sync`, `trellis hygiene --freeze` and `trellis doctor`.
 
-`init` pins the marketplace in `.claude/settings.json` with the plugin's full sha and `autoUpdate: false`, and the CI workflow with the same sha. Updating the plugin is changing that sha in both places, in a pull request of its own.
+`init` works in a worktree and writes the project-scope keys there: `extraKnownMarketplaces` with the plugin's full sha (`ref`) and `autoUpdate: false`, and `enabledPlugins`, in `.claude/settings.json`, and the CI workflow with the same sha. The merge of that branch is the only place they land; the local entries of step 2 are then redundant, and the local marketplace entry can override the project's sha with the old pin. After the merge, remove both local keys from `.claude/settings.local.json` (`extraKnownMarketplaces.trellis` and `enabledPlugins."trellis@trellis"`; `claude plugin uninstall trellis@trellis --scope local` removes only the second), and check with `claude plugin marketplace list` that the marketplace shows the project's sha. Updating the plugin is changing that sha in both places, in a pull request of its own.
 
 ## Language
 
@@ -33,7 +40,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 | Configuration | the project's `trellis.config` | git-config format, read with `git config -f`; `lib/schema` holds the keys and their defaults. |
 | Guards | `hooks/guard-git.sh` | Pushes to protected branches, branch switches in the main checkout, issues without a prior search, merges outside the allowed bases. |
 | Git hooks | `templates/githooks/` | Ratchet, hygiene, commit message and branch name, in the clone. |
-| Consumer CI | `.github/workflows/consumer-check.yml` | Hygiene, ratchet, `pr-check` and the secret scanner on every pull request. |
+| Consumer CI | `.github/workflows/consumer-check.yml` | Hygiene, ratchet, `pr-check` and the secret scanner on every pull request. It runs no rung: a rung with `pr = true` is run by the project's own CI. |
 | Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`. |
 | Agent | `agents/plan-reviewer.md` | Checks a plan against the repository, in a clean context. |
 
@@ -47,6 +54,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 ## The barriers and their limits
 
 - **Consumer CI**: the real barrier, where the GitHub plan allows requiring checks. In a private repository on a plan without required checks it is advisory: nothing prevents merging with a red check. What is left is `guard-git` and the `deny` for Claude, the git hooks for the clone, and the person who does not merge on red. `trellis doctor` cannot know which plan the repository has.
+- **Consumer CI and the plugin's visibility**: the consumer workflow clones the plugin at the pinned sha with no credentials, so the plugin repository has to be reachable anonymously: public, and with a public repository nothing else is configured. A private fork needs its own adaptation, which this repository does not build: its Actions access level set so that the project's repositories can call the reusable workflow, plus a token for the clone of the plugin (a secret of every consumer).
 - **Git hooks**: a convenience, not a barrier. A clone without Claude and without `init` lacks them until someone runs `trellis setup`; the plugin's `SessionStart` hook runs it in every session, in the cloud too. The aggregate limits (the total of the rules) run only in CI: they are a budget shared between branches.
 - **Push without a refspec**: the `deny` of `settings.json` covers the forms a permission rule can express (`main`, `+main`, `refs/heads/main`, `HEAD:main`, with or without `-C`), but not a bare `git push` on a protected branch: no pattern stops it without stopping every push. There the guard is `guard-git`, which judges the current branch and its upstream; where the plugin does not load, the method asks for an explicit refspec.
 - **Directory of the command**: `guard-git` judges a push or a merge with the `trellis.config` of the directory the command runs in, after its `cd` or `git -C`. It expands what needs no execution: quotes, `~`, and the variables the same command assigns literally. A directory that needs the shell (`~user`, `cd -`, `$(...)`, a variable set in an earlier call) is read as the session's own, so the session's repository config judges it; if the session's directory has no `trellis.config` either, there is no opinion and a push is left to the `deny` of `settings.json`, a merge to nothing.
@@ -57,8 +65,8 @@ Each prose template is a file per locale rather than one file with per-locale st
 
 Read-only: it never writes or fetches. It exits 1 when there is any FAIL.
 
-- **FAIL**: a `trellis.config` key outside the schema, a value outside the accepted ones of an enum key of `lib/schema` (`project.locale`, `tracker.kind`, `workspace.kind`, `rung.*.agent`, `rung.*.pr`), `workspace.kind = other` without `[hygiene] namedExt` (the extensions to declare for a stack beyond flutter, dart and node), a command name without `[command "<name>"] run`, or a `trellis.config` that does not parse (the doctor reports it and goes on diagnosing; the other subcommands stop on it); a tool of `[toolchain] require` missing or older than its minimum; `core.hooksPath` unset or other than `.githooks`; the plugin not installed or Claude Code below 2.1.324; node missing with hooks active; `ANTHROPIC_API_KEY` exported (the subscription stops being used and every token is billed as API usage, silently); a branch that is not the integration branch, the release branch or an issue branch; a configured `[command] secretScan` whose scanner is missing; a file of `[toolchain] envFile` missing (presence only, it is never read).
-- **Warning**: no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
+- **FAIL**: a `trellis.config` key outside the schema, a value outside the accepted ones of an enum key of `lib/schema` (`project.locale`, `tracker.kind`, `workspace.kind`, `rung.*.agent`, `rung.*.pr`), `workspace.kind = other` without `[hygiene] namedExt` (the extensions to declare for a stack beyond flutter, dart and node), a command name without `[command "<name>"] run`, or a `trellis.config` that does not parse (the doctor reports it and goes on diagnosing; the other subcommands stop on it); a tool of `[toolchain] require` missing or older than its minimum; `core.hooksPath` unset or other than `.githooks`; the plugin not installed or Claude Code below 2.1.330; node missing with hooks active; `ANTHROPIC_API_KEY` exported (the subscription stops being used and every token is billed as API usage, silently); a branch that is not the integration branch, the release branch or an issue branch; a configured `[command] secretScan` whose scanner is missing; a file of `[toolchain] envFile` missing (presence only, it is never read).
+- **Warning**: a rung with `pr = true` that no file under `.github/workflows/` runs (it must contain the command's `run` text, or its `ci` text when set, as a plain substring search: a folded `run: >-`, a YAML comment or a commented-out step is misjudged and `npm test` is found inside `pnpm test`, so it is a hint and not a YAML parser: `pr = true` means the project's own CI runs the rung on every pull request, because the consumer workflow never runs rungs and does not install a stack's toolchain), no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
 - **Info**: what the release is waiting for.
 
 ## What the framework does not do, and why

@@ -105,6 +105,34 @@ test('narrative in Spanish fails in an es project and passes in an en one', () =
   fails(p, 'app/CLAUDE.md: line 3 narrates history');
 });
 
+test('the es narrative catches a word between "antes" and the verb, and "ahora" as a contrast', () => {
+  for (const line of ['Antes esto usaba Provider.', 'Antes aquello era un singleton.', 'Antes Provider estaba en core.', 'Antes esto usaba Provider, ahora usa Bloc.', 'Esto era un singleton y ahora es un servicio.', 'Usaba Provider, pero ahora usa Bloc.']) {
+    const p = project();
+    p.write('app/CLAUDE.md', `# App\n\n${line}\n`);
+    p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
+    p.trellis('sync');
+    fails(p, 'app/CLAUDE.md: line 3 narrates history');
+  }
+  const p = project();
+  const legitimate = [
+    'Antes de ejecutar, lee el plan.',
+    'Antes de proponer algo, busca lo que existe.',
+    'Ejecuta antes una alternativa barata.',
+    'Por ahora el escalón está apagado.',
+    'Ahora mismo no hay caché.',
+    'A partir de ahora, cada PR lleva su issue.',
+    'Ahora, ejecuta el análisis.',
+    'Comprueba antes qué había en la rama.',
+    'Mira antes si había cambios sin commit.',
+    'Pregunta antes si estaba aprobado.',
+    'Mira antes de la rama lo que había.',
+  ];
+  p.write('app/CLAUDE.md', `# App\n\n${legitimate.join('\n')}\n`);
+  p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
+  p.trellis('sync');
+  passes(p);
+});
+
 test('narrative in English fails in an en project and in an es one', () => {
   const p = project();
   p.write('.claude/rules/app.md', `${p.read('.claude/rules/app.md')}\nThe cache is no longer used.\n`);
@@ -201,6 +229,35 @@ test('a package without CLAUDE.md fails', () => {
   p.git('config', '-f', 'trellis.config', '--add', 'workspace.package', 'core');
   p.write('core/lib/core.dart', '\n');
   fails(p, 'core: is a [workspace] package without its CLAUDE.md');
+});
+
+test('a package at the root is satisfied by the root CLAUDE.md', () => {
+  const p = project();
+  p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', '.');
+  passes(p);
+});
+
+test('a package path is read once the same way: ., ./x and a trailing slash', () => {
+  for (const spelling of ['./', './app', 'app/', './app/', 'app//']) {
+    const p = project();
+    p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', spelling);
+    passes(p);
+  }
+  const p = project();
+  p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', './packages/foo/');
+  fails(p, 'packages/foo: is a [workspace] package without its CLAUDE.md');
+  p.write('packages/foo/CLAUDE.md', '# Foo\n');
+  p.trellis('sync');
+  passes(p);
+});
+
+test('the rule lookup resolves a file a rule names against a package written with a slash', () => {
+  const p = project();
+  p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', './app/');
+  p.write('.claude/rules/app.md', '---\npaths:\n  - "app/lib/other/*.dart"\n---\n\n# App code\n\n`lib/main.dart` starts it.\n');
+  p.write('app/lib/other/x.dart', '\n');
+  p.trellis('sync');
+  fails(p, 'names app/lib/main.dart, which does not load it');
 });
 
 test('the orientation must list every nested file and rule', () => {
