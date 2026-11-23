@@ -1,69 +1,81 @@
 # trellis
 
-Un arnés agéntico replicable para Claude Code: el método de trabajo siempre cargado, guardas de git, higiene de los ficheros de instrucciones, trinquetes y plantillas de proyecto. Este repositorio es a la vez el plugin y su marketplace.
+A replicable agentic harness for Claude Code: the always-loaded working method, git guards, hygiene of the instruction files, ratchets and project templates. This repository is both the plugin and its marketplace.
 
-Base, el módulo de este repositorio, solo necesita git y node. Los módulos Ciclo (issues, labels, revisión contra el plan) y Autonomía (rutinas en la nube, despachador, presupuesto) se construyen encima.
+Base, the module of this repository, needs only git and node. The Cycle (issues, labels, review against the plan) and Autonomy (cloud routines, dispatcher, budget) modules are built on top of it.
 
-## Instalar en un proyecto
+## Install in a project
 
-1. Claude Code 2.1.324 o posterior (el marketplace fijado por sha lo necesita).
-2. En el proyecto: `/plugin marketplace add rologr35/trellis` y `/plugin install trellis@trellis`. `enabledPlugins` de `settings.json` habilita un plugin instalado, no lo instala.
-3. `/trellis:init`: entrevista, escribe la configuración y las plantillas, y termina con `trellis sync`, `trellis hygiene --freeze` y `trellis doctor`.
+1. Claude Code 2.1.324 or later (the marketplace pinned by sha needs it).
+2. In the project: `/plugin marketplace add rologr35/trellis` and `/plugin install trellis@trellis`. `enabledPlugins` in `settings.json` enables an installed plugin, it does not install it.
+3. `/trellis:init`: an interview, then it writes the configuration and the templates, and ends with `trellis sync`, `trellis hygiene --freeze` and `trellis doctor`.
 
-`init` fija el marketplace en `.claude/settings.json` con el sha completo del plugin y `autoUpdate: false`, y el workflow del CI con el mismo sha. Actualizar el plugin es cambiar ese sha en los dos sitios, en un pull request propio.
+`init` pins the marketplace in `.claude/settings.json` with the plugin's full sha and `autoUpdate: false`, and the CI workflow with the same sha. Updating the plugin is changing that sha in both places, in a pull request of its own.
 
-## Qué hay
+## Language
 
-| Pieza | Dónde | Qué hace |
+The plugin is written in English. What it writes into a project follows `project.locale`, `en` (the default) or `es`, the first question of `init`:
+
+- the method block, from `method/en.md` or `method/es.md`;
+- the templates, from `templates/en/` or `templates/es/`: `CLAUDE.root.md`, `CLAUDE.package.md`, `rule.md`, `SKILL.md`, `TESTING.md` and the comments of `trellis.config`; the language-neutral ones (`settings.json`, `githooks/`, `gitignore.fragment`, `workflows/`) stay in `templates/`;
+- the generated blocks (`method`, `orientation`, `commands`, `gates`, `rungs`), whose labels live in `lib/blocks.mjs`;
+- the pull request sections `pr-check` requires, defined in `lib/locale.mjs`: **Summary**, **Verification** and **Setback** in en; **Resumen**, **Verificación** and **Retroceso** in es;
+- the narrative phrases the hygiene checks: the list of the project's locale, and always the en one, because code comments are English.
+
+Each prose template is a file per locale rather than one file with per-locale strings: a template is mostly prose, and a file per locale keeps it readable as the text it produces. The tests keep the copies aligned: each principle of the method carries an id (`<!-- p:<id> -->`, stripped from the generated block) and both methods carry the same ids in the same order; both template folders hold the same files with the same blocks and the same `trellis.config` keys; and a project written from each locale's templates passes the hygiene.
+
+## What is there
+
+| Piece | Where | What it does |
 |---|---|---|
-| Método | `method/base.md` | Cómo trabaja Claude, en cada turno. `trellis sync` lo copia en el bloque `<!-- trellis:method -->` del `CLAUDE.md` raíz, y la higiene comprueba que coincide: un skill solo carga cuando se invoca, el método se necesita siempre. |
+| Method | `method/<locale>.md` | How Claude works, on every turn. `trellis sync` copies it into the `<!-- trellis:method -->` block of the root `CLAUDE.md`, and the hygiene checks that it matches: a skill loads only when invoked, the method is needed always. |
 | CLI | `bin/trellis` | `config`, `doctor`, `sync`, `hygiene`, `setup`, `worktree add\|prune`, `ratchet`, `pr-check`, `check`. |
-| Configuración | `trellis.config` del proyecto | Formato git-config, leído con `git config -f`; `lib/schema` tiene las claves y sus valores por defecto. |
-| Guardas | `hooks/guard-git.sh` | Push a ramas protegidas, cambios de rama en el checkout principal, issues sin búsqueda previa, merges fuera de las bases permitidas. |
-| Git hooks | `templates/githooks/` | Trinquete, higiene, mensaje de commit y nombre de rama, en el clon. |
-| CI del consumidor | `.github/workflows/consumer-check.yml` | Higiene, trinquete, `pr-check` y escáner de secretos en cada pull request. |
+| Configuration | the project's `trellis.config` | git-config format, read with `git config -f`; `lib/schema` holds the keys and their defaults. |
+| Guards | `hooks/guard-git.sh` | Pushes to protected branches, branch switches in the main checkout, issues without a prior search, merges outside the allowed bases. |
+| Git hooks | `templates/githooks/` | Ratchet, hygiene, commit message and branch name, in the clone. |
+| Consumer CI | `.github/workflows/consumer-check.yml` | Hygiene, ratchet, `pr-check` and the secret scanner on every pull request. |
 | Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`. |
-| Agent | `agents/plan-reviewer.md` | Comprueba un plan contra el repositorio, en contexto limpio. |
+| Agent | `agents/plan-reviewer.md` | Checks a plan against the repository, in a clean context. |
 
-## Dónde corre cada cosa
+## Where each thing runs
 
-- `bin/` del plugin entra en el PATH del Bash tool de Claude, no en la shell de una persona ni en los hooks. Una persona o un git hook llama a `trellis` por su ruta: `lib/find-trellis.sh` la busca en el PATH y después en el `installPath` de `~/.claude/plugins/installed_plugins.json`, porque la ruta del caché cambia con cada versión.
-- Los hooks del plugin usan `${CLAUDE_PLUGIN_ROOT}` y necesitan node. Sin node, `guard-git` queda sin opinión y `trellis doctor` da FAIL. El binario nativo de `claude` no trae node.
-- Un plugin no aporta `permissions`: el `deny` vive en el `settings.json` del proyecto, y `trellis sync` lo genera.
-- Una sesión alojada en la nube lee el `settings.json` del proyecto pero no añade los marketplaces de `extraKnownMarketplaces`, así que los hooks del plugin pueden no correr allí. Por eso el `deny` de push está en `settings.json` además de en `guard-git`.
+- The plugin's `bin/` joins the PATH of Claude's Bash tool, not a person's shell nor the hooks. A person or a git hook calls `trellis` by its path: `lib/find-trellis.sh` looks for it on the PATH and then in the `installPath` of `~/.claude/plugins/installed_plugins.json`, because the cache path changes with every version.
+- The plugin's hooks use `${CLAUDE_PLUGIN_ROOT}` and need node. Without node, `guard-git` has no opinion and `trellis doctor` gives a FAIL. The native `claude` binary does not bring node.
+- A plugin does not contribute `permissions`: the `deny` lives in the project's `settings.json`, and `trellis sync` generates it.
+- A session hosted in the cloud reads the project's `settings.json` but does not add the marketplaces of `extraKnownMarketplaces`, so the plugin's hooks may not run there. That is why the push `deny` is in `settings.json` as well as in `guard-git`.
 
-## Las barreras y sus límites
+## The barriers and their limits
 
-- **CI del consumidor**: la barrera real, donde el plan de GitHub permite exigir checks. En un repositorio privado de un plan sin checks requeridos es consultivo: nada impide mezclar con un check en rojo. Quedan `guard-git` y el `deny` para Claude, los git hooks para el clon, y la persona que no mezcla en rojo. `trellis doctor` no puede saber qué plan tiene el repositorio.
-- **Git hooks**: comodidad, no barrera. Un clon sin Claude y sin `init` no los tiene hasta que alguien corre `trellis setup`; el hook `SessionStart` del plugin lo corre en cada sesión, también en la nube. Los límites agregados (el total de las rules) corren solo en CI: son un presupuesto compartido entre ramas.
-- **Push sin refspec**: el `deny` de `settings.json` cubre las formas que una regla de permisos puede expresar (`main`, `+main`, `refs/heads/main`, `HEAD:main`, con o sin `-C`), pero no `git push` a secas en una rama protegida: no hay patrón que lo pare sin parar todo push. Ahí la guarda es `guard-git`, que juzga la rama actual y su upstream; donde el plugin no carga, el método pide refspec explícito.
-- **Merge**: solo `guard-git` juzga la base de un pull request. Un `deny` de `gh pr merge` bloquearía todos los merges o ninguno, porque una regla de permisos no ve la base y un `deny` gana a todo `allow`. Donde el plugin no carga, el merge queda sin guarda; Base no lanza sesiones en la nube.
-- **Escáner de secretos**: una herramienta externa elegida en `init` (gitleaks por defecto). Sin ninguno configurado, `doctor` avisa; configurado y ausente, FAIL.
+- **Consumer CI**: the real barrier, where the GitHub plan allows requiring checks. In a private repository on a plan without required checks it is advisory: nothing prevents merging with a red check. What is left is `guard-git` and the `deny` for Claude, the git hooks for the clone, and the person who does not merge on red. `trellis doctor` cannot know which plan the repository has.
+- **Git hooks**: a convenience, not a barrier. A clone without Claude and without `init` lacks them until someone runs `trellis setup`; the plugin's `SessionStart` hook runs it in every session, in the cloud too. The aggregate limits (the total of the rules) run only in CI: they are a budget shared between branches.
+- **Push without a refspec**: the `deny` of `settings.json` covers the forms a permission rule can express (`main`, `+main`, `refs/heads/main`, `HEAD:main`, with or without `-C`), but not a bare `git push` on a protected branch: no pattern stops it without stopping every push. There the guard is `guard-git`, which judges the current branch and its upstream; where the plugin does not load, the method asks for an explicit refspec.
+- **Merge**: only `guard-git` judges the base of a pull request. A `deny` of `gh pr merge` would block every merge or none, because a permission rule does not see the base and a `deny` beats every `allow`. Where the plugin does not load, the merge has no guard; Base launches no cloud sessions.
+- **Secret scanner**: an external tool chosen in `init` (gitleaks by default). With none configured, `doctor` warns; configured and missing, FAIL.
 
 ## `trellis doctor`
 
-Solo lectura: nunca escribe ni hace fetch. Sale con 1 si hay algún FAIL.
+Read-only: it never writes or fetches. It exits 1 when there is any FAIL.
 
-- **FAIL**: una clave de `trellis.config` fuera del esquema, un nombre de comando sin `[command "<nombre>"] run`, o un `trellis.config` que no parsea (el doctor lo informa y sigue diagnosticando; los demás subcomandos paran con él); una herramienta de `[toolchain] require` ausente o más vieja que su mínimo; `core.hooksPath` sin fijar o distinto de `.githooks`; el plugin no instalado o Claude Code por debajo de 2.1.324; node ausente con hooks activos; `ANTHROPIC_API_KEY` exportada (la suscripción deja de usarse y cada token se cobra como uso de API, en silencio); una rama que no es la de integración, la de release ni una rama de issue; un `[command] secretScan` configurado cuyo escáner falta; un fichero de `[toolchain] envFile` ausente (solo presencia, nunca se lee).
-- **Aviso**: ningún escáner de secretos configurado, cambios sin commit, commits sin push, worktrees de ramas que no están en origin.
-- **Info**: lo que espera la release.
+- **FAIL**: a `trellis.config` key outside the schema, a command name without `[command "<name>"] run`, or a `trellis.config` that does not parse (the doctor reports it and goes on diagnosing; the other subcommands stop on it); a tool of `[toolchain] require` missing or older than its minimum; `core.hooksPath` unset or other than `.githooks`; the plugin not installed or Claude Code below 2.1.324; node missing with hooks active; `ANTHROPIC_API_KEY` exported (the subscription stops being used and every token is billed as API usage, silently); a branch that is not the integration branch, the release branch or an issue branch; a configured `[command] secretScan` whose scanner is missing; a file of `[toolchain] envFile` missing (presence only, it is never read).
+- **Warning**: no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
+- **Info**: what the release is waiting for.
 
-## Lo que el marco no hace, y por qué
+## What the framework does not do, and why
 
-- **Subagentes ejecutores que releen el repositorio.** Un subagente arranca sin el contexto de la sesión y lo reconstruye leyendo, lo que cuesta cupo cada vez. Base usa un solo subagente, `plan-reviewer`, porque un contexto limpio es justo lo que su comprobación necesita.
-- **Comentarios de estado en las issues.** El estado de un trabajo vive en su rama, sus commits y su pull request; un comentario de estado es una segunda copia que envejece.
-- **Reconciliación al iniciar sesión.** Releer todo el estado al arrancar paga en cada sesión lo que pocas necesitan. El estado se relee de su fuente cuando se usa.
-- **Rituales de cierre.** Un paso fijo al terminar se salta cuando no aporta. `retro` propone una lección solo cuando la hay, y una persona la aplica.
+- **Executor subagents that reread the repository.** A subagent starts without the session's context and rebuilds it by reading, which costs quota every time. Base uses a single subagent, `plan-reviewer`, because a clean context is exactly what its check needs.
+- **Status comments on issues.** The state of a piece of work lives in its branch, its commits and its pull request; a status comment is a second copy that goes stale.
+- **Reconciliation at session start.** Rereading all the state at startup pays in every session for what few of them need. State is reread from its source when it is used.
+- **Closing rituals.** A fixed step at the end gets skipped when it adds nothing. `retro` proposes a lesson only when there is one, and a person applies it.
 
-## Desarrollo
+## Development
 
 ```sh
 for t in lib/*.test.sh scripts/*.test.sh hooks/*.test.sh; do /bin/bash "$t" || break; done
 node --test hygiene/*.test.mjs
 ```
 
-Los scripts corren con bash 3.2 (el de macOS): sin `mapfile`, sin arrays asociativos, y los arrays vacíos con `set -u` se expanden con cuidado. El CI corre en ubuntu y macos, y en macos con `/bin/bash`.
+The scripts run with bash 3.2 (the macOS one): no `mapfile`, no associative arrays, and empty arrays under `set -u` are expanded with care. CI runs on ubuntu and macos, and on macos with `/bin/bash`.
 
-## Versión
+## Version
 
-`version` de `.claude-plugin/plugin.json` y un tag por versión. Un consumidor fija el sha, no el tag.
+`version` of `.claude-plugin/plugin.json` and a tag per version. A consumer pins the sha, not the tag.

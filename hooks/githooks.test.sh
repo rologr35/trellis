@@ -32,7 +32,7 @@ tl_has 'with what regresses' 'adds 1 suppression' "$(cat "$TL_TMP/out.txt")"
 printf 'void main() {}\n' > lib/main.dart && git add -A
 tl_eq 'the clean version passes' '0' "$(commit -m 'feat: main (#1)')"
 
-mkdir app && printf '# App\n\nLa app ya no usa la caché.\n' > app/CLAUDE.md && git add -A
+mkdir app && printf '# App\n\nThe app no longer uses the cache.\n' > app/CLAUDE.md && git add -A
 tl_eq 'a narrative line in a CLAUDE.md is refused by the hygiene' '1' "$(commit -m 'docs: app (#1)')"
 tl_has 'and named' 'narrates history' "$(cat "$TL_TMP/out.txt")"
 git rm -q --cached -r app && rm -rf app

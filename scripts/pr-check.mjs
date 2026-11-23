@@ -3,20 +3,17 @@
 
 import {readFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
+import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 
 const [, , mode, file, hasSetback, branchArg, loosened] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
 const config = loadConfig();
-const locale = config.get('project.locale') === 'en' ? 'en' : 'es';
 const tracker = config.get('tracker.kind');
-
-const SECTIONS = {
-  es: {required: ['Resumen', 'Verificación'], setback: 'Retroceso', none: /^nada\.?$/i},
-  en: {required: ['Summary', 'Verification'], setback: 'Setback', none: /^none\.?$/i},
-}[locale];
+const SECTIONS = PR_SECTIONS[localeOf(config)];
 
 const LONG_DASH = /[\u2014\u2013]/;
 const ATTRIBUTION = /co-authored-by:|generated with|claude\.ai\/code|\u{1F916}/iu;
+// The words a reference follows, the es ones included (Ver, depende de, parte de) for es bodies.
 const KEYWORD = /(?:^|[\s(])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|see|ver|issue|pr|pull request|depende de|parte de|part of)\s+$/i;
 
 const misses = [];
@@ -30,7 +27,7 @@ function style(text, what) {
       const before = line.slice(0, m.index);
       const parenthesized = before.endsWith('(') && line.slice(m.index + m[0].length).startsWith(')');
       if (!parenthesized && !KEYWORD.test(before)) {
-        misses.push(`${what}: bare ${m[0]} that GitHub links to an issue ("${line.trim()}"); write it after Closes/Refs/Ver, or in backticks`);
+        misses.push(`${what}: bare ${m[0]} that GitHub links to an issue ("${line.trim()}"); write it after Closes/Refs/See, or in backticks`);
       }
     }
   }

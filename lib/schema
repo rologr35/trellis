@@ -9,7 +9,7 @@
 # everything that reads the config through `trellis config`.
 
 project.name|single|
-project.locale|single|es
+project.locale|single|en
 
 trellis.upstream|single|rologr35/trellis
 

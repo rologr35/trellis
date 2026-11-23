@@ -8,8 +8,9 @@
 //
 // What is checked:
 //   - the instruction files (root and nested CLAUDE.md, rules, agents, skills, TESTING.md) describe
-//     the present: no phrase that narrates what the code used to be (es, en), and no tracker
-//     reference unless [hygiene] keepRef lists it with its reason;
+//     the present: no phrase that narrates what the code used to be (the en list, and the es one
+//     too when project.locale is es), and no tracker reference unless [hygiene] keepRef lists it
+//     with its reason;
 //   - every `paths:` glob of a rule matches a file; a file a rule names (extensions of
 //     [hygiene] namedExt, by default those of workspace.kind) loads that rule, unless
 //     [hygiene] namedElsewhere lists it; a rule does not load what [hygiene] mustNotLoad lists;
@@ -41,29 +42,41 @@ import {
   rulePaths,
 } from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
+import {localeOf} from '../lib/locale.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
 export const AGENT_LIMIT_BYTES = 4 * 1024;
 export const FROZEN_SLACK = 1.02;
 
-/** Phrases that narrate what the code used to be instead of what it is. */
-export const NARRATIVE = [
-  /\bused to\b/iu,
-  /\bthe old\s/iu,
-  /\bretired with\b/iu,
-  /\bwas replaced\b/iu,
-  /\bno longer\b/iu,
-  /\bany ?more\b/iu,
-  /\b(?:is|are) gone\b/iu,
-  /\b(?:since|before|until) #\d/iu,
-  /(?<![\p{L}])ya no(?![\p{L}])/iu,
-  /(?<![\p{L}])sol[ií]a(?:n)?(?![\p{L}])/iu,
-  /(?<![\p{L}])antes (?:era|eran|se|hab[ií]a|estaba|usaba)(?![\p{L}])/iu,
-  /(?<![\p{L}])(?:se reemplaz[oó]|fue reemplazad[oa]|fueron reemplazad[oa]s)(?![\p{L}])/iu,
-  /(?<![\p{L}])dej[oó] de(?![\p{L}])/iu,
-  /(?<![\p{L}])(?:desde|hasta|a partir de) #\d/iu,
-  /(?<![\p{L}])(?:anteriormente|en su momento)(?![\p{L}])/iu,
-];
+/**
+ * Phrases that narrate what the code used to be instead of what it is, per locale. A project is
+ * checked with the list of its project.locale and always with the en one, because code comments
+ * are English.
+ */
+export const NARRATIVE = {
+  en: [
+    /\bused to\b/iu,
+    /\bthe old\s/iu,
+    /\bretired with\b/iu,
+    /\bwas replaced\b/iu,
+    /\bno longer\b/iu,
+    /\bany ?more\b/iu,
+    /\b(?:is|are) gone\b/iu,
+    /\b(?:since|before|until) #\d/iu,
+  ],
+  es: [
+    /(?<![\p{L}])ya no(?![\p{L}])/iu,
+    /(?<![\p{L}])sol[ií]a(?:n)?(?![\p{L}])/iu,
+    /(?<![\p{L}])antes (?:era|eran|se|hab[ií]a|estaba|usaba)(?![\p{L}])/iu,
+    /(?<![\p{L}])(?:se reemplaz[oó]|fue reemplazad[oa]|fueron reemplazad[oa]s)(?![\p{L}])/iu,
+    /(?<![\p{L}])dej[oó] de(?![\p{L}])/iu,
+    /(?<![\p{L}])(?:desde|hasta|a partir de) #\d/iu,
+    /(?<![\p{L}])(?:anteriormente|en su momento)(?![\p{L}])/iu,
+  ],
+};
+
+/** The narrative phrases a project of this locale is checked with. */
+export const narrativeFor = locale => (locale === 'en' ? NARRATIVE.en : [...NARRATIVE.en, ...NARRATIVE[locale]]);
 
 /** A tracker reference, not an HTML entity, a path or a color. */
 export const TRACKER_REF = /(?<![\w&/])#\d+\b/gu;
@@ -120,10 +133,11 @@ export function hygiene(root, {staged = false} = {}) {
 
   // The present tense, and no tracker references.
   const keepRef = allowlist(config.all('hygiene.keepRef'));
+  const narrative = narrativeFor(localeOf(config));
   for (const file of instructions) {
     const text = tree.read(file);
     text.split('\n').forEach((line, i) => {
-      for (const phrase of NARRATIVE) {
+      for (const phrase of narrative) {
         if (phrase.test(line)) fail(file, `line ${i + 1} narrates history (${phrase.source}): rewrite the paragraph to its current state; the history stays in the commit`);
       }
     });

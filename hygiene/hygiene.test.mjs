@@ -85,25 +85,32 @@ const passes = (p, ...args) => {
 test('the project /trellis:init leaves passes', () => {
   const p = project();
   passes(p);
-  assert.match(p.read('CLAUDE.md'), /## Método de trabajo/);
+  assert.match(p.read('CLAUDE.md'), /## Working method/);
+  assert.doesNotMatch(p.read('CLAUDE.md'), /<!-- p:/);
 });
 
 test('the root template with the method block passes and fits its limit', () => {
   const p = project();
-  p.write('CLAUDE.md', readFileSync(path.join(TRELLIS_ROOT, 'templates', 'CLAUDE.root.md'), 'utf8'));
+  p.write('CLAUDE.md', readFileSync(path.join(TRELLIS_ROOT, 'templates', 'en', 'CLAUDE.root.md'), 'utf8'));
   p.trellis('sync');
   passes(p);
 });
 
-test('narrative in Spanish fails', () => {
+test('narrative in Spanish fails in an es project and passes in an en one', () => {
   const p = project();
   p.write('app/CLAUDE.md', '# App\n\nEl servicio ya no usa la caché.\n');
+  passes(p);
+  p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
+  p.trellis('sync');
   fails(p, 'app/CLAUDE.md: line 3 narrates history');
 });
 
-test('narrative in English fails', () => {
+test('narrative in English fails in an en project and in an es one', () => {
   const p = project();
   p.write('.claude/rules/app.md', `${p.read('.claude/rules/app.md')}\nThe cache is no longer used.\n`);
+  fails(p, '.claude/rules/app.md: line 10 narrates history');
+  p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
+  p.trellis('sync');
   fails(p, '.claude/rules/app.md: line 10 narrates history');
 });
 

@@ -1,6 +1,6 @@
 # The project's call to the plugin's consumer check, pinned to the same sha as the marketplace of
-# .claude/settings.json. `edited` reruns it when the body changes, so a **Retroceso** added later
-# is read.
+# .claude/settings.json. `edited` reruns it when the body changes, so a **Setback** (es: **Retroceso**)
+# added later is read.
 name: trellis
 
 on:
