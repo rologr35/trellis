@@ -29,9 +29,11 @@
 # `cd <dir>` or `git -C <dir>`, through lib/config.sh. The directory is expanded without running
 # anything: quotes (a path with a space), `~`, `~/x`, and `$NAME` / `${NAME}` for HOME and for the
 # variables the command assigns literally (`REPO=/x; cd $REPO`). A directory that needs the shell
-# (`~user`, `cd -`, `$(pwd)`, a backtick, a variable set elsewhere) is the session's own: the
-# config of the session's repository judges the command, and with none there is no opinion. Works
-# with bash 3.2.
+# (`~user`, `cd -`, `$(pwd)`, a backtick, a variable set elsewhere, an empty or unset HOME) is the
+# session's own: the config of the session's repository judges the command, and with none there is
+# no opinion. A variable is unresolved, never stale, when its assignment may not run or last (after
+# && || or a pipe, or on the left of one) or the resolver cannot follow it (`NAME+=`, a value from a
+# command, read, printf -v, for, export, declare, local, typeset, readonly, unset). Works with bash 3.2.
 
 set -uo pipefail
 
@@ -210,19 +212,55 @@ guard_gh_merge() {
 
 # The words of every segment (a line of stdin) as the shell reads them, without running anything:
 # single and double quotes group and are removed ("main" and 'HEAD:main' are main), a backslash
-# escapes the next character (between double quotes, only $ ` " and \). One record per line: "w" and
-# the word, "e" at the end of a segment. In node because bash 3.2 takes quadratic time over a long line.
+# escapes the next character (between double quotes, only $ ` " and \), and $'...' is ANSI-C
+# quoting, where a backslash escapes any character and \xHH, \nnn and \uHHHH spell one. A line that
+# ends with a quote still open is judged by every word whitespace splits it into, which fails closed.
+# A line that starts with \001 follows && or || (it may not run), with \002 follows a pipe (it runs in
+# a subshell, as does the line before it). One record per line: "c" (may not run), "w" and the word,
+# "p" (the segment is the left side of a pipe), "e" at the end of a segment. In node because bash 3.2
+# takes quadratic time over a long line.
 split_segments() {
   node -e '
+    const ESC = {a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "\\": "\\", "\x27": "\x27", "\"": "\"", "?": "?"};
+    // The escape at line[i] === "\\" inside $x27...x27, and the index of its last character.
+    const ansi = (line, i) => {
+      const next = line[i + 1];
+      if (next === undefined) return ["\\", i];
+      let m;
+      if ((m = /^[0-7]{1,3}/.exec(line.slice(i + 1)))) return [String.fromCharCode(parseInt(m[0], 8) & 255), i + m[0].length];
+      if ((m = /^x[0-9a-fA-F]{1,2}/.exec(line.slice(i + 1)))) return [String.fromCharCode(parseInt(m[0].slice(1), 16)), i + m[0].length];
+      if ((m = /^u[0-9a-fA-F]{1,4}/.exec(line.slice(i + 1))) || (m = /^U[0-9a-fA-F]{1,8}/.exec(line.slice(i + 1)))) {
+        const point = parseInt(m[0].slice(1), 16);
+        return [point <= 0x10ffff ? String.fromCodePoint(point) : "", i + m[0].length];
+      }
+      if (next === "c" && line[i + 2] !== undefined) return [String.fromCharCode(line.charCodeAt(i + 2) & 31), i + 2];
+      if (next in ESC) return [ESC[next], i + 1];
+      return ["\\" + next, i + 1];
+    };
+    const lines = require("fs").readFileSync(0, "utf8").split("\n").map(raw => {
+      const mark = raw[0] === "\x01" || raw[0] === "\x02" ? raw[0] : "";
+      return {mark, text: mark ? raw.slice(1) : raw};
+    });
     const out = [];
-    for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
+    lines.forEach(({mark, text: line}, n) => {
+      const words = [];
       let cur = "", have = false, quote = "";
       for (let i = 0; i < line.length; i++) {
         const c = line[i];
-        if (quote) {
-          if (c === quote) quote = "";
-          else if (c === "\\" && quote === "\"" && "$`\"\\".includes(line[i + 1] || " ")) cur += line[++i];
+        if (quote === "\x27") {
+          if (c === "\x27") quote = ""; else cur += c;
+        } else if (quote === "\x27$") {
+          if (c === "\x27") quote = "";
+          else if (c === "\\") { const [text, end] = ansi(line, i); cur += text; i = end; }
           else cur += c;
+        } else if (quote === "\"") {
+          if (c === "\"") quote = "";
+          else if (c === "\\" && "$`\"\\".includes(line[i + 1] || " ")) cur += line[++i];
+          else cur += c;
+        } else if (c === "$" && line[i + 1] === "\x27") {
+          quote = "\x27$";
+          have = true;
+          i++;
         } else if (c === "\"" || c === "\x27") {
           quote = c;
           have = true;
@@ -230,7 +268,7 @@ split_segments() {
           cur += line[++i] || "";
           have = true;
         } else if (c === " " || c === "\t") {
-          if (have) out.push("w" + cur);
+          if (have) words.push(cur);
           cur = "";
           have = false;
         } else {
@@ -238,20 +276,35 @@ split_segments() {
           have = true;
         }
       }
-      if (have) out.push("w" + cur);
+      if (quote) {
+        words.length = 0;
+        for (const w of line.split(/[ \t]+/)) if (w) words.push(w.replace(/[\x27"\\]/g, ""));
+      } else if (have) {
+        words.push(cur);
+      }
+      if (mark) out.push("c");
+      for (const w of words) out.push("w" + w);
+      if (lines[n + 1] && lines[n + 1].mark === "\x02") out.push("p");
       out.push("e");
-    }
+    });
     process.stdout.write(out.join("\n") + "\n");
   '
 }
 
-# The words of the next segment, from file descriptor 3, in `words`.
+# The words of the next segment, from file descriptor 3, in `words`, and whether the segment may not
+# run (after && or ||, or after a pipe) or runs in a pipe's subshell (MAY_NOT_RUN, PIPED).
 next_segment() {
   local record
   words=()
+  MAY_NOT_RUN=false
+  PIPED=false
   while IFS= read -r record <&3; do
-    [ "$record" = 'e' ] && return 0
-    words+=("${record#w}")
+    case "$record" in
+      e) return 0 ;;
+      c) MAY_NOT_RUN=true ;;
+      p) PIPED=true ;;
+      *) words+=("${record#w}") ;;
+    esac
   done
   return 1
 }
@@ -260,8 +313,31 @@ next_segment() {
 # that needs the shell to run something is not recorded, so the name stays unresolved.
 record_assignment() {
   local name="${1%%=*}" value="${1#*=}"
-  if expand_word "$value"; then printf -v "GV_$name" '%s' "$EXPANDED"; else unset "GV_$name"; fi
+  if expand_word "$value"; then printf -v "GV_$name" '%s' "$EXPANDED"; else forget "$name"; fi
 }
+
+# The name holds no known value for the rest of the command: a use of it is unresolved. HOME too: the
+# shell's ~ follows it, so once it is touched the process's HOME is no longer the shell's.
+forget() {
+  [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 0
+  unset "GV_$1"
+  [ "$1" = 'HOME' ] && HOME_TOUCHED=true
+  return 0
+}
+
+# HOME as the shell has it, in HV. Status 1 when it is empty, unset, or was changed in a way the
+# resolver could not follow: `~` is then unresolved, never a guess.
+home_value() {
+  if [ -n "${GV_HOME+x}" ]; then
+    HV="$GV_HOME"
+  elif [ "$HOME_TOUCHED" = true ]; then
+    return 1
+  else
+    HV="${HOME:-}"
+  fi
+  [ -n "$HV" ]
+}
+HOME_TOUCHED=false
 
 # The word with `~`, `~/x`, `$NAME` and `${NAME}` expanded from what the command assigned (and
 # HOME), in EXPANDED. Status 1 when it needs the shell: `~user`, `-`, an unknown variable, `$(...)`,
@@ -272,8 +348,8 @@ expand_word() {
   [ "$w" = '-' ] && return 1
   case "$w" in *'`'*) return 1 ;; esac
   case "$w" in
-    '~') w="$HOME" ;;
-    '~/'*) w="$HOME/${w#\~/}" ;;
+    '~') home_value || return 1; w="$HV" ;;
+    '~/'*) home_value || return 1; w="$HV/${w#\~/}" ;;
     '~'*) return 1 ;;
   esac
   while [[ "$w" == *'$'* ]]; do
@@ -285,8 +361,8 @@ expand_word() {
       ref="GV_$name"
       if [ -n "${!ref+x}" ]; then
         out="$out${!ref}"
-      elif [ "$name" = 'HOME' ]; then
-        out="$out$HOME"
+      elif [ "$name" = 'HOME' ] && home_value; then
+        out="$out$HV"
       else
         return 1
       fi
@@ -312,9 +388,10 @@ move_to() {
 }
 
 # One tool call can chain several commands; every segment is judged on its own.
-CHAINED="${COMMAND//&&/$'\n'}"
-CHAINED="${CHAINED//||/$'\n'}"
-CHAINED="${CHAINED//|/$'\n'}"
+CHAINED="${COMMAND//&&/$'\n\001'}"
+CHAINED="${CHAINED//||/$'\n\001'}"
+CHAINED="${CHAINED// & /$'\n\001'}"
+CHAINED="${CHAINED//|/$'\n\002'}"
 CHAINED="${CHAINED//;/$'\n'}"
 # Where the shell stands; DIR is where one segment runs, which its own `git -C` moves.
 SHELL_DIR="$CWD"
@@ -323,23 +400,46 @@ while next_segment; do
   DIR="$SHELL_DIR"
   count=${#words[@]}
   i=0
-  while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+  while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*\+?= ]]; do
     i=$((i + 1))
   done
-  # A segment of assignments alone sets them for the next ones (`export` too); in front of a command
-  # they belong to that command only.
-  first=-1
-  if [ "$i" -eq "$count" ]; then
-    first=0
-  elif [ "${words[i]}" = 'export' ]; then
-    first=$((i + 1))
-  fi
-  if [ "$first" -ge 0 ]; then
-    k=$first
-    while [ "$k" -lt "$count" ]; do
-      [[ "${words[k]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && record_assignment "${words[k]}"
-      k=$((k + 1))
-    done
+  # Assignments alone set the variable for the next segments, when the segment runs and lasts. In
+  # front of a command they belong to that command only. Whatever else the resolver cannot follow
+  # (`NAME+=`, a value from a command, a segment after && || or a pipe, read, printf -v, for,
+  # declare and its kin) leaves the name unresolved, never holding an old value.
+  k=0
+  while [ "$k" -lt "$i" ]; do
+    name="${words[k]%%=*}"
+    if [[ "$name" == *+ ]]; then
+      forget "${name%+}"
+    elif [ "$i" -eq "$count" ] && [ "$MAY_NOT_RUN" = false ] && [ "$PIPED" = false ]; then
+      record_assignment "${words[k]}"
+    elif [ "$i" -eq "$count" ] || ! expand_word "${words[k]#*=}"; then
+      forget "$name"
+    fi
+    k=$((k + 1))
+  done
+  if [ "$i" -lt "$count" ]; then
+    case "${words[i]}" in
+      export | declare | local | typeset | readonly | unset | read)
+        k=$((i + 1))
+        while [ "$k" -lt "$count" ]; do
+          name="${words[k]%%=*}"
+          [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && forget "$name"
+          k=$((k + 1))
+        done
+        ;;
+      for | select)
+        [ $((i + 1)) -lt "$count" ] && forget "${words[i + 1]}"
+        ;;
+      printf)
+        k=$((i + 1))
+        while [ "$k" -lt "$count" ]; do
+          [ "${words[k]}" = '-v' ] && [ $((k + 1)) -lt "$count" ] && forget "${words[k + 1]}"
+          k=$((k + 1))
+        done
+        ;;
+    esac
   fi
   [ "$i" -lt "$count" ] || continue
 

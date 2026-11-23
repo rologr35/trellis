@@ -85,7 +85,6 @@ tl_eq 'a variable assigned in the same command' 'deny' "$(verdict "REPO=$repo; c
 tl_eq 'a variable in -C, braced and quoted' 'deny' "$(verdict "R=$repo && git -C \"\${R}\" push origin main" "$plain")"
 tl_eq 'a variable with a quoted literal value' 'deny' "$(verdict "REPO='$repo'; cd \"\$REPO\" && git push origin main" "$plain")"
 tl_eq 'a variable built from an earlier one' 'deny' "$(verdict "BASE=$TL_TMP; REPO=\$BASE/$(basename "$repo"); cd \$REPO && git push origin main" "$plain")"
-tl_eq 'export of a variable' 'deny' "$(verdict "export REPO=$repo; cd \$REPO && git push origin main" "$plain")"
 tl_eq '~ in cd' 'deny' "$(HOME="$home" verdict 'cd ~/proj && git push origin main' "$plain")"
 tl_eq '~ in -C' 'deny' "$(HOME="$home" verdict 'git -C ~/proj push origin main' "$plain")"
 tl_eq 'a quoted path with a space in cd' 'deny' "$(verdict "cd \"$spaced/proj\" && git push origin main" "$plain")"
@@ -111,7 +110,40 @@ started=$SECONDS
 tl_eq 'a push after a long line' 'deny' "$(verdict "gh issue create --body \"$long\" && git push origin main")"
 tl_eq 'a long line is split in linear time' 'fast' "$([ $((SECONDS - started)) -le 10 ] && echo fast || echo slow)"
 
+printf '\nthe expansion does not trust what may not have run (#21)\n'
+wtb="$TL_TMP/on-issue-branch"
+tl_eq 'ANSI-C quoting: an escaped quote does not swallow the refspec' 'deny' "$(verdict "git push -o \$'x\\'y' origin main" "$wtb")"
+tl_eq 'ANSI-C quoting: a hex escape spells main' 'deny' "$(verdict "git push origin \$'\\x6dain'" "$wtb")"
+tl_eq 'ANSI-C quoting: an octal escape spells main' 'deny' "$(verdict "git push origin \$'\\155ain'" "$wtb")"
+tl_eq 'ANSI-C quoting: an issue branch passes' 'allow' "$(verdict "git push -o \$'x\\'y' origin 21-x" "$wtb")"
+tl_eq 'a quote left open: every word is judged' 'deny' "$(verdict "git push -o 'x origin main" "$wtb")"
+tl_eq 'a double quote left open: every word is judged' 'deny' "$(verdict 'git push -o "x origin main' "$wtb")"
+# The variable held the repository, and the command may have set it to a directory without config.
+for assign in "true || X=$plain" "false && X=$plain" "echo | X=$plain" "X=$plain | cat" "export X=$plain"; do
+  tl_eq "a variable assigned where it may not run or last is unresolved: ${assign//$plain/PLAIN}" 'deny' "$(verdict "X=$repo; $assign; cd \"\$X\"; git push origin main" "$wtb")"
+done
+# The variable held a directory without config, and the command may have set it to the repository.
+for assign in "X=\$(echo $repo)" "X=\`echo $repo\`" 'X+=/sub' 'read -r X' "printf -v X %s $repo" "for X in $repo; do :; done" "declare X=$repo" "local X=$repo" "typeset X=$repo" "readonly X=$repo"; do
+  tl_eq "a variable the resolver cannot follow is unresolved: ${assign//$repo/REPO}" 'deny' "$(verdict "X=$plain; $assign; cd \"\$X\"; git push origin main" "$wtb")"
+done
+tl_eq 'a reassignment that did not run still falls back, to an issue branch push' 'allow' "$(verdict "X=$repo; true || X=$plain; cd \"\$X\"; git push origin 21-x" "$wtb")"
+tl_eq 'a plain reassignment is still read' 'deny' "$(verdict "X=$plain; X=$repo; cd \"\$X\"; git push origin main" "$plain")"
+tl_eq 'export makes the variable unresolved: a bare session has no opinion' 'allow' "$(verdict "export REPO=$repo; cd \$REPO && git push origin main" "$plain")"
+tl_eq 'and the session repository judges it' 'deny' "$(verdict "export REPO=$repo; cd \$REPO && git push origin main" "$wtb")"
+tl_eq 'HOME unset: ~ falls back to the session repository' 'deny' "$(unset HOME; verdict 'cd ~/x && git push origin main' "$wtb")"
+tl_eq 'HOME unset: $HOME falls back too' 'deny' "$(unset HOME; verdict 'git -C $HOME/x push origin main' "$wtb")"
+tl_eq 'HOME unset: ${HOME} falls back too' 'deny' "$(unset HOME; verdict 'git -C ${HOME}/x push origin main' "$wtb")"
+tl_eq 'HOME empty: ~ is unresolved, not /x' 'deny' "$(HOME= verdict 'cd ~/x && git push origin main' "$wtb")"
+tl_eq 'HOME empty: $HOME is unresolved too' 'deny' "$(HOME= verdict 'cd $HOME/x && git push origin main' "$wtb")"
+tl_eq 'HOME unset: a push of an issue branch passes' 'allow' "$(unset HOME; verdict 'cd ~/x && git push origin 21-x' "$wtb")"
+rm -f "$TL_TMP/canary"
+verdict "cd \"\$(touch $TL_TMP/canary)/x\" && git push origin main" "$wtb" > /dev/null
+verdict "X=\$(touch $TL_TMP/canary); git -C \"\$X\" push origin main" "$wtb" > /dev/null
+verdict "git -C \`touch $TL_TMP/canary\` push origin main" "$wtb" > /dev/null
+tl_eq 'a command substitution inside a path is never run' 'absent' "$([ -e "$TL_TMP/canary" ] && echo ran || echo absent)"
+
 printf '\nbranch switch on the main checkout\n'
+
 
 tl_eq 'to an issue branch' 'deny' "$(verdict 'git switch -c 4-thing')"
 tl_eq 'checkout -b to an issue branch' 'deny' "$(verdict 'git checkout -b 4-thing origin/develop')"
