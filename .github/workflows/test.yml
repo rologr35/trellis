@@ -29,3 +29,5 @@ jobs:
             echo "::endgroup::"
           done
           exit $status
+      - name: hygiene tests
+        run: node --test hygiene/*.test.mjs

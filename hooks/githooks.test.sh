@@ -32,6 +32,11 @@ tl_has 'with what regresses' 'adds 1 suppression' "$(cat "$TL_TMP/out.txt")"
 printf 'void main() {}\n' > lib/main.dart && git add -A
 tl_eq 'the clean version passes' '0' "$(commit -m 'feat: main (#1)')"
 
+mkdir app && printf '# App\n\nLa app ya no usa la caché.\n' > app/CLAUDE.md && git add -A
+tl_eq 'a narrative line in a CLAUDE.md is refused by the hygiene' '1' "$(commit -m 'docs: app (#1)')"
+tl_has 'and named' 'narrates history' "$(cat "$TL_TMP/out.txt")"
+git rm -q --cached -r app && rm -rf app
+
 printf '\ncommit-msg\n'
 printf 'x\n' > a.txt && git add -A
 tl_eq 'an AI attribution is refused' '1' "$(commit -m 'feat: a (#1)' -m 'Co-Authored-By: Claude <noreply@anthropic.com>')"
