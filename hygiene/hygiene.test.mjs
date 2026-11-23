@@ -2,7 +2,7 @@
 // way /trellis:init leaves it (templates filled, `trellis sync` run, sizes frozen).
 
 import {execFileSync, spawnSync} from 'node:child_process';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {after, test} from 'node:test';
@@ -83,7 +83,16 @@ const passes = (p, ...args) => {
 };
 
 test('the project /trellis:init leaves passes', () => {
-  passes(project());
+  const p = project();
+  passes(p);
+  assert.match(p.read('CLAUDE.md'), /## Método de trabajo/);
+});
+
+test('the root template with the method block passes and fits its limit', () => {
+  const p = project();
+  p.write('CLAUDE.md', readFileSync(path.join(TRELLIS_ROOT, 'templates', 'CLAUDE.root.md'), 'utf8'));
+  p.trellis('sync');
+  passes(p);
 });
 
 test('narrative in Spanish fails', () => {
@@ -190,7 +199,7 @@ test('a generated block that drifted from its source fails', () => {
   passes(p);
 });
 
-test('a root without the method block fails', {skip: !existsSync(path.join(TRELLIS_ROOT, 'method', 'base.md')) && 'method/base.md not written yet'}, () => {
+test('a root without the method block fails', () => {
   const p = project();
   p.write('CLAUDE.md', p.read('CLAUDE.md').replace(/<!-- trellis:method -->[\s\S]*<!-- \/trellis:method -->/, ''));
   fails(p, 'has no <!-- trellis:method --> block');
