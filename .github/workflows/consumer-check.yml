@@ -67,16 +67,9 @@ jobs:
           else
             bash "$TRELLIS" ratchet --base "origin/$BASE"
           fi
+      # gitleaks is installed at a pinned version and checksum; another scanner by its ciInstall.
       - name: secret scan
-        run: |
-          name="$(bash "$TRELLIS" config get command.secretScan)"
-          if [ -z "$name" ]; then
-            echo 'no [command] secretScan configured'
-            exit 0
-          fi
-          run="$(bash "$TRELLIS" config get "command.$name.ci")"
-          [ -n "$run" ] || run="$(bash "$TRELLIS" config get "command.$name.run")"
-          bash -c "$run"
+        run: bash "$RUNNER_TEMP/trellis/scripts/secret-scan-ci.sh"
 
   # A pull request whose head is a protected branch is closed: with branches deleted on merge, its
   # merge would delete that branch.
