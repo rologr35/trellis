@@ -33,6 +33,7 @@ command.secretScan|single|
 command.install|single|
 command.*.run|single|
 command.*.description|single|
+command.*.ci|single|
 
 rung.*.command|single|
 rung.*.agent|single|true

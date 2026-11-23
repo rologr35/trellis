@@ -17,11 +17,17 @@
 
 set -uo pipefail
 
-TRELLIS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolved through symlinks: a person may link this file into a folder of their PATH.
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,13p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 

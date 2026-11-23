@@ -1,0 +1,104 @@
+# The barrier of a trellis project, where the GitHub plan allows requiring checks: a reusable
+# workflow the project calls on every pull request, the ones that only touch .md included.
+#
+#   jobs:
+#     trellis:
+#       uses: rologr35/trellis/.github/workflows/consumer-check.yml@<sha>
+#       with:
+#         trellis-ref: <the same sha>
+#
+# The plugin is cloned at that sha outside the workspace, so the project's hygiene never sees it.
+# The ratchet compares HEAD with the pull request's base over the full history (fetch-depth 0): a
+# shallow clone gives false results. It runs with --allow-loosen only when the body carries a valid
+# **Retroceso**, so an accepted setback is written where the person reviews it.
+
+name: trellis consumer check
+
+on:
+  workflow_call:
+    inputs:
+      trellis-ref:
+        description: The full sha of the plugin the project pins.
+        required: true
+        type: string
+      trellis-repo:
+        description: The plugin repository.
+        required: false
+        type: string
+        default: rologr35/trellis
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: plugin at the pinned sha
+        env:
+          REPO: ${{ inputs.trellis-repo }}
+          REF: ${{ inputs.trellis-ref }}
+        run: |
+          git clone -q "https://github.com/$REPO.git" "$RUNNER_TEMP/trellis"
+          git -C "$RUNNER_TEMP/trellis" checkout -q "$REF"
+          echo "TRELLIS=$RUNNER_TEMP/trellis/bin/trellis" >> "$GITHUB_ENV"
+      - name: pull request body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+      - name: hygiene
+        run: bash "$TRELLIS" hygiene
+      - name: pr-check
+        run: bash "$TRELLIS" pr-check --body "$RUNNER_TEMP/pr-body.md"
+      - name: ratchet
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if bash "$TRELLIS" pr-check --has-setback --body "$RUNNER_TEMP/pr-body.md"; then
+            bash "$TRELLIS" ratchet --base "origin/$BASE" --allow-loosen
+          else
+            bash "$TRELLIS" ratchet --base "origin/$BASE"
+          fi
+      - name: secret scan
+        run: |
+          name="$(bash "$TRELLIS" config get command.secretScan)"
+          if [ -z "$name" ]; then
+            echo 'no [command] secretScan configured'
+            exit 0
+          fi
+          run="$(bash "$TRELLIS" config get "command.$name.ci")"
+          [ -n "$run" ] || run="$(bash "$TRELLIS" config get "command.$name.run")"
+          bash -c "$run"
+
+  # A pull request whose head is a protected branch is closed: with branches deleted on merge, its
+  # merge would delete that branch.
+  protected-head:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: plugin at the pinned sha
+        env:
+          REPO: ${{ inputs.trellis-repo }}
+          REF: ${{ inputs.trellis-ref }}
+        run: |
+          git clone -q "https://github.com/$REPO.git" "$RUNNER_TEMP/trellis"
+          git -C "$RUNNER_TEMP/trellis" checkout -q "$REF"
+      - name: close when the head is protected
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if bash "$RUNNER_TEMP/trellis/bin/trellis" config all git.protected | grep -qxF "$HEAD_REF"; then
+            gh pr close "$NUMBER" --repo "$GITHUB_REPOSITORY" --comment "The head of this pull request is $HEAD_REF, a protected branch: merging it with branch deletion on would delete $HEAD_REF. Open it from an issue branch."
+            exit 1
+          fi
