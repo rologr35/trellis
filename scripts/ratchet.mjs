@@ -58,20 +58,18 @@ const configAt = (text, name, label) => {
     return error;
   }
 };
-// The config after the change fails closed when it does not parse; one that did not parse before
-// is replaced by the change's own, so the change that repairs it can pass.
-let configWas = before('trellis.config');
+// The config after the change fails closed when it does not parse. One that did not parse before
+// is judged as the schema's defaults (a file that does not exist), never as the change's own
+// config: the change that repairs it passes only if it loosens nothing against the defaults.
+const configWas = before('trellis.config');
 const newConfig = configAt(after('trellis.config'), 'after.config', `trellis.config (${afterRev ? afterRev : 'staged'})`);
 let oldConfig = configAt(configWas, 'before.config', `trellis.config (${beforeRev})`);
-rmSync(scratch, {recursive: true, force: true});
 if (newConfig instanceof Error) {
   console.error(newConfig.message);
   process.exit(3);
 }
-if (oldConfig instanceof Error) {
-  configWas = null;
-  oldConfig = newConfig;
-}
+if (oldConfig instanceof Error) oldConfig = loadConfig({file: path.join(scratch, 'absent.config')});
+rmSync(scratch, {recursive: true, force: true});
 // The policy is the one in force before the change, so a change cannot exempt itself.
 const policy = configWas === null ? newConfig : oldConfig;
 

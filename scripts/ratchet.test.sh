@@ -112,6 +112,15 @@ reset
 cp "$TL_TMP/broken.config" trellis.config && git add trellis.config && git commit -q --no-verify -m 'chore: broken (#7)'
 cp "$TL_TMP/good.config" trellis.config && git add trellis.config
 tl_eq 'the commit that repairs it passes' '0' "$(judge)"
+git config -f trellis.config hygiene.rootLimit 999999 && git add trellis.config
+tl_eq 'a repair that raises a limit over the default is refused' '1' "$(judge)"
+cp "$TL_TMP/good.config" trellis.config
+git config -f trellis.config ratchets.suppression nothing
+printf '// ignore: x\n' >> lib/main.dart && git add -A
+tl_eq 'a repair that replaces the suppressions and adds one is refused' '1' "$(judge)"
+tl_has 'by the default suppressions' 'adds 1 suppression' "$(cat "$OUT")"
+git checkout -q HEAD -- lib/main.dart
+cp "$TL_TMP/good.config" trellis.config && git add -A
 git commit -q --no-verify -m 'chore: repaired (#7)'
 
 printf '\nescape, merge and base\n'

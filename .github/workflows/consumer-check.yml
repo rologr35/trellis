@@ -90,8 +90,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          if bash "$RUNNER_TEMP/trellis/bin/trellis" config all git.protected | grep -qxF "$HEAD_REF"; then
-            gh pr close "$NUMBER" --repo "$GITHUB_REPOSITORY" --comment "The head of this pull request is $HEAD_REF, a protected branch: merging it with branch deletion on would delete $HEAD_REF. Open it from an issue branch."
-            exit 1
-          fi
+        run: bash "$RUNNER_TEMP/trellis/scripts/protected-head-ci.sh"
