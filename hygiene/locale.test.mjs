@@ -114,3 +114,18 @@ test('the templates of every locale are the same files with the same blocks and 
     assert.deepEqual(configLines(template(locale, 'trellis.config')), configLines(template(first, 'trellis.config')), `${locale}/trellis.config has the keys of ${first}`);
   }
 });
+
+test('the plan-reviewer takes its report labels from one table, with a row per locale', () => {
+  const agent = readFileSync(path.join(TRELLIS_ROOT, 'agents', 'plan-reviewer.md'), 'utf8');
+  const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
+  assert.deepEqual(rows.map(row => row[0]), LOCALES, 'one row per locale, in the order of LOCALES');
+  const expected = {
+    en: ['Verdict', 'Errors', 'Omissions', 'Not established', 'correct', 'with errors'],
+    es: ['Veredicto', 'Errores', 'Omisiones', 'No establecido', 'correcto', 'con errores'],
+  };
+  for (const row of rows) assert.deepEqual(row.slice(1), expected[row[0]], `labels of ${row[0]}`);
+  const outside = agent.split('\n').filter(line => !line.startsWith('|')).join('\n');
+  for (const word of ['Verdict', 'Errors', 'Omissions', 'Not established']) {
+    assert.ok(!outside.includes(`**${word}**`), `the label ${word} is written only in the table`);
+  }
+});
