@@ -51,11 +51,38 @@ tl_eq 'push of an issue branch' 'allow' "$(verdict 'git push origin 4-thing')"
 tl_eq 'protected names come from the config' 'allow' "$(verdict 'git push origin staging')"
 git config -f trellis.config --add git.protected staging
 tl_eq 'and follow it' 'deny' "$(verdict 'git push origin staging')"
+tl_eq 'a double-quoted refspec' 'deny' "$(verdict 'git push origin "main"')"
+tl_eq 'a single-quoted HEAD:main' 'deny' "$(verdict "git push origin 'HEAD:main'")"
+tl_eq '@ on develop' 'deny' "$(verdict 'git push origin @')"
+tl_eq '@:main' 'deny' "$(verdict 'git push origin @:main')"
+tl_eq 'HEAD on develop' 'deny' "$(verdict 'git push -u origin HEAD')"
+tl_eq 'a remote without refspec on develop' 'deny' "$(verdict 'git push origin')"
+git switch -q -c 9-up
+git config branch.9-up.remote origin
+git config branch.9-up.merge refs/heads/main
+tl_eq 'a bare push whose upstream is protected' 'deny' "$(verdict 'git push')"
+git config --unset branch.9-up.merge
+tl_eq 'a bare push of an issue branch without upstream' 'allow' "$(verdict 'git push')"
+git switch -q develop
+git branch -q -D 9-up
+
+printf '\nthe directory the command runs in\n'
+elsewhere="$(tl_repo)"
+plain="$TL_TMP/plain"
+mkdir -p "$plain"
+tl_eq '-C into the project from a directory without config' 'deny' "$(verdict "git -C $repo push origin main" "$plain")"
+tl_eq 'cd into the project from a directory without config' 'deny' "$(verdict "cd $repo && git push origin main" "$plain")"
+tl_eq 'cd out of the project into one without config' 'allow' "$(verdict "cd $elsewhere && git push origin main")"
 
 printf '\nbranch switch on the main checkout\n'
 tl_eq 'to an issue branch' 'deny' "$(verdict 'git switch -c 4-thing')"
 tl_eq 'checkout -b to an issue branch' 'deny' "$(verdict 'git checkout -b 4-thing origin/develop')"
 tl_eq 'to another branch' 'allow' "$(verdict 'git switch main')"
+tl_eq 'checkout -t of a remote issue branch' 'deny' "$(verdict 'git checkout -t origin/12-foo')"
+tl_eq 'checkout --track of a remote issue branch' 'deny' "$(verdict 'git checkout --track origin/12-foo')"
+tl_eq 'switch --track of a remote issue branch' 'deny' "$(verdict 'git switch --track origin/12-foo')"
+tl_eq 'switch -C to an issue branch' 'deny' "$(verdict 'git switch -C 12-foo')"
+tl_eq 'a quoted issue branch' 'deny' "$(verdict 'git switch -c "12-foo"')"
 tl_eq 'a path restore is not a switch' 'allow' "$(verdict 'git checkout -- file.txt')"
 git branch 4-thing
 git switch -q 4-thing

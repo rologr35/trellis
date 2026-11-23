@@ -2,10 +2,12 @@
 #
 # guard-git: PreToolUse hook of the Bash tool. Refuses, for the assistant, in every permission mode:
 #
-#   1. a push to a branch of git.protected, by refspec or, for a bare push, by the checked-out
-#      branch (so the method asks for an explicit refspec: the bare push is judged by the checkout);
-#   2. on the main checkout, a checkout or switch to an issue branch (git.issueBranch): every issue
-#      is worked in its own worktree, and the main checkout stays on the integration branch;
+#   1. a push to a branch of git.protected: by refspec (quotes, a leading +, refs/heads/, and HEAD
+#      or @ as the checked-out branch are normalized), or, without a refspec, by the checked-out
+#      branch and its upstream;
+#   2. on the main checkout, a checkout or switch to an issue branch (git.issueBranch), created with
+#      -b/-c/-C or by -t/--track from a remote branch: every issue is worked in its own worktree,
+#      and the main checkout stays on the integration branch;
 #   3. on the main checkout, a checkout or switch while the current branch is <n>-... and issue n is
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
@@ -23,7 +25,8 @@
 # a missing node and a repository without trellis.config never block anything. A deny, not an
 # "ask": an auto-mode session resolves an "ask" on its own.
 #
-# Reads the branches from trellis.config through lib/config.sh. Works with bash 3.2.
+# Reads the branches from the trellis.config of the repository each segment runs in, after its
+# `cd <dir>` or `git -C <dir>`, through lib/config.sh. Works with bash 3.2.
 
 set -uo pipefail
 
@@ -40,17 +43,31 @@ CWD="$(field cwd)"
 CWD="${CWD:-${CLAUDE_PROJECT_DIR:-.}}"
 TRANSCRIPT="$(field transcript_path)"
 
-TOP="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[ -f "$TOP/trellis.config" ] || exit 0
-export TRELLIS_CONFIG="$TOP/trellis.config"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
 
-PROTECTED="$(tc_all git.protected)"
-MERGE_INTO="$(tc_all git.assistantMayMergeInto)"
-ISSUE_REGEX="$(tc_get git.issueBranch)"
-INTEGRATION="$(tc_get git.integrationBranch)"
-TRACKER="$(tc_get tracker.kind)"
+# The config is the one of the repository a segment runs in, after its `cd` or `git -C`: a session
+# standing outside a project can still push into it. A repository without trellis.config is no
+# opinion. Loaded once per repository.
+LOADED_TOP=''
+HAS_CONFIG=false
+load_config() {
+  local top
+  top="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  if [ "$top" != "$LOADED_TOP" ]; then
+    LOADED_TOP="$top"
+    HAS_CONFIG=false
+    [ -f "$top/trellis.config" ] || return 1
+    HAS_CONFIG=true
+    export TRELLIS_CONFIG="$top/trellis.config"
+    PROTECTED="$(tc_all git.protected)"
+    MERGE_INTO="$(tc_all git.assistantMayMergeInto)"
+    ISSUE_REGEX="$(tc_get git.issueBranch)"
+    INTEGRATION="$(tc_get git.integrationBranch)"
+    TRACKER="$(tc_get tracker.kind)"
+  fi
+  [ "$HAS_CONFIG" = true ]
+}
 
 deny() {
   node -e 'console.log(JSON.stringify({hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: process.argv[1]}}));' "$1"
@@ -65,12 +82,16 @@ in_list() {
   return 1
 }
 
-# What lands on the remote is the destination of a refspec: "+src:dst", "src:dst", "refs/heads/dst".
+# The branch a refspec lands on: "+src:dst", "src:dst", "refs/heads/dst", ":dst" (a delete), or a
+# bare name; HEAD and @ on the destination side are the branch checked out in $2.
 refspec_target() {
-  local spec="$1"
+  local spec="${1#+}" dir="$2"
   spec="${spec##*:}"
   spec="${spec#+}"
   spec="${spec#refs/heads/}"
+  if [ "$spec" = 'HEAD' ] || [ "$spec" = '@' ]; then
+    spec="$(git -C "$dir" branch --show-current 2>/dev/null)"
+  fi
   printf '%s' "$spec"
 }
 
@@ -183,6 +204,13 @@ while IFS= read -r segment; do
   words=()
   read -ra words <<< "$segment"
   count=${#words[@]}
+  # Quotes are the shell's, not part of a branch name: "main" and 'HEAD:main' are main.
+  k=0
+  while [ "$k" -lt "$count" ]; do
+    words[k]="${words[k]//\"/}"
+    words[k]="${words[k]//\'/}"
+    k=$((k + 1))
+  done
   i=0
   while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
     i=$((i + 1))
@@ -199,6 +227,7 @@ while IFS= read -r segment; do
   fi
 
   if [ "${words[i]}" = 'gh' ]; then
+    load_config "$DIR" || continue
     rest=("${words[@]:i+1}")
     if [ "${#rest[@]}" -gt 0 ]; then
       guard_gh_merge "${rest[@]}"
@@ -218,11 +247,16 @@ while IFS= read -r segment; do
     esac
   done
   [ "$i" -lt "$count" ] || continue
+  load_config "$DIR" || continue
 
   # A branch switch: checkout or switch without `--` and not `checkout .` (those restore paths).
+  # The target is the name after -b/-B/-c/-C when a branch is created; with -t/--track and no name,
+  # the remote-tracking branch's name without its remote, which is what git creates.
   if [ "${words[i]}" = 'checkout' ] || [ "${words[i]}" = 'switch' ]; then
     is_switch=true
-    target=''
+    created=''
+    positional=''
+    track=false
     j=$((i + 1))
     while [ "$j" -lt "$count" ]; do
       word="${words[j]}"
@@ -230,15 +264,25 @@ while IFS= read -r segment; do
         is_switch=false
         break
       fi
-      if [ -z "$target" ]; then
-        case "$word" in
-          -b | -B | -c | -C | --create | --force-create) [ $((j + 1)) -lt "$count" ] && target="${words[j + 1]}" ;;
-          -*) ;;
-          *) target="$word" ;;
-        esac
-      fi
+      case "$word" in
+        -b | -B | -c | -C | --create | --force-create)
+          [ $((j + 1)) -lt "$count" ] && [ -z "$created" ] && created="${words[j + 1]}"
+          j=$((j + 1))
+          ;;
+        -t | --track | --track=*) track=true ;;
+        -*) ;;
+        *) [ -z "$positional" ] && positional="$word" ;;
+      esac
       j=$((j + 1))
     done
+    target="$created"
+    if [ -z "$target" ]; then
+      target="$positional"
+      if [ "$track" = true ]; then
+        target="${target#refs/remotes/}"
+        target="${target#*/}"
+      fi
+    fi
     [ "$is_switch" = true ] && guard_branch_switch "$DIR" "$target"
     continue
   fi
@@ -261,16 +305,21 @@ while IFS= read -r segment; do
     i=$((i + 1))
   done
 
+  # Without a refspec git pushes the checked-out branch to its upstream: both are judged.
   if [ "${#refspecs[@]}" -eq 0 ]; then
-    target="$(git -C "$DIR" branch --show-current 2>/dev/null)"
-    if [ -n "$target" ] && in_list "$target" "$PROTECTED"; then
-      deny "A bare push pushes the checked-out branch, $target, and a push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec (git push origin <branch>) and open a pull request; a person pushes to $target."
-    fi
+    current="$(git -C "$DIR" branch --show-current 2>/dev/null)"
+    upstream=''
+    [ -n "$current" ] && upstream="$(git -C "$DIR" config --get "branch.$current.merge" 2>/dev/null)"
+    upstream="${upstream#refs/heads/}"
+    for target in "$current" "$upstream"; do
+      if [ -n "$target" ] && in_list "$target" "$PROTECTED"; then
+        deny "A push without refspec pushes $current to ${upstream:-$current}, and a push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec (git push origin <branch>) and open a pull request; a person pushes to $target."
+      fi
+    done
     continue
   fi
   for spec in "${refspecs[@]}"; do
-    target="$(refspec_target "$spec")"
-    [ "$target" = 'HEAD' ] && target="$(git -C "$DIR" branch --show-current 2>/dev/null)"
+    target="$(refspec_target "$spec" "$DIR")"
     if in_list "$target" "$PROTECTED"; then
       deny "A push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec and open a pull request; a person pushes to $target."
     fi
