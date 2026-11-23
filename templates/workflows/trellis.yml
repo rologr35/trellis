@@ -1,0 +1,18 @@
+# The project's call to the plugin's consumer check, pinned to the same sha as the marketplace of
+# .claude/settings.json. `edited` reruns it when the body changes, so a **Retroceso** added later
+# is read.
+name: trellis
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  trellis:
+    uses: {{trellis.upstream}}/.github/workflows/consumer-check.yml@{{sha}}
+    with:
+      trellis-ref: {{sha}}
+      trellis-repo: {{trellis.upstream}}
+    permissions:
+      contents: read
+      pull-requests: write

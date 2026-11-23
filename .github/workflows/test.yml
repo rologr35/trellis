@@ -1,0 +1,41 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # On macOS the bash of the PATH is a newer one; the scripts call `bash` and `env bash`, so
+      # /bin/bash (3.2, the shell a Mac runs them with) goes first on the PATH, and lib/bash.test.sh
+      # checks that it is the one found.
+      - name: bash 3.2 first on the PATH
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$RUNNER_TEMP/bash32"
+          ln -sf /bin/bash "$RUNNER_TEMP/bash32/bash"
+          echo "$RUNNER_TEMP/bash32" >> "$GITHUB_PATH"
+          echo "TRELLIS_EXPECT_BASH=3.2" >> "$GITHUB_ENV"
+      - name: shell tests
+        run: |
+          status=0
+          for t in lib/*.test.sh scripts/*.test.sh hooks/*.test.sh; do
+            [ -f "$t" ] || continue
+            echo "::group::$t"
+            bash "$t" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+      - name: hygiene tests
+        run: node --test hygiene/*.test.mjs

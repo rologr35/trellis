@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# commit-msg of a trellis project: the message passes `trellis pr-check --commit` (its shape, no long
+# dash, no AI attribution, no bare #N). Without trellis at hand it warns and lets the commit through.
+
+set -uo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/find-trellis.sh"
+trellis="$(find_trellis)"
+if [ -z "$trellis" ]; then
+  echo 'commit-msg: trellis not found (PATH or the installed plugin), check skipped' >&2
+  exit 0
+fi
+# A config that does not parse stops the hook with its error (trellis exits 3).
+"$trellis" config list >/dev/null || exit 1
+"$trellis" pr-check --commit "$1"

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#
+# trellis: the command line of the plugin. Each subcommand is a script of scripts/ or hygiene/.
+#
+#   trellis config get <key> | all <key> | list | subsections <section> | unknown
+#   trellis doctor                          read-only diagnosis, FAIL exits 1
+#   trellis sync                            rewrites the generated blocks and the generated deny
+#   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
+#   trellis setup [--quiet]                 core.hooksPath = .githooks when it is missing
+#   trellis worktree add <n> <slug> | prune
+#   trellis ratchet [--base <ref>] [--allow-loosen]
+#   trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>
+#   trellis check                           runs [command] check in order, fail-fast
+#
+# The plugin's bin/ is on the PATH of Claude's Bash tool only; a person, a git hook or a hook of the
+# plugin calls this file by its path.
+
+set -uo pipefail
+
+# Resolved through symlinks: a person may link this file into a folder of their PATH.
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
+export TRELLIS_ROOT
+
+usage() {
+  sed -n '3,13p' "$self" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+[ $# -gt 0 ] || usage
+sub="$1"
+shift
+
+# A config that does not parse stops every subcommand but the doctor, which reports it.
+case "$sub" in
+  doctor | -h | --help | help) ;;
+  *)
+    # shellcheck source=../lib/config.sh
+    . "$TRELLIS_ROOT/lib/config.sh"
+    tc_check || exit 3
+    ;;
+esac
+
+case "$sub" in
+  config)
+    # shellcheck source=../lib/config.sh
+    . "$TRELLIS_ROOT/lib/config.sh"
+    action="${1:-}"
+    case "$action" in
+      get) [ $# -eq 2 ] || usage; tc_get "$2" ;;
+      all) [ $# -eq 2 ] || usage; tc_all "$2" ;;
+      list) tc_list ;;
+      subsections) [ $# -eq 2 ] || usage; tc_subsections "$2" ;;
+      unknown) tc_unknown ;;
+      *) usage ;;
+    esac
+    ;;
+  doctor) exec bash "$TRELLIS_ROOT/scripts/doctor.sh" "$@" ;;
+  sync) exec bash "$TRELLIS_ROOT/scripts/sync.sh" "$@" ;;
+  hygiene) exec node "$TRELLIS_ROOT/hygiene/hygiene.mjs" "$@" ;;
+  setup) exec bash "$TRELLIS_ROOT/scripts/setup.sh" "$@" ;;
+  worktree)
+    action="${1:-}"
+    [ $# -gt 0 ] && shift
+    case "$action" in
+      add) exec bash "$TRELLIS_ROOT/scripts/worktree-add.sh" "$@" ;;
+      prune) exec bash "$TRELLIS_ROOT/scripts/worktree-prune.sh" "$@" ;;
+      *) usage ;;
+    esac
+    ;;
+  ratchet) exec bash "$TRELLIS_ROOT/scripts/ratchet.sh" "$@" ;;
+  pr-check) exec bash "$TRELLIS_ROOT/scripts/pr-check.sh" "$@" ;;
+  check) exec bash "$TRELLIS_ROOT/scripts/check.sh" "$@" ;;
+  -h | --help | help) usage ;;
+  *) printf 'trellis: unknown subcommand %s\n' "$sub" >&2; usage ;;
+esac
