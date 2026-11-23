@@ -68,6 +68,8 @@ export const NARRATIVE = {
     /(?<![\p{L}])ya no(?![\p{L}])/iu,
     /(?<![\p{L}])sol[ií]a(?:n)?(?![\p{L}])/iu,
     /(?<![\p{L}])antes (?:era|eran|se|hab[ií]a|estaba|usaba)(?![\p{L}])/iu,
+    /(?<![\p{L}])antes \p{L}+ (?:era|eran|hab[ií]a|estaba|usaba)(?![\p{L}])/iu,
+    /(?<![\p{L}])ahora(?![\p{L}])/iu,
     /(?<![\p{L}])(?:se reemplaz[oó]|fue reemplazad[oa]|fueron reemplazad[oa]s)(?![\p{L}])/iu,
     /(?<![\p{L}])dej[oó] de(?![\p{L}])/iu,
     /(?<![\p{L}])(?:desde|hasta|a partir de) #\d/iu,

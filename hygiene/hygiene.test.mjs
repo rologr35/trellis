@@ -105,6 +105,21 @@ test('narrative in Spanish fails in an es project and passes in an en one', () =
   fails(p, 'app/CLAUDE.md: line 3 narrates history');
 });
 
+test('the es narrative catches a word between "antes" and the verb, and "ahora" as a contrast', () => {
+  for (const line of ['Antes esto usaba Provider.', 'Antes aquello era un singleton.', 'Antes Provider estaba en core.', 'El estado ahora vive en Bloc.', 'Ahora usa Bloc.']) {
+    const p = project();
+    p.write('app/CLAUDE.md', `# App\n\n${line}\n`);
+    p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
+    p.trellis('sync');
+    fails(p, 'app/CLAUDE.md: line 3 narrates history');
+  }
+  const p = project();
+  p.write('app/CLAUDE.md', '# App\n\nAntes de ejecutar, lee el plan.\nAntes de proponer algo, busca lo que existe.\nEjecuta antes una alternativa barata.\n');
+  p.git('config', '-f', 'trellis.config', 'project.locale', 'es');
+  p.trellis('sync');
+  passes(p);
+});
+
 test('narrative in English fails in an en project and in an es one', () => {
   const p = project();
   p.write('.claude/rules/app.md', `${p.read('.claude/rules/app.md')}\nThe cache is no longer used.\n`);
