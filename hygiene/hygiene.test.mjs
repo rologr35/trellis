@@ -203,6 +203,35 @@ test('a package without CLAUDE.md fails', () => {
   fails(p, 'core: is a [workspace] package without its CLAUDE.md');
 });
 
+test('a package at the root is satisfied by the root CLAUDE.md', () => {
+  const p = project();
+  p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', '.');
+  passes(p);
+});
+
+test('a package path is read once the same way: ., ./x and a trailing slash', () => {
+  for (const spelling of ['./', './app', 'app/', './app/', 'app//']) {
+    const p = project();
+    p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', spelling);
+    passes(p);
+  }
+  const p = project();
+  p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', './packages/foo/');
+  fails(p, 'packages/foo: is a [workspace] package without its CLAUDE.md');
+  p.write('packages/foo/CLAUDE.md', '# Foo\n');
+  p.trellis('sync');
+  passes(p);
+});
+
+test('the rule lookup resolves a file a rule names against a package written with a slash', () => {
+  const p = project();
+  p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.package', './app/');
+  p.write('.claude/rules/app.md', '---\npaths:\n  - "app/lib/other/*.dart"\n---\n\n# App code\n\n`lib/main.dart` starts it.\n');
+  p.write('app/lib/other/x.dart', '\n');
+  p.trellis('sync');
+  fails(p, 'names app/lib/main.dart, which does not load it');
+});
+
 test('the orientation must list every nested file and rule', () => {
   const p = project();
   p.write('core/CLAUDE.md', '# Core\n');
