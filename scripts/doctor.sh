@@ -136,7 +136,7 @@ if [ -z "$claude_version" ]; then
 elif version_ge "$claude_version" "$CLAUDE_MIN"; then
   ok "Claude Code $claude_version (>= $CLAUDE_MIN)"
 else
-  fail "Claude Code $claude_version is older than $CLAUDE_MIN (the pinned marketplace and `--scope local` need it)"
+  fail "Claude Code $claude_version is older than $CLAUDE_MIN (the pinned marketplace and --scope local need it)"
 fi
 plugin_installed=false
 if grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then

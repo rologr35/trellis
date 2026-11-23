@@ -85,6 +85,7 @@ stub claude '2.1.300 (Claude Code)'
 tl_eq 'an old Claude Code fails' '1' "$(doctor)"
 stub claude '2.1.324 (Claude Code)'
 tl_eq 'Claude Code below the verified --scope local fails' '1' "$(doctor)"
+tl_has 'and names what needs it' 'the pinned marketplace and --scope local need it' "$(out)"
 stub claude '2.1.330 (Claude Code)'
 mv "$HOME/.claude/plugins/installed_plugins.json" "$TL_TMP/plugins.json"
 tl_eq 'the plugin not installed fails' '1' "$(doctor)"
