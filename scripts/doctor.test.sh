@@ -44,6 +44,26 @@ git config -f trellis.config --add command.check missing
 tl_eq 'a command name without run fails' '1' "$(doctor)"
 git config -f trellis.config --unset-all command.check
 
+git config -f trellis.config project.locale es
+tl_eq 'a locale in the schema passes' '0' "$(doctor)"
+git config -f trellis.config project.locale ES
+tl_eq 'a locale outside en|es fails' '1' "$(doctor)"
+tl_has 'naming the value and the accepted ones' 'project.locale = ES is not one of en, es' "$(out)"
+git config -f trellis.config --unset project.locale
+git config -f trellis.config tracker.kind gitlab
+tl_eq 'tracker.kind outside the schema fails' '1' "$(doctor)"
+tl_has 'naming the value and the accepted ones' 'tracker.kind = gitlab is not one of github, none' "$(out)"
+git config -f trellis.config --unset tracker.kind
+git config -f trellis.config workspace.kind python
+tl_eq 'workspace.kind outside the schema fails' '1' "$(doctor)"
+tl_has 'naming the value and the accepted ones' 'workspace.kind = python is not one of flutter, dart, node' "$(out)"
+git config -f trellis.config --unset workspace.kind
+git config -f trellis.config rung.unit.agent maybe
+tl_eq 'a subsection enum fails too' '1' "$(doctor)"
+tl_has 'with its own name' 'rung.unit.agent = maybe is not one of true, false' "$(out)"
+git config -f trellis.config --remove-section rung.unit
+tl_eq 'a config back to valid values passes' '0' "$(doctor)"
+
 printf '\ntoolchain\n'
 git config -f trellis.config toolchain.require 'flutter 3.24.0'
 tl_eq 'an old tool fails' '1' "$(doctor)"

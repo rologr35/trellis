@@ -43,6 +43,17 @@ tl_eq 'subsection default' 'true' "$("$TRELLIS" config get rung.Unit.pr)"
 tl_eq 'subsection override' 'false' "$("$TRELLIS" config get rung.Unit.agent)"
 tl_eq 'a doubled backslash reads as one' '\bTODO\b' "$("$TRELLIS" config all ratchets.suppression)"
 tl_eq 'unknown key reported' 'bogus.key' "$("$TRELLIS" config unknown)"
+tl_eq 'a valid enum value is not invalid' '' "$("$TRELLIS" config invalid)"
+git config -f trellis.config project.locale ES
+git config -f trellis.config tracker.kind gitlab
+git config -f trellis.config rung.Unit.agent maybe
+tl_eq 'enum values outside the schema are listed with the accepted ones' "rung.Unit.agent|maybe|true,false
+project.locale|ES|en,es
+tracker.kind|gitlab|github,none" "$("$TRELLIS" config invalid)"
+tl_eq 'an invalid enum value still reads as written' 'ES' "$("$TRELLIS" config get project.locale)"
+git config -f trellis.config --unset project.locale
+git config -f trellis.config --unset tracker.kind
+git config -f trellis.config rung.Unit.agent false
 tl_eq 'TRELLIS_CONFIG points elsewhere' 'develop' "$(TRELLIS_CONFIG="$repo/none" "$TRELLIS" config get git.integrationBranch)"
 
 printf '\na config that does not parse fails closed\n'

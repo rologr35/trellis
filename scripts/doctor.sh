@@ -8,7 +8,8 @@
 # never fetches: the repository state is read from local refs. Env files are checked for presence
 # and never read.
 #
-# FAIL: a key of trellis.config outside lib/schema, or a command name that names no [command]; a
+# FAIL: a key of trellis.config outside lib/schema, a value outside the accepted ones of an enum key
+# of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), or a command name that names no [command]; a
 # tool of [toolchain] require missing or older than its minimum; core.hooksPath unset; the plugin
 # not installed or Claude Code older than the minimum; node missing while hooks are active;
 # ANTHROPIC_API_KEY exported (the subscription stops being used and every token is billed as API
@@ -66,6 +67,14 @@ else
     while IFS= read -r key; do
       fail "trellis.config: unknown key $key (lib/schema lists the keys)"
     done <<< "$unknown"
+  fi
+  invalid="$(tc_invalid)"
+  if [ -z "$invalid" ]; then
+    ok 'every enum value of trellis.config is one the schema accepts'
+  else
+    while IFS='|' read -r key value accepted; do
+      fail "trellis.config: $key = $value is not one of ${accepted//,/, }"
+    done <<< "$invalid"
   fi
   missing_commands=''
   for name in $(tc_all command.check) $(tc_get command.secretScan) $(tc_get command.install); do
