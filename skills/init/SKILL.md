@@ -1,51 +1,53 @@
 ---
 name: init
-description: Pone un proyecto bajo trellis. Entrevista a la persona y escribe trellis.config, el CLAUDE.md raíz con el método, los CLAUDE.md por paquete, TESTING.md, .claude/settings.json, los git hooks, el .gitignore y el workflow del CI.
+description: Puts a project under trellis. Interviews the person and writes trellis.config, the root CLAUDE.md with the method, a CLAUDE.md per package, TESTING.md, .claude/settings.json, the git hooks, the .gitignore and the CI workflow.
 disable-model-invocation: true
 ---
 
 # init
 
-Las plantillas viven en el plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis)")/.." && pwd)"`, y `$PLUGIN/templates/`.
+The templates live in the plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis)")/.." && pwd)"`. The prose templates and `trellis.config` are in `$PLUGIN/templates/<locale>/`, one folder per `project.locale` (`en`, `es`); the language-neutral ones (`settings.json`, `githooks/`, `gitignore.fragment`, `workflows/`) are in `$PLUGIN/templates/`.
 
-## 0. Un worktree para init
+## 0. A worktree for init
 
-El checkout principal se queda en la rama de integración, limpio: en cuanto existe `trellis.config`, `guard-git` impide volver a ella desde una rama de issue abierta. Como todavía no hay config, el worktree se crea con git plano, desde el checkout principal y en líneas simples:
+The main checkout stays on the integration branch, clean: as soon as `trellis.config` exists, `guard-git` prevents going back to it from an open issue branch. Since there is no config yet, the worktree is created with plain git, from the main checkout and in simple lines:
 
-1. `<n>` es la issue que pide la adopción de trellis; sin tracker, un número que elige la persona.
-2. `printf '.claude/worktrees/\n' >> .git/info/exclude`, para que el checkout principal no vea el worktree antes de que `.gitignore` lo diga.
+1. `<n>` is the issue that asks for adopting trellis; without a tracker, a number the person picks.
+2. `printf '.claude/worktrees/\n' >> .git/info/exclude`, so the main checkout does not see the worktree before `.gitignore` says so.
 3. `git fetch origin`
-4. `git worktree add .claude/worktrees/<n>-trellis-init -b <n>-trellis-init origin/<integración>`
-5. `EnterWorktree` con la ruta absoluta de ese worktree. Todo lo que sigue se escribe allí.
+4. `git worktree add .claude/worktrees/<n>-trellis-init -b <n>-trellis-init origin/<integration>`
+5. `EnterWorktree` with the absolute path of that worktree. Everything that follows is written there.
 
-## 1. Leer antes de preguntar
+## 1. Read before asking
 
-Claude deduce del código todo lo que puede y solo pregunta lo que no: el stack y su versión (`pubspec.yaml`, `package.json`, `.tool-versions`), los paquetes del workspace, las ramas (`git branch -a`), el remoto y si es GitHub, los comandos que ya existen (scripts, Makefile, CI), y si ya hay `CLAUDE.md`, `.claude/settings.json` o hooks. Lo existente se conserva y se integra; nada se sobreescribe sin decirlo.
+Claude deduces from the code all it can and asks only what it cannot: the stack and its version (`pubspec.yaml`, `package.json`, `.tool-versions`), the workspace packages, the branches (`git branch -a`), the remote and whether it is GitHub, the commands that already exist (scripts, Makefile, CI), and whether there is already a `CLAUDE.md`, a `.claude/settings.json` or hooks. What exists is kept and integrated; nothing is overwritten without saying so.
 
-## 2. Entrevista
+## 2. Interview
 
-Una pregunta por tema, con la respuesta deducida como opción por defecto:
+One question per topic, with the deduced answer as the default option. The language comes first, because every later question and every file written follow it:
 
-1. **Stack y workspace**: `workspace.kind` (flutter, dart, node), los paquetes (`workspace.package`) y las herramientas con su versión mínima (`toolchain.require`).
-2. **Ramas**: release, integración, la forma de una rama de issue y las protegidas.
-3. **Tracker**: `github` o `none`.
-4. **Idioma**: `es` o `en` (`project.locale`).
-5. **Comandos**: análisis, formato, pruebas por escalón, instalación de dependencias. Cada escalón: si Claude puede correrlo (`agent`), si corre en cada pull request (`pr`) y qué prueba.
-6. **Qué es irreversible**: migraciones, envíos a usuarios, pagos, despliegues. Cada cosa se vuelve una línea de **Nunca** del `CLAUDE.md` raíz y, si tiene ficheros propios, un `[gate]`.
-7. **Escáner de secretos**: gitleaks por defecto (`gitleaks protect --staged --redact` en local, `gitleaks git --redact` en CI con `ci =`), otro, o ninguno (el doctor avisa).
-8. **Modelos**: `model`, `effortLevel` y `autoCompactWindow` por defecto del proyecto.
+1. **Language**: `en` (the default) or `es` (`project.locale`). It governs everything trellis writes into the project: the method block, the templates, the generated blocks, the narrative phrases the hygiene checks and the pull request sections (`Summary`, `Verification`, `Setback` in en; `Resumen`, `Verificación`, `Retroceso` in es). The interview continues in that language.
+2. **Stack and workspace**: `workspace.kind` (flutter, dart, node), the packages (`workspace.package`) and the tools with their minimum version (`toolchain.require`).
+3. **Branches**: release, integration, the shape of an issue branch and the protected ones.
+4. **Tracker**: `github` or `none`.
+5. **Commands**: analysis, formatting, tests per rung, installing dependencies. For each rung: whether Claude may run it (`agent`), whether it runs on every pull request (`pr`) and what it proves.
+6. **What is irreversible**: migrations, messages to users, payments, deploys. Each one becomes a line of the **Never** section of the root `CLAUDE.md` and, if it has its own files, a `[gate]`.
+7. **Secret scanner**: gitleaks by default (`gitleaks protect --staged --redact` locally, `gitleaks git --redact` in CI with `ci =`), another one, or none (the doctor warns).
+8. **Models**: the project's default `model`, `effortLevel` and `autoCompactWindow`.
 
-## 3. Escribir
+## 3. Write
 
-1. `trellis.config` desde `$PLUGIN/templates/trellis.config`, con las respuestas. Sin `{{...}}` sin rellenar; lo que no aplica se borra. `trellis config unknown` vacío.
-2. `CLAUDE.md` desde `CLAUDE.root.md`: el layout, la anti-duplicación y las convenciones deducidos del código, y **Nunca** con lo irreversible. Si ya existía, su contenido vigente se reparte en esas secciones.
-3. El skill `scaffold` para un `CLAUDE.md` por paquete.
-4. `TESTING.md` desde su plantilla, una sección por escalón.
-5. `.claude/settings.json` desde la plantilla, fusionado con el existente: `allow` y `deny` se unen, lo demás de la persona se conserva. El sha del marketplace es el `gitCommitSha` de `trellis@trellis` en `~/.claude/plugins/installed_plugins.json`, completo (40 caracteres).
-6. `.githooks/` desde `$PLUGIN/templates/githooks/`, ejecutables.
-7. La línea de `$PLUGIN/templates/gitignore.fragment` en `.gitignore`, si falta.
-8. `.github/workflows/trellis.yml` desde `$PLUGIN/templates/workflows/trellis.yml`, con el mismo sha, si el remoto es GitHub.
+Every file below is written in the chosen language, from `$PLUGIN/templates/<locale>/` where the template is a prose one.
 
-## 4. Cerrar
+1. `trellis.config` from `trellis.config`, with the answers and `project.locale` set. No `{{...}}` left unfilled; what does not apply is deleted. `trellis config unknown` empty.
+2. `CLAUDE.md` from `CLAUDE.root.md`: the layout, the anti-duplication and the conventions deduced from the code, and the **Never** section with what is irreversible. If one existed, its current content is spread over those sections.
+3. The `scaffold` skill for a `CLAUDE.md` per package.
+4. `TESTING.md` from its template, one section per rung.
+5. `.claude/settings.json` from `$PLUGIN/templates/settings.json`, merged with the existing one: `allow` and `deny` are joined, everything else of the person's is kept. The marketplace sha is the `gitCommitSha` of `trellis@trellis` in `~/.claude/plugins/installed_plugins.json`, in full (40 characters).
+6. `.githooks/` from `$PLUGIN/templates/githooks/`, executable.
+7. The line of `$PLUGIN/templates/gitignore.fragment` in `.gitignore`, if missing.
+8. `.github/workflows/trellis.yml` from `$PLUGIN/templates/workflows/trellis.yml`, with the same sha, if the remote is GitHub.
 
-En este orden: `trellis setup`, `trellis sync`, `trellis hygiene --freeze`, `trellis hygiene` y `trellis doctor`. Lo que quede en FAIL se arregla o se le dice a la persona con su causa. Después, un commit en la rama del worktree (`chore(trellis): init (#n)`), el push con refspec explícito (`git push origin <n>-trellis-init`), `ExitWorktree` con `keep`, y el resumen: qué se escribió, qué se dedujo y qué se preguntó, qué queda en aviso, y que los `CLAUDE.md` de paquete esperan revisión humana.
+## 4. Close
+
+In this order: `trellis setup`, `trellis sync`, `trellis hygiene --freeze`, `trellis hygiene` and `trellis doctor`. Whatever is left in FAIL is fixed, or told to the person with its cause. Then a commit on the worktree's branch (`chore(trellis): init (#n)`), the push with an explicit refspec (`git push origin <n>-trellis-init`), `ExitWorktree` with `keep`, and the summary: what was written, what was deduced and what was asked, what is left as a warning, and that the package `CLAUDE.md` files wait for human review.

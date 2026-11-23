@@ -1,34 +1,36 @@
 ---
 name: retro
-description: Al cerrar un trabajo, propone en el chat la lección que deja y su destino, o "sin cambio" cuando no hay lección. Una persona la aplica.
+description: When a piece of work closes, proposes in the chat the lesson it leaves and where it goes, or "no change" when there is no lesson. A person applies it.
 disable-model-invocation: true
 ---
 
 # retro
 
-## 1. ¿Hay lección?
+The proposal and any text for the project are written in the project's language (`trellis config get project.locale`); a lesson for the framework is written in English.
 
-Una lección es algo que la próxima sesión haría mal sin ella: un error repetido, una instrucción que faltó o que confundió, un paso caro que se puede evitar. Si no la hay, la respuesta es "sin cambio" y nada más.
+## 1. Is there a lesson?
 
-## 2. La pieza más barata que la sostenga
+A lesson is something the next session would get wrong without it: a repeated mistake, an instruction that was missing or confused, an expensive step that can be avoided. If there is none, the answer is "no change" and nothing more.
 
-En este orden, y la primera que baste:
+## 2. The cheapest piece that holds it
 
-1. Salida acotada de una herramienta (un flag, un filtro).
-2. Un script.
-3. Un skill.
-4. Un hook, solo con evidencia repetida.
-5. Texto corto en un fichero de instrucciones, al final, reemplazando antes que añadiendo.
+In this order, and the first one that is enough:
 
-Un cambio por métrica a la vez, para poder atribuir su efecto.
+1. Bounded output of a tool (a flag, a filter).
+2. A script.
+3. A skill.
+4. A hook, only with repeated evidence.
+5. Short text in an instruction file, at the end, replacing before adding.
 
-## 3. Local o del marco
+One change per metric at a time, so its effect can be attributed.
 
-- **Local**: vale para este proyecto. Destino: el `CLAUDE.md` o la rule más cercana al código del que habla, a la altura del concepto.
-- **Del marco**: vale para cualquier proyecto (el método, una guarda, la higiene, una plantilla). No se escribe en el proyecto: se cambiaría solo aquí y los demás no la recibirían.
+## 3. Local or framework
 
-## 4. Proponer
+- **Local**: it holds for this project. Destination: the `CLAUDE.md` or the rule closest to the code it speaks about, at the height of the concept.
+- **Framework**: it holds for any project (the method, a guard, the hygiene, a template). It is not written in the project: it would change only here and the others would not receive it.
 
-En el chat: la lección en una frase, el incidente que la muestra (qué pasó, dónde consta), su clasificación y el texto o el cambio propuesto con su destino exacto. Claude no lo aplica: una persona decide.
+## 4. Propose
 
-Para una lección del marco, con la aprobación de la persona: buscar antes en el repositorio del plugin (`trellis config get trellis.upstream`) con `gh issue list -R <upstream> --state all --search '<concepto>'`, y si no existe, abrir allí una issue con la lección, el incidente y el texto propuesto (`gh issue create -R <upstream> --body-file`). El proyecto la recibe cuando actualiza el sha fijado del plugin.
+In the chat: the lesson in one sentence, the incident that shows it (what happened, where it is recorded), its classification and the proposed text or change with its exact destination. Claude does not apply it: a person decides.
+
+For a framework lesson, with the person's approval: search first in the plugin's repository (`trellis config get trellis.upstream`) with `gh issue list -R <upstream> --state all --search '<concept>'`, and if it does not exist, open an issue there with the lesson, the incident and the proposed text (`gh issue create -R <upstream> --body-file`). The project receives it when it updates the plugin's pinned sha.

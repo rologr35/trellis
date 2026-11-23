@@ -13,6 +13,7 @@ const SECTIONS = PR_SECTIONS[localeOf(config)];
 
 const LONG_DASH = /[\u2014\u2013]/;
 const ATTRIBUTION = /co-authored-by:|generated with|claude\.ai\/code|\u{1F916}/iu;
+// The words a reference follows, the es ones included (Ver, depende de, parte de) for es bodies.
 const KEYWORD = /(?:^|[\s(])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|see|ver|issue|pr|pull request|depende de|parte de|part of)\s+$/i;
 
 const misses = [];

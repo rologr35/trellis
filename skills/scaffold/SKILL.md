@@ -1,24 +1,24 @@
 ---
 name: scaffold
-description: Escribe un CLAUDE.md por paquete del workspace, con sus capas y comandos deducidos del código, para que una persona lo revise.
+description: Writes a CLAUDE.md per workspace package, with its layers and commands deduced from the code, for a person to review.
 disable-model-invocation: true
 ---
 
 # scaffold
 
-Un `CLAUDE.md` por cada `workspace.package` de `trellis.config` que no lo tenga, desde la plantilla `CLAUDE.package.md` del plugin (`$(cd "$(dirname "$(command -v trellis)")/.." && pwd)/templates/`). Un paquete que ya lo tiene no se toca.
+One `CLAUDE.md` for each `workspace.package` of `trellis.config` that lacks one, from the plugin's `CLAUDE.package.md` template of the project's language (`$(cd "$(dirname "$(command -v trellis)")/.." && pwd)/templates/<locale>/`, where `<locale>` is `trellis config get project.locale`). The draft is written in that language. A package that already has one is not touched.
 
-## Qué se deduce y de dónde
+## What is deduced and from where
 
-- **Qué hace el paquete**: su manifiesto (`pubspec.yaml`, `package.json`), su punto de entrada y sus dependencias internas.
-- **Capas**: las carpetas de primer nivel bajo su código fuente y la dirección de sus imports. Una capa es una carpeta que importa de otras pero no al revés; si los imports no muestran una dirección, el borrador lo dice en vez de inventarla.
-- **Comandos**: los scripts del manifiesto y los del CI que corren en esa carpeta, con lo que hace cada uno. Los que ya están en `trellis check` no se repiten.
-- **Reglas**: las rules de `.claude/rules/` cuyos `paths:` cubren ficheros del paquete.
+- **What the package does**: its manifest (`pubspec.yaml`, `package.json`), its entry point and its internal dependencies.
+- **Layers**: the top-level folders under its source code and the direction of their imports. A layer is a folder that imports from others but not the other way around; if the imports show no direction, the draft says so instead of inventing one.
+- **Commands**: the manifest's scripts and the CI ones that run in that folder, with what each one does. The ones already in `trellis check` are not repeated.
+- **Rules**: the rules of `.claude/rules/` whose `paths:` cover files of the package.
 
-## Límites
+## Limits
 
-- Presente y tercera persona, sin historia ni referencias a issues: la higiene lo comprueba.
-- Corto: es el índice del paquete, no su manual. El detalle de un dominio va a una rule con `paths:`.
-- Lo que no se pudo deducir queda como pregunta explícita en el borrador.
+- Present tense and third person, without history or references to issues: the hygiene checks it.
+- Short: it is the package's index, not its manual. The detail of a domain goes to a rule with `paths:`.
+- What could not be deduced stays as an explicit question in the draft.
 
-Al terminar, `trellis sync` (la tabla de orientación los lista) y `trellis hygiene`. El resumen nombra cada fichero escrito y pide su revisión a una persona.
+When done, `trellis sync` (the orientation table lists them) and `trellis hygiene`. The summary names every file written and asks a person to review it.
