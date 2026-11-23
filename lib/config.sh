@@ -12,6 +12,8 @@
 #   tc_all <key>            every value of a multi key, one per line, or its defaults
 #   tc_subsections <sect>   the names of the subsections of a section, e.g. the commands
 #   tc_unknown              the keys of the file that the schema does not know
+#   tc_invalid              key|value|accepted for each written value outside the accepted ones
+#                           of an enum key of the schema (the defaults are always accepted)
 #   tc_check                exit status 3 and the parse error on stderr when the file exists and
 #                           does not parse; bin/trellis runs it before every subcommand but doctor
 #
@@ -49,7 +51,8 @@ _tc_raw() {
   git config -f "$file" --list 2>/dev/null
 }
 
-# mode=list prints the effective config; mode=unknown prints the keys the schema does not know.
+# mode=list prints the effective config; mode=unknown prints the keys the schema does not know;
+# mode=invalid prints key|value|accepted for each written value outside an enum key's accepted ones.
 _tc_awk() {
   _tc_raw | awk -v schema="$TRELLIS_ROOT/lib/schema" -v mode="$1" '
     BEGIN {
@@ -58,6 +61,7 @@ _tc_awk() {
         i1 = index(line, "|"); key = substr(line, 1, i1 - 1); rest = substr(line, i1 + 1)
         i2 = index(rest, "|"); kind = substr(rest, 1, i2 - 1); def = substr(rest, i2 + 1)
         lk = tolower(key)
+        if (kind ~ /^enum:/) { enums[key] = substr(kind, 6); kind = "single" }
         if (!(lk in canon)) { canon[lk] = key; kinds[key] = kind; order[++nkeys] = key }
         if (def != "") { ndef[key]++; defs[key, ndef[key]] = def }
       }
@@ -89,6 +93,19 @@ _tc_awk() {
       return a[1] ".*." a[n]
     }
     END {
+      if (mode == "invalid") {
+        for (i = 1; i <= nwritten; i++) {
+          name = written[i]; pat = pattern_of(name)
+          if (!(pat in enums)) continue
+          n = split(enums[pat], accepted, ",")
+          for (j = 1; j <= nval[name]; j++) {
+            good = 0
+            for (k = 1; k <= n; k++) if (vals[name, j] == accepted[k]) good = 1
+            if (!good) print name "|" vals[name, j] "|" enums[pat]
+          }
+        }
+        exit
+      }
       if (mode != "list") exit
       for (i = 1; i <= nkeys; i++) {
         key = order[i]
@@ -114,6 +131,8 @@ _tc_awk() {
 tc_list() { _tc_awk list; }
 
 tc_unknown() { _tc_awk unknown; }
+
+tc_invalid() { _tc_awk invalid; }
 
 tc_all() {
   tc_list | awk -v key="$1" 'BEGIN { lk = tolower(key) } { eq = index($0, "="); if (tolower(substr($0, 1, eq - 1)) == lk) print substr($0, eq + 1) }'

@@ -29,36 +29,63 @@ delete env.TRELLIS_CONFIG;
 
 const template = (locale, file) => readFileSync(path.join(TEMPLATES, locale, file), 'utf8');
 
-/** A template with its placeholders filled: the named ones from `values`, every other one with `x`. */
-const fill = (text, values = {}) => text.replace(/\{\{([^}]*)\}\}/g, (_, key) => values[key] ?? 'x');
+/** A placeholder with a name (`{{package}}`, `{{project.name}}`), which init fills with a value. */
+const NAMED = /\{\{([A-Za-z][\w.]*)\}\}/g;
+/** Any placeholder: the named ones and the prose ones (`{{One sentence ...}}`), which init asks for. */
+const ANY = /\{\{[^}]*\}\}/g;
+
+/** The values a project gives the named placeholders: the same names in every locale. */
+const VALUES = {
+  name: 'x',
+  package: 'app',
+  command: 'true',
+  'project.name': 'demo',
+  'git.releaseBranch': 'main',
+  'git.integrationBranch': 'develop',
+  'tracker.kind': 'github',
+  'workspace.kind': 'flutter',
+  'workspace.package': 'app',
+  'toolchain.require': 'node 22',
+  'trellis.upstream': 'rologr35/trellis',
+  'models.model': 'sonnet',
+  'models.effortLevel': 'high',
+  'models.autoCompactWindow': '200000',
+};
+
+/**
+ * A template with its placeholders filled: the named ones from `values`, a prose one with `x`. A
+ * named placeholder without a value stays, so the text still holds `{{`.
+ */
+const fill = (text, locale, values = {}) => text
+  .replace(NAMED, (whole, key) => ({...VALUES, 'project.locale': locale, ...values})[key] ?? whole)
+  .replace(ANY, whole => (/^\{\{[A-Za-z][\w.]*\}\}$/.test(whole) ? whole : 'x'));
+
+/** The names of the named placeholders of a template, with how often each appears, in order. */
+const namesOf = text => {
+  const counts = new Map();
+  for (const [, key] of text.matchAll(NAMED)) counts.set(key, (counts.get(key) ?? 0) + 1);
+  return [...counts].sort(([a], [b]) => a.localeCompare(b));
+};
 
 /** A project written from the templates of a locale, the way /trellis:init leaves it. */
 function initProject(locale) {
   const root = path.join(scratch, `init-${locale}`);
   mkdirSync(root);
   const write = (file, text) => {
+    assert.ok(!text.includes('{{'), `${locale}: ${file} is written with a placeholder left unfilled`);
     mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
     writeFileSync(path.join(root, file), text);
   };
   const trellis = (...args) => spawnSync('bash', [TRELLIS, ...args], {cwd: root, env, encoding: 'utf8'});
   execFileSync('git', ['init', '-q'], {cwd: root, env});
-  write('trellis.config', fill(template(locale, 'trellis.config'), {
-    'project.name': 'demo',
-    'project.locale': locale,
-    'git.releaseBranch': 'main',
-    'git.integrationBranch': 'develop',
-    'tracker.kind': 'github',
-    'workspace.kind': 'flutter',
-    'workspace.package': 'app',
-    'toolchain.require': 'node 22',
-  }));
-  write('CLAUDE.md', fill(template(locale, 'CLAUDE.root.md')));
-  write('app/CLAUDE.md', fill(template(locale, 'CLAUDE.package.md'), {package: 'app'}));
+  write('trellis.config', fill(template(locale, 'trellis.config'), locale));
+  write('CLAUDE.md', fill(template(locale, 'CLAUDE.root.md'), locale));
+  write('app/CLAUDE.md', fill(template(locale, 'CLAUDE.package.md'), locale));
   write('app/lib/main.dart', 'void main() {}\n');
-  write('.claude/rules/app.md', fill(template(locale, 'rule.md').replace(/\{\{glob[^}]*\}\}/, 'app/lib/**/*.dart')));
-  write('.claude/skills/x/SKILL.md', fill(template(locale, 'SKILL.md')));
-  write('TESTING.md', fill(template(locale, 'TESTING.md')));
-  write('.claude/settings.json', fill(readFileSync(path.join(TEMPLATES, 'settings.json'), 'utf8'), {sha: '0'.repeat(40)}));
+  write('.claude/rules/app.md', fill(template(locale, 'rule.md').replace(/\{\{glob[^}]*\}\}/, 'app/lib/**/*.dart'), locale));
+  write('.claude/skills/x/SKILL.md', fill(template(locale, 'SKILL.md'), locale));
+  write('TESTING.md', fill(template(locale, 'TESTING.md'), locale));
+  write('.claude/settings.json', fill(readFileSync(path.join(TEMPLATES, 'settings.json'), 'utf8'), locale, {sha: '0'.repeat(40)}));
   cpSync(path.join(TEMPLATES, 'githooks'), path.join(root, '.githooks'), {recursive: true});
   for (const step of [['sync'], ['hygiene', '--freeze']]) {
     const r = trellis(...step);
@@ -104,7 +131,7 @@ test('the methods of every locale carry the same principles: the same count and 
 test('the templates of every locale are the same files with the same blocks and config keys', () => {
   const files = locale => readdirSync(path.join(TEMPLATES, locale)).sort();
   const markers = text => [...text.matchAll(/<!-- \/?trellis:[a-z]+ -->/g)].map(m => m[0]);
-  const configLines = text => text.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).map(l => l.replace(/\{\{[^}]*\}\}/g, '{{}}'));
+  const configLines = text => text.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).map(l => l.replace(ANY, '{{}}'));
   const [first, ...rest] = LOCALES;
   for (const locale of rest) {
     assert.deepEqual(files(locale), files(first));
@@ -113,4 +140,45 @@ test('the templates of every locale are the same files with the same blocks and 
     }
     assert.deepEqual(configLines(template(locale, 'trellis.config')), configLines(template(first, 'trellis.config')), `${locale}/trellis.config has the keys of ${first}`);
   }
+});
+
+test('the plan-reviewer takes its report labels from one table, with a row per locale', () => {
+  const agent = readFileSync(path.join(TRELLIS_ROOT, 'agents', 'plan-reviewer.md'), 'utf8');
+  const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
+  assert.deepEqual(rows.map(row => row[0]), LOCALES, 'one row per locale, in the order of LOCALES');
+  const expected = {
+    en: ['Verdict', 'Errors', 'Omissions', 'Not established', 'correct', 'with errors'],
+    es: ['Veredicto', 'Errores', 'Omisiones', 'No establecido', 'correcto', 'con errores'],
+  };
+  for (const row of rows) assert.deepEqual(row.slice(1), expected[row[0]], `labels of ${row[0]}`);
+  const outside = agent.split('\n').filter(line => !line.startsWith('|')).join('\n');
+  for (const word of ['Verdict', 'Errors', 'Omissions', 'Not established']) {
+    assert.ok(!outside.includes(`**${word}**`), `the label ${word} is written only in the table`);
+  }
+});
+
+test('the templates of every locale use the same placeholder names; only the text around them is translated', () => {
+  const [first, ...rest] = LOCALES;
+  for (const file of readdirSync(path.join(TEMPLATES, first))) {
+    const names = namesOf(template(first, file));
+    for (const locale of rest) {
+      assert.deepEqual(namesOf(template(locale, file)), names, `${locale}/${file} names its placeholders as ${first}/${file} does`);
+    }
+    const prose = text => (text.match(ANY) ?? []).length - [...text.matchAll(NAMED)].length;
+    for (const locale of rest) {
+      assert.equal(prose(template(locale, file)), prose(template(first, file)), `${locale}/${file} has as many free-text placeholders as ${first}/${file}`);
+    }
+  }
+});
+
+test('filling the placeholders of a template leaves no {{ behind, and a name without a value is caught', () => {
+  for (const locale of LOCALES) {
+    for (const file of readdirSync(path.join(TEMPLATES, locale))) {
+      const filled = fill(template(locale, file), locale);
+      assert.ok(!filled.includes('{{'), `${locale}/${file} keeps a placeholder after filling`);
+    }
+  }
+  const unfilled = fill('# {{package}} {{extra}}', 'en', {package: 'app'});
+  assert.ok(unfilled.includes('{{'), 'a placeholder with no value is not filled');
+  assert.match(fill('{{One sentence, free text.}}', 'en'), /^x$/, 'a free-text placeholder is filled with text');
 });

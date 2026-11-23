@@ -1,6 +1,9 @@
 # The keys trellis.config accepts, one per line: <key>|<kind>|<default>.
 #
-# kind is single (one value) or multi (a list, written as the key repeated). A key whose middle part
+# kind is single (one value) or multi (a list, written as the key repeated). A single key whose values
+# are a closed set has kind enum:<a>,<b>,...: it reads as single, and this is the one place that lists
+# the accepted values, which `trellis doctor` checks the file against. The readers compare the
+# rung booleans to the literal false, so yes, on and 1 are not accepted spellings of true. A key whose middle part
 # is * belongs to a named subsection: [command "analyze"] run = ... is command.analyze.run. A multi
 # key with defaults repeats the line once per default value; setting the key in the config replaces
 # all of them. Any key of trellis.config that is not here is a FAIL of `trellis doctor`.
@@ -9,7 +12,7 @@
 # everything that reads the config through `trellis config`.
 
 project.name|single|
-project.locale|single|en
+project.locale|enum:en,es|en
 
 trellis.upstream|single|rologr35/trellis
 
@@ -20,9 +23,9 @@ git.protected|multi|main
 git.protected|multi|develop
 git.assistantMayMergeInto|multi|develop
 
-tracker.kind|single|github
+tracker.kind|enum:github,none|github
 
-workspace.kind|single|flutter
+workspace.kind|enum:flutter,dart,node,other|flutter
 workspace.package|multi|
 
 toolchain.require|multi|
@@ -37,8 +40,8 @@ command.*.ci|single|
 command.*.ciInstall|single|
 
 rung.*.command|single|
-rung.*.agent|single|true
-rung.*.pr|single|true
+rung.*.agent|enum:true,false|true
+rung.*.pr|enum:true,false|true
 rung.*.proves|single|
 rung.*.offUntil|single|
 

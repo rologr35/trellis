@@ -2,7 +2,7 @@
 #
 # trellis: the command line of the plugin. Each subcommand is a script of scripts/ or hygiene/.
 #
-#   trellis config get <key> | all <key> | list | subsections <section> | unknown
+#   trellis config get <key> | all <key> | list | subsections <section> | unknown | invalid
 #   trellis doctor                          read-only diagnosis, FAIL exits 1
 #   trellis sync                            rewrites the generated blocks and the generated deny
 #   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
@@ -56,6 +56,7 @@ case "$sub" in
       list) tc_list ;;
       subsections) [ $# -eq 2 ] || usage; tc_subsections "$2" ;;
       unknown) tc_unknown ;;
+      invalid) tc_invalid ;;
       *) usage ;;
     esac
     ;;
