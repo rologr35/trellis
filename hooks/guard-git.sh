@@ -208,30 +208,52 @@ guard_gh_merge() {
   fi
 }
 
-# The words of a segment as the shell reads them, without running anything: single and double
-# quotes group (and are removed: "main" and 'HEAD:main' are main), a backslash escapes the next
-# character. The result is in `words`.
-split_words() {
+# The words of every segment (a line of stdin) as the shell reads them, without running anything:
+# single and double quotes group and are removed ("main" and 'HEAD:main' are main), a backslash
+# escapes the next character (between double quotes, only $ ` " and \). One record per line: "w" and
+# the word, "e" at the end of a segment. In node because bash 3.2 takes quadratic time over a long line.
+split_segments() {
+  node -e '
+    const out = [];
+    for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
+      let cur = "", have = false, quote = "";
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (quote) {
+          if (c === quote) quote = "";
+          else if (c === "\\" && quote === "\"" && "$`\"\\".includes(line[i + 1] || " ")) cur += line[++i];
+          else cur += c;
+        } else if (c === "\"" || c === "\x27") {
+          quote = c;
+          have = true;
+        } else if (c === "\\") {
+          cur += line[++i] || "";
+          have = true;
+        } else if (c === " " || c === "\t") {
+          if (have) out.push("w" + cur);
+          cur = "";
+          have = false;
+        } else {
+          cur += c;
+          have = true;
+        }
+      }
+      if (have) out.push("w" + cur);
+      out.push("e");
+    }
+    process.stdout.write(out.join("\n") + "\n");
+  '
+}
+
+# The words of the next segment, from file descriptor 3, in `words`.
+next_segment() {
+  local record
   words=()
-  local s="$1" n=${#1} c cur='' have=false q='' i=0
-  while [ "$i" -lt "$n" ]; do
-    c="${s:i:1}"
-    if [ -n "$q" ]; then
-      if [ "$c" = "$q" ]; then q=''; else cur="$cur$c"; fi
-    else
-      case "$c" in
-        '"' | "'") q="$c"; have=true ;;
-        '\') i=$((i + 1)); cur="$cur${s:i:1}"; have=true ;;
-        ' ' | $'\t')
-          if [ "$have" = true ]; then words+=("$cur"); cur=''; have=false; fi
-          ;;
-        *) cur="$cur$c"; have=true ;;
-      esac
-    fi
-    i=$((i + 1))
+  while IFS= read -r record <&3; do
+    [ "$record" = 'e' ] && return 0
+    words+=("${record#w}")
   done
-  if [ "$have" = true ]; then words+=("$cur"); fi
-  return 0
+  return 1
 }
 
 # Variables assigned literally in the command itself (`REPO=/x; cd $REPO`), as GV_<name>. A value
@@ -276,7 +298,7 @@ expand_word() {
   EXPANDED="$out$w"
 }
 
-# Where the segments run after `cd <word>` or `git -C <word>`. A word that cannot be expanded
+# Where a segment runs after `cd <word>` or `git -C <word>`. A word that cannot be expanded
 # without the shell leaves the session's own directory: its repository's config judges the command.
 move_to() {
   if expand_word "$1"; then
@@ -294,10 +316,11 @@ CHAINED="${COMMAND//&&/$'\n'}"
 CHAINED="${CHAINED//||/$'\n'}"
 CHAINED="${CHAINED//|/$'\n'}"
 CHAINED="${CHAINED//;/$'\n'}"
-DIR="$CWD"
+# Where the shell stands; DIR is where one segment runs, which its own `git -C` moves.
+SHELL_DIR="$CWD"
 
-while IFS= read -r segment; do
-  split_words "$segment"
+while next_segment; do
+  DIR="$SHELL_DIR"
   count=${#words[@]}
   i=0
   while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
@@ -321,8 +344,13 @@ while IFS= read -r segment; do
   [ "$i" -lt "$count" ] || continue
 
   # `cd <dir>` moves where the later segments run.
-  if [ "${words[i]}" = 'cd' ] && [ $((i + 1)) -lt "$count" ]; then
-    move_to "${words[i + 1]}"
+  if [ "${words[i]}" = 'cd' ]; then
+    i=$((i + 1))
+    while [ "$i" -lt "$count" ] && [[ "${words[i]}" =~ ^-(-|[LPe@]+)$ ]]; do
+      i=$((i + 1))
+    done
+    [ "$i" -lt "$count" ] && move_to "${words[i]}"
+    SHELL_DIR="$DIR"
     continue
   fi
 
@@ -425,6 +453,6 @@ while IFS= read -r segment; do
       deny "A push to $target is refused for the assistant in every permission mode. Push an issue branch with an explicit refspec and open a pull request; a person pushes to $target."
     fi
   done
-done <<< "$CHAINED"
+done 3< <(split_segments <<< "$CHAINED")
 
 exit 0
