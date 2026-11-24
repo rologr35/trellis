@@ -236,6 +236,60 @@ tl_eq 'a merge into a base not allowed is still denied' 'deny' "$(verdict 'gh pr
 tl_eq 'a session with no config anywhere has no opinion on any form' 'allow' "$(verdict 'env git push origin main && sh -c "git push origin main"' "$plain")"
 tl_eq 'the denial says how to write the command' 'yes' "$(node -e 'console.log(JSON.stringify({tool_input: {command: process.argv[1]}, cwd: process.argv[2]}))' 'env git push origin main' "$wtb" | bash "$HOOK" | grep -q 'one invocation per command' && echo yes || echo no)"
 
+printf '\nthe review of #24\n'
+issueonly="$(tl_repo)"
+git -C "$issueonly" switch -q -c 7-x
+review_deny=(
+  'a substitution in a message::git commit -m "$(git push origin main)"'
+  'a substitution in a cd::cd "$(git push origin main; echo .)"'
+  'a substitution in an assignment before a command::X=$(git push origin main) git status'
+  'a process substitution::diff <(git push origin main) /dev/null'
+  'a substitution in a gh body::gh issue comment 3 --body "$(git push origin main)"'
+  'push --all::git push --all origin'
+  'push --mirror::git push --mirror origin'
+  'push --branches::git push --branches origin'
+  'the refspec ":"::git push origin :'
+  'the refspec "+:"::git push origin +:'
+  'a glob refspec::git push origin "refs/heads/*:refs/heads/*"'
+  'a star in a name::git push origin "ma*"'
+  'heads/ without refs/::git push origin heads/main'
+  'a brace list::git push origin {main,x}'
+  'a default in a variable::git push origin ${B:-main}'
+  'a default without colon::git push origin ${B-main}'
+  'a quoted default::BRANCH=; git push origin "${BRANCH:-main}"'
+  'a default assigned::git push origin ${B:=main}'
+  'the current branch by substitution on develop::git push origin "$(git branch --show-current)"'
+  'the current branch by rev-parse on develop::git push origin $(git rev-parse --abbrev-ref HEAD)'
+  'a -c on a push::git -c core.x=y push origin 21-x && echo main'
+)
+for entry in "${review_deny[@]}"; do
+  label="${entry%%::*}"
+  cmd="${entry#*::}"
+  case "$label" in *develop) cwd="$repo" ;; *) cwd="$wtb" ;; esac
+  tl_eq "$label" 'deny' "$(verdict "$cmd" "$cwd")"
+done
+tl_eq 'the current branch by substitution on an issue branch' 'allow' "$(verdict 'git push origin "$(git branch --show-current)"' "$wtb")"
+tl_eq 'a commit message with a substitution stays free' 'allow' "$(verdict 'git commit -m "$(date) fix"' "$wtb")"
+tl_eq 'a bare push uses the checkout of its own directory' 'allow' "$(verdict "cd $issueonly && git push" "$repo")"
+tl_eq 'HEAD too' 'allow' "$(verdict "cd $issueonly && git push origin HEAD" "$repo")"
+tl_eq 'GIT_DIR names a project the session has no config for' 'deny' "$(verdict "GIT_DIR=$repo/.git git push origin main" "$plain")"
+tl_eq '--git-dir too' 'deny' "$(verdict "git --git-dir=$repo/.git push origin main" "$plain")"
+tl_eq 'env -C too' 'deny' "$(verdict "env -C $repo git push origin main" "$plain")"
+tl_eq '$PWD is the tracked directory' 'deny' "$(verdict "cd $repo && cd \"\$PWD\" && git push origin main" "$plain")"
+tl_eq 'a variable-looking word in a message is not an invocation' 'allow' "$(verdict 'git commit -m "docs: GH_REPO and --git-dir notes, push to main" && git push origin 21-x' "$wtb")"
+out="$(node -e 'console.log(JSON.stringify({tool_input: {command: process.argv[1]}, cwd: process.argv[2]}))' 'env git push origin main' "$wtb" | bash "$HOOK")"
+tl_has 'the backstop names what it could not judge' 'wrapper' "$out"
+tl_has 'and says names, not pushes to' 'names a protected branch' "$out"
+out="$(node -e 'console.log(JSON.stringify({tool_input: {command: process.argv[1]}, cwd: process.argv[2]}))' "cd $plain && git push origin main" "$wtb" | bash "$HOOK")"
+tl_has 'a candidate denial says whose config judged' 'has no trellis.config' "$out"
+chain=''
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do chain="${chain}cd d$n && "; done
+started_ms="$(node -e 'console.log(Date.now())')"
+verdict "${chain}git push origin 21-x" "$wtb" > /dev/null
+elapsed_ms=$(($(node -e 'console.log(Date.now())') - started_ms))
+tl_eq '20 chained cd are judged in linear time' 'fast' "$([ "$elapsed_ms" -le 3000 ] && echo fast || echo "slow: $elapsed_ms ms")"
+tl_eq '20 chained cd and a protected push are refused' 'deny' "$(verdict "${chain}git push origin main" "$wtb")"
+
 printf '\nbranch switch on the main checkout\n'
 
 
