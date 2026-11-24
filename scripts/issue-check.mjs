@@ -1,6 +1,11 @@
 // The judgment of `trellis issue` (scripts/issue.sh holds the contract).
 //   node issue-check.mjs body <file>    judges a body before it is published
 //   node issue-check.mjs class <file>   prints S, M or L, the class of a body that passes
+//   node issue-check.mjs issue <json>   judges an issue as `gh issue view --json body,comments` gives it
+//   node issue-check.mjs deps <json>    prints what the plan of an issue depends on, one per line:
+//                                       ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
+//   node issue-check.mjs print <json>   prints the plan of an issue, its amendments resolved
+//   node issue-check.mjs issue-class <json>
 // The text is data: nothing in it is run.
 
 import {execFileSync} from 'node:child_process';
@@ -71,6 +76,68 @@ function sectionsOf(lines) {
 function parse(text) {
   const {value, rest} = complexityOf(linesOf(text));
   return {sections: sectionsOf(rest), complexity: value};
+}
+
+// Whoever may write in the repository. Anyone may comment on an issue of a public one.
+const TRUSTED = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+
+/** What a comment amends, when it is an amendment: its `###` sections of the mould, and its class. */
+function amendmentOf(comment) {
+  if (!TRUSTED.includes(comment.authorAssociation)) return null;
+  const {value, rest} = complexityOf(linesOf(comment.body));
+  const first = rest.find(l => l.text.trim() !== '');
+  if (!first || first.code || !new RegExp(`^##\\s+${escape(L.amendment)}\\s+\\([^)]+\\)`).test(first.text)) return null;
+  const sections = new Map();
+  let current = null;
+  for (const line of rest) {
+    const name = line.code ? undefined : /^ {0,3}###\s+(.*?)\s*#*\s*$/.exec(line.text)?.[1];
+    if (!line.code && /^ {0,3}#{1,2}\s/.test(line.text)) {
+      current = null;
+    } else if (L.sections.includes(name)) {
+      current = {name, lines: [], amended: true};
+      sections.set(name, current);
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  return {sections, complexity: value};
+}
+
+/** The plan of an issue: the body, with each section and the class of the last amendment that has it. */
+function resolve(issue) {
+  const plan = parse(issue.body);
+  const comments = [...(issue.comments ?? [])].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  for (const comment of comments) {
+    const amendment = amendmentOf(comment);
+    if (!amendment) continue;
+    plan.sections = [...plan.sections.filter(s => !amendment.sections.has(s.name)), ...amendment.sections.values()];
+    plan.complexity = amendment.complexity ?? plan.complexity;
+  }
+  return plan;
+}
+
+/** The text of a plan, as a body of the mould. */
+function render(plan) {
+  const parts = L.sections.flatMap(name => plan.sections.filter(s => s.name === name).map(s => `## ${name}\n\n${textOf(s.lines).trim()}`));
+  if (plan.complexity) parts.push(`${L.complexity}: ${plan.complexity}`);
+  return parts.join('\n\n');
+}
+
+/** The issues the plan depends on, and the lines a person reads. */
+function dependencies(plan) {
+  const refs = new Map();
+  const texts = [];
+  for (const section of plan.sections.filter(s => s.name === L.sections[0])) {
+    for (const group of labelled(section.lines, L.dependsOn)) {
+      const lines = group.inline === '' ? group.lines.map(l => l.text) : [group.inline];
+      for (const line of lines) {
+        for (const [whole, repo, n] of line.matchAll(REFERENCE)) refs.set(whole, {repo: repo ?? '-', n});
+        const rest = line.replace(REFERENCE, '').replace(/(?<!\p{L})(?:and|y|e)(?!\p{L})/gu, '');
+        if (/[\p{L}\p{N}]/u.test(rest)) texts.push(line.trim().replace(/\t/g, ' '));
+      }
+    }
+  }
+  return {refs: [...refs.values()], texts};
 }
 
 /** The text without what the mould leaves for the person to fill, and without comments. */
@@ -201,7 +268,7 @@ function judge(plan, lines) {
     else if (all.length > 1) misses.push(`section ${name} appears ${all.length} times`);
     else if (isEmpty(all[0].lines)) misses.push(`section ${name} is empty`);
   }
-  const order = plan.sections.map(s => L.sections.indexOf(s.name));
+  const order = plan.sections.filter(s => !s.amended).map(s => L.sections.indexOf(s.name));
   if (order.some((n, i) => i > 0 && n < order[i - 1])) misses.push(`the sections are not in order: ${L.sections.join(', ')}`);
 
   const source = new RegExp(`(?:^|[^\\p{L}])${escape(L.source)}(?:\\*\\*|__)?\\s*:(?:\\*\\*|__)?\\s*[^\\s.]`, 'u');
@@ -245,3 +312,14 @@ function report(misses) {
 const text = readFileSync(file, 'utf8');
 if (mode === 'body') process.exitCode = report(judge(parse(text), linesOf(text)));
 if (mode === 'class') console.log(parse(text).complexity);
+if (!['body', 'class'].includes(mode)) {
+  const plan = resolve(JSON.parse(text));
+  if (mode === 'issue') process.exitCode = report(judge(plan, linesOf(render(plan))));
+  if (mode === 'issue-class') console.log(plan.complexity);
+  if (mode === 'print') console.log(render(plan));
+  if (mode === 'deps') {
+    const {refs, texts} = dependencies(plan);
+    for (const {repo, n} of refs) console.log(`ref\t${repo}\t${n}`);
+    for (const line of texts) console.log(`text\t${line}`);
+  }
+}

@@ -3,6 +3,50 @@
 # with its amendments and dependencies, and the creation.
 . "$(dirname "$0")/../lib/testlib.sh"
 
+# gh answers from files: issue-<n>.json for the issue of this repository, state-<owner_repo>-<n> (or
+# state-here-<n>) for a dependency. Each call is logged with the token it ran with (fake values), and
+# `auth token -u <user>` prints token-<user> or fails, as gh does for an account not signed in.
+stubs="$TL_TMP/stubs"
+mkdir -p "$stubs"
+cat > "$stubs/gh" <<'GH'
+#!/bin/sh
+printf '%s|' "$@" >> "$GH_FIXTURES/calls.log"
+printf ' token=%s\n' "${GH_TOKEN:-none}" >> "$GH_FIXTURES/calls.log"
+fail() { echo "$1" >&2; exit 1; }
+user=''; repo=here; fields=''; prev=''
+for a in "$@"; do
+  case "$prev" in
+    -u) user="$a" ;;
+    --repo) repo="$(echo "$a" | tr / _)" ;;
+    --json) fields="$a" ;;
+  esac
+  prev="$a"
+done
+case "$1 $2" in
+  'auth token') cat "$GH_FIXTURES/token-$user" 2>/dev/null || exit 1 ;;
+  'issue view')
+    case "$fields" in
+      *body*) cat "$GH_FIXTURES/issue-$3.json" 2>/dev/null || fail "GraphQL: Could not resolve to an issue with the number of $3." ;;
+      *) cat "$GH_FIXTURES/state-$repo-$3" 2>/dev/null || fail "HTTP 404: not found ($repo $3)" ;;
+    esac ;;
+  *) fail "unexpected call: $*" ;;
+esac
+GH
+chmod +x "$stubs/gh"
+export GH_FIXTURES="$TL_TMP/gh"
+mkdir -p "$GH_FIXTURES"
+export PATH="$stubs:$PATH"
+# issue_json <n> <body file> [<author association> <comment file>]...: the issue as gh answers it.
+issue_json() {
+  node -e '
+    const {readFileSync, writeFileSync} = require("fs");
+    const [out, body, ...rest] = process.argv.slice(1);
+    const comments = [];
+    for (let i = 0; i < rest.length; i += 2) comments.push({authorAssociation: rest[i], body: readFileSync(rest[i + 1], "utf8"), createdAt: `2026-01-0${1 + i / 2}T00:00:00Z`});
+    writeFileSync(out, JSON.stringify({body: readFileSync(body, "utf8"), comments}));
+  ' "$GH_FIXTURES/issue-$1.json" "${@:2}"
+}
+
 # A project whose origin/develop holds lib/a.sh, docs/guide.md and README.md.
 remote="$(mktemp -d "$TL_TMP/remote.XXXXXX")"
 git init -q --bare "$remote"
@@ -177,6 +221,103 @@ fails 'an attribution' 's/^Gates: none/Generated with a tool/' 'attribution'
 fails 'a bare #N' 's/^Gates: none/As #3 says/' 'bare #3'
 fails 'a bare #N on the Depends on line of another section is judged as text' 's/^Gates: none/It depends on the thing in #3/' 'bare #3'
 tl_eq 'a #N on the Depends on line is a reference' '0' "$(case_of 's/^Depends on: .*/Depends on: #7, #8 and rologr35\/x#9/')"
+
+printf '\nan issue\n'
+printf 'CLOSED\n' > "$GH_FIXTURES/state-rologr35_x-7"
+printf 'CLOSED\n' > "$GH_FIXTURES/state-here-8"
+printf 'token-of-rologr35\n' > "$GH_FIXTURES/token-rologr35"
+issue_json 1 "$TL_TMP/good.md"
+tl_eq 'a good issue passes' '0' "$(status_of check 1)"
+tl_has '  and says so' 'issue check: ok (M)' "$(out)"
+tl_has '  a dependency in free text is printed for a person' 'the tag v2' "$(out)"
+tl_has '  the dependency is asked as its owner, when it is signed in' 'issue|view|7|--json|state|--jq|.state|--repo|rologr35/x| token=token-of-rologr35' "$(cat "$GH_FIXTURES/calls.log")"
+tl_lacks '  the token is not printed' 'token-of-rologr35' "$(out)"
+printf 'OPEN\n' > "$GH_FIXTURES/state-here-8"
+tl_eq 'an open dependency fails' '1' "$(status_of check 1)"
+tl_has '  and is named' 'depends on #8, which is open' "$(out)"
+printf 'MERGED\n' > "$GH_FIXTURES/state-here-8"
+tl_eq 'a merged pull request is closed' '0' "$(status_of check 1)"
+rm "$GH_FIXTURES/state-here-8"
+tl_eq 'a dependency that cannot be read fails' '1' "$(status_of check 1)"
+tl_has '  with the error of gh' 'HTTP 404: not found (here 8)' "$(out)"
+printf 'CLOSED\n' > "$GH_FIXTURES/state-here-8"
+tl_eq 'a body does not ask for its dependencies' '0' "$(rm -f "$GH_FIXTURES/calls.log"; status_of check --body "$TL_TMP/good.md")"
+tl_eq '  no gh call' 'none' "$([ -f "$GH_FIXTURES/calls.log" ] && echo some || echo none)"
+sed 's/^Depends on: .*/Depends on:\
+\
+- #8\
+- rologr35\/x#9/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 2 "$TL_TMP/case.md"
+printf 'OPEN\n' > "$GH_FIXTURES/state-rologr35_x-9"
+tl_eq 'a dependency in a list under the label counts' '1' "$(status_of check 2)"
+tl_has '  and is named' 'depends on rologr35/x#9, which is open' "$(out)"
+sed 's/^Depends on: .*/Depends on: the tag v2 and a decision/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 2 "$TL_TMP/case.md"
+tl_eq 'only a free-text dependency passes' '0' "$(status_of check 2)"
+sed 's/^Depends on: .*//' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 2 "$TL_TMP/case.md"
+tl_eq 'without Depends on' '0' "$(status_of check 2)"
+tl_eq 'an issue gh cannot read fails' '1' "$(status_of check 404)"
+tl_has '  with the error of gh' 'Could not resolve to an issue' "$(out)"
+tl_eq '#n is the number too' '0' "$(status_of check '#2')"
+
+printf '\nthe amendments of an issue\n'
+printf 'It is slow since #3.\n\n## Verification\n\nNo idea.\n\n## Context\n\nWho knows.\n' > "$TL_TMP/symptom.md"
+amendment() { printf '## Amendment (2026-11-24): %s\n\n' "$1"; }
+{ amendment 'the plan'; sed 's/^## /### /; s/^Depends on: .*//' "$TL_TMP/good.md"; } > "$TL_TMP/plan.md"
+issue_json 3 "$TL_TMP/symptom.md"
+tl_eq 'an issue without a plan fails' '1' "$(status_of check 3)"
+for who in OWNER MEMBER COLLABORATOR; do
+  issue_json 3 "$TL_TMP/symptom.md" "$who" "$TL_TMP/plan.md"
+  tl_eq "a plan in an amendment of $who passes, whatever the body says" '0' "$(status_of check 3)"
+done
+for who in NONE CONTRIBUTOR FIRST_TIME_CONTRIBUTOR ''; do
+  issue_json 3 "$TL_TMP/symptom.md" "$who" "$TL_TMP/plan.md"
+  tl_eq "one of an outside commenter (${who:-no association}) is ignored" '1' "$(status_of check 3)"
+done
+{ printf 'A thought first.\n\n'; cat "$TL_TMP/plan.md"; } > "$TL_TMP/buried.md"
+issue_json 3 "$TL_TMP/symptom.md" OWNER "$TL_TMP/buried.md"
+tl_eq 'a comment that is not headed Amendment is ignored' '1' "$(status_of check 3)"
+sed 's/^### Risks$/## Risks/' "$TL_TMP/plan.md" > "$TL_TMP/wrong-level.md"
+issue_json 3 "$TL_TMP/symptom.md" OWNER "$TL_TMP/wrong-level.md"
+tl_eq 'a section of an amendment is a ### heading' '1' "$(status_of check 3)"
+{ amendment 'risks'; printf '### Risks\n\nThe first risk.\n'; } > "$TL_TMP/a1.md"
+{ amendment 'risks again'; printf '### Risks\n\nThe second risk.\n\n### Notes\n\nStill risks.\n\n## Other\n\nNot risks.\n\nComplexity: L\n'; } > "$TL_TMP/a2.md"
+{ amendment 'nothing but words'; printf 'The plan does not change.\n'; } > "$TL_TMP/a3.md"
+{ amendment 'a stranger'; printf '### Risks\n\nThe risk of a stranger.\n\nComplexity: S\n'; } > "$TL_TMP/a4.md"
+sed 's/^Gates: none\.$//' "$TL_TMP/good.md" > "$TL_TMP/no-risks.md"
+issue_json 4 "$TL_TMP/no-risks.md" OWNER "$TL_TMP/a1.md"
+tl_eq 'a section filled by an amendment passes' '0' "$(status_of check 4)"
+issue_json 4 "$TL_TMP/no-risks.md" OWNER "$TL_TMP/a1.md" MEMBER "$TL_TMP/a2.md" OWNER "$TL_TMP/a3.md" NONE "$TL_TMP/a4.md"
+tl_eq 'the last amendment that has the section wins' '0' "$(status_of check 4)"
+tl_has '  and the last complexity line' 'issue check: ok (L)' "$(out)"
+tl_eq '--print passes' '0' "$(status_of check 4 --print)"
+tl_has '  with the last Risks' 'The second risk.' "$(out)"
+tl_has '  and what its section holds' 'Still risks.' "$(out)"
+tl_lacks '  without the one before' 'The first risk.' "$(out)"
+tl_lacks '  without what is outside a section' 'Not risks.' "$(out)"
+tl_lacks '  without the one of a stranger' 'stranger' "$(out)"
+tl_eq '  and with the last line the class' 'Complexity: L' "$(tail -n 1 "$TL_TMP/out.txt")"
+tl_eq '  its sections are the five, in order' 'Context Approved-plan Layers-and-files Risks Verification' "$(sed -n 's/^## //p' "$TL_TMP/out.txt" | tr ' ' '-' | tr '\n' ' ' | sed 's/ $//')"
+{ amendment 'emptied'; printf '### Risks\n\n### Verification\n\nRun it.\n\nComplexity: XL\n'; } > "$TL_TMP/a5.md"
+issue_json 5 "$TL_TMP/good.md" OWNER "$TL_TMP/a5.md"
+tl_eq 'an amendment that empties a section fails' '1' "$(status_of check 5)"
+tl_has '  naming it' 'section Risks is empty' "$(out)"
+tl_has '  and its wrong class' 'last line is not `Complexity: S`, M or L' "$(out)"
+tl_eq '--print judges nothing' '0' "$(status_of check 5 --print)"
+issue_json 5 "$TL_TMP/symptom.md"
+tl_eq '--print of an issue without a plan' '0' "$(status_of check --print 5)"
+{ amendment 'deps'; printf '### Context\n\nChanged.\n\nDepends on: rologr35/x#9\n'; } > "$TL_TMP/a6.md"
+issue_json 6 "$TL_TMP/good.md" OWNER "$TL_TMP/a6.md"
+tl_eq 'the dependencies are those of the last Context' '1' "$(status_of check 6)"
+tl_has '  named' 'depends on rologr35/x#9, which is open' "$(out)"
+tl_lacks '  and not those of the body' 'the tag v2' "$(out)"
+git config -f trellis.config project.locale es
+sed 's/^## /### /; s/^Depende de: .*//' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
+{ printf '## Enmienda (2026-11-24)\n\n'; cat "$TL_TMP/case.md"; } > "$TL_TMP/plan-es.md"
+issue_json 7 "$TL_TMP/symptom.md" OWNER "$TL_TMP/plan-es.md"
+tl_eq 'es: a plan in an Enmienda passes' '0' "$(status_of check 7)"
+git config -f trellis.config --unset project.locale
 
 printf '\nusage\n'
 tl_eq 'no arguments' '2' "$(status_of)"
