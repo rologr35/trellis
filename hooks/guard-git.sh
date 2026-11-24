@@ -56,6 +56,16 @@ TRANSCRIPT="$(field transcript_path)"
 
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/gh.sh
+. "$TRELLIS_ROOT/lib/gh.sh"
+
+# A note for the person that the hook prints with its answer (a `systemMessage`): what it could not
+# ask GitHub. Held until the end, because the hook prints one JSON object.
+HELD_MESSAGE=''
+hold_message() {
+  case "$HELD_MESSAGE" in *"$1"*) return 0 ;; esac
+  HELD_MESSAGE="${HELD_MESSAGE:+$HELD_MESSAGE }$1"
+}
 
 # The config is the one of the repository a segment runs in, after its `cd` or `git -C`: a session
 # standing outside a project can still push into it. A repository without trellis.config is no
@@ -84,8 +94,18 @@ load_config() {
 
 DENY_NOTE=''
 deny() {
-  node -e 'console.log(JSON.stringify({hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: process.argv[1]}}));' "$1$DENY_NOTE"
+  node -e '
+    const out = {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: process.argv[1]}};
+    if (process.argv[2]) out.systemMessage = process.argv[2];
+    console.log(JSON.stringify(out));
+  ' "$1$DENY_NOTE" "$HELD_MESSAGE"
   exit 0
+}
+
+# The held message alone, when no decision was made.
+print_held_message() {
+  [ -n "$HELD_MESSAGE" ] || return 0
+  node -e 'console.log(JSON.stringify({systemMessage: process.argv[1]}));' "$HELD_MESSAGE"
 }
 
 in_list() {
@@ -139,7 +159,12 @@ guard_branch_switch() {
   branch="$(git -C "$dir" branch --show-current 2>/dev/null)" || return 0
   issue="$(branch_issue "$branch")"
   [ -n "$issue" ] || return 0
-  state="$(cd "$dir" && GH_PROMPT_DISABLED=1 gh issue view "$issue" --json state --jq .state 2>/dev/null </dev/null)" || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  if ! gh_as_owner "$dir" "$(gh_owner "$dir")" issue view "$issue" --json state --jq .state; then
+    hold_message "trellis guard-git: the state of issue $issue could not be read as $GH_AS_ACCOUNT (${GH_AS_ERR:-gh failed}), so the open-issue check of this switch was skipped."
+    return 0
+  fi
+  state="$GH_AS_OUT"
   if [ "$state" = 'OPEN' ]; then
     deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
   fi
@@ -202,14 +227,18 @@ guard_gh_merge() {
   if [ -z "$target" ]; then
     deny "A merge names its pull request (number, URL or branch), so its base can be read first: gh pr merge <n>. The assistant merges only into: ${allowed:-nothing}."
   fi
+  # The account that sees the repository is its owner's: of -R, of the URL naming the pull request,
+  # or of the origin remote.
+  local hint="$repo"
+  [ -n "$hint" ] || case "$target" in http://* | https://*) hint="$target" ;; esac
   if [ -n "$repo" ]; then
-    base="$(cd "$dir" 2>/dev/null && GH_PROMPT_DISABLED=1 gh pr view "$target" --json baseRefName --jq .baseRefName --repo "$repo" 2>/dev/null </dev/null)"
+    gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName --repo "$repo"
   else
-    base="$(cd "$dir" 2>/dev/null && GH_PROMPT_DISABLED=1 gh pr view "$target" --json baseRefName --jq .baseRefName 2>/dev/null </dev/null)"
+    gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName
   fi
-  base="${base//[[:space:]]/}"
+  base="${GH_AS_OUT//[[:space:]]/}"
   if [ -z "$base" ]; then
-    deny "The base branch of pull request $target could not be read (gh pr view failed or answered nothing), and a merge whose base is unknown is refused. Check the pull request and gh's session, then repeat."
+    deny "The base branch of pull request $target could not be read as $GH_AS_ACCOUNT (${GH_AS_ERR:-gh failed or answered nothing}), and a merge whose base is unknown is refused. Check the pull request and gh's session, then repeat."
   fi
   if ! in_list "$base" "$MERGE_INTO"; then
     deny "Pull request $target merges into $base, and the assistant merges only into: ${allowed:-nothing}. A merge into $base is a person's."
@@ -1017,4 +1046,5 @@ while next_segment; do
 done 3< <(split_segments)
 
 backstop
+print_held_message
 exit 0

@@ -65,4 +65,56 @@ out="$("$TRELLIS" worktree prune 2>&1)"
 tl_has 'keeps a fresh one' "(6-from-inside): no commits yet" "$out"
 tl_eq 'the main checkout stays' "$repo" "$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
 
+printf '\nprune asks GitHub as the owner\n'
+# 9: merged with a merge commit whose subject does not name the branch, so only GitHub can say the
+# pull request was this branch's. The origin of this repository is a local path, so a git shim
+# answers `remote get-url origin` with a GitHub URL and passes everything else to git.
+gpath="$(add 9 ghmerge)"
+(cd "$gpath" && printf 'g\n' > g.txt && git add g.txt && git commit -q -m 'feat: g (#9)' && git push -q origin 9-ghmerge)
+git merge -q --no-ff -m "Merge branch '9-ghmerge'" 9-ghmerge
+git push -q origin develop
+git push -q origin --delete 9-ghmerge
+gtip="$(git rev-parse 9-ghmerge)"
+shim="$TL_TMP/shim"
+mkdir -p "$shim"
+export REAL_GIT="$(command -v git)"
+cat > "$shim/git" <<'SHIM'
+#!/bin/sh
+case " $* " in
+  *' remote get-url origin '*) echo 'https://github.com/acme/thing.git'; exit 0 ;;
+esac
+exec "$REAL_GIT" "$@"
+SHIM
+# gh lists the merged pull request only to the owner's token (fake), and logs each call.
+cat > "$shim/gh" <<'GH'
+#!/bin/sh
+printf '%s %s token=%s\n' "$1" "$2" "${GH_TOKEN:-none}" >> "$GH_CALLS"
+case "$1 $2" in
+  'auth token') cat "$GH_TOKEN_FILE" 2>/dev/null || exit 1 ;;
+  'pr list')
+    [ -f "$GH_FAIL" ] && { echo 'HTTP 401: Bad credentials' >&2; exit 1; }
+    [ "${GH_TOKEN:-none}" = 'tok-acme' ] || { echo 'GraphQL: Could not resolve to a Repository' >&2; exit 1; }
+    cat "$GH_HEADS" ;;
+  *) exit 0 ;;
+esac
+GH
+chmod +x "$shim/git" "$shim/gh"
+export GH_CALLS="$TL_TMP/gh-calls.log" GH_TOKEN_FILE="$TL_TMP/gh-token" GH_FAIL="$TL_TMP/gh-fail" GH_HEADS="$TL_TMP/gh-heads"
+printf 'tok-acme\n' > "$GH_TOKEN_FILE"
+printf '%s\n' "$gtip" > "$GH_HEADS"
+: > "$GH_CALLS"
+: > "$GH_FAIL"
+out="$(PATH="$shim:$PATH" "$TRELLIS" worktree prune 2>&1)"
+tl_has 'a failing gh is named' "GitHub could not be asked as the owner's account (acme): HTTP 401: Bad credentials" "$out"
+tl_has 'and keeps the worktree' "$gpath (9-ghmerge): GitHub could not be asked" "$out"
+tl_eq 'its directory is still there' 'there' "$([ -d "$gpath" ] && echo there)"
+tl_lacks 'the token is not printed' 'tok-acme' "$out"
+rm "$GH_FAIL"
+: > "$GH_CALLS"
+out="$(PATH="$shim:$PATH" "$TRELLIS" worktree prune 2>&1)"
+tl_has 'a merged pull request is seen and the worktree removed' "removed $gpath (9-ghmerge)" "$out"
+tl_has 'with the owner token' 'pr list token=tok-acme' "$(cat "$GH_CALLS")"
+tl_eq 'one lookup of the token' '1' "$(grep -c 'auth token' "$GH_CALLS")"
+tl_lacks 'the token is not printed either' 'tok-acme' "$out"
+
 tl_done
