@@ -11,8 +11,9 @@
 #   3. on the main checkout, a checkout or switch while the current branch is <n>-... and issue n is
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
-#   4. a `gh issue create` when the session's transcript holds no earlier `gh issue list` with
-#      --search: a plan written without reading what was decided around it repeats a decision;
+#   4. a `gh issue create` or a `trellis issue create` when the session's transcript holds no earlier
+#      `gh issue list` with --search: a plan written without reading what was decided around it
+#      repeats a decision;
 #   5. a `gh pr merge` that names no pull request, whose base cannot be read, that runs in a cloud
 #      session (CLAUDE_CODE_REMOTE), or whose base is not in git.assistantMayMergeInto. Silence is not
 #      a neutral opinion on a merge, unlike on the other guards.
@@ -884,6 +885,13 @@ judge_gh() {
   guard_gh_issue "${rest[@]}"
 }
 
+# One trellis invocation, in the directory $1 the shell may stand in: words[ci] is `trellis`.
+judge_trellis() {
+  DIR="$1"
+  load_config "$DIR" || return 0
+  guard_gh_issue "${words[@]:ci+1}"
+}
+
 # Whether a git or gh invocation hides in a segment: its command is not git or gh itself, and its
 # words mention git, gh, push or merge. Programs that only print or move text do not count.
 INERT=' echo printf cat tee grep egrep fgrep rg head tail wc ls cp mv rm mkdir touch diff cmp sort uniq tr cut basename dirname test [ true false : pwd realpath stat file tree date sleep which type '
@@ -1054,6 +1062,13 @@ while next_segment; do
           *) unjudged 'a gh form it does not parse (gh api, an alias)' ;;
         esac
         [ "$UNRES" = true ] && unjudged 'a directory only the shell can resolve'
+      fi
+      ;;
+    trellis | */trellis)
+      # Its subcommand `issue` takes the arguments of `gh issue`, whose words are data.
+      for sd in "${SHELL_DIRS[@]}"; do judge_trellis "$sd"; done
+      if [[ "$FLAGS" == *[ghkm]* ]] && [ "$cmd ${words[ci + 1]:-}" != 'trellis issue' ]; then
+        unjudged "a wrapper or a program ($cmd) that may run git or gh"
       fi
       ;;
     *)

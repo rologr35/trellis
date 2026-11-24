@@ -339,8 +339,18 @@ printf '\nissue creation\n'
 transcript="$TL_TMP/transcript.jsonl"
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "ls"}}]}}\n' > "$transcript"
 tl_eq 'without a search' 'deny' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
+tl_eq 'trellis issue create without a search' 'deny' "$(verdict 'trellis issue create --title x --body-file b.md' "$repo" "$transcript")"
+tl_eq 'after a cd and an assignment, too' 'deny' "$(verdict "cd $repo && X=1 trellis issue create --title x --body-file b.md" "$plain" "$transcript")"
+tl_eq 'by the path of the script, too' 'deny' "$(verdict './bin/trellis issue create --title x --body-file b.md' "$repo" "$transcript")"
+tl_eq 'trellis issue check needs no search' 'allow' "$(verdict 'trellis issue check --body b.md' "$repo" "$transcript")"
+tl_eq 'a title of trellis issue create without a search is denied for the search' 'deny' "$(verdict "trellis issue create --title 'never push to main' --body-file b.md" "$repo" "$transcript")"
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "gh issue list --search login"}}]}}\n' >> "$transcript"
 tl_eq 'after a search' 'allow' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
+tl_eq 'trellis issue create after a search' 'allow' "$(verdict 'trellis issue create --title x --body-file b.md' "$repo" "$transcript")"
+tl_eq 'the words of its title are data, as those of gh issue create are' 'allow' "$(verdict "trellis issue create --title 'never push to main, nor gh pr merge' --body-file b.md" "$repo" "$transcript")"
+tl_eq 'a push in a substitution of its title is judged' 'deny' "$(verdict 'trellis issue create --title "$(git push origin main)" --body-file b.md' "$repo" "$transcript")"
+tl_eq 'another trellis subcommand with those words is not judged' 'deny' "$(verdict "trellis other 'push main'" "$repo" "$transcript")"
+tl_eq 'a wrapper in front of it is not judged either' 'deny' "$(verdict "env trellis issue create --title 'never push to main'" "$repo" "$transcript")"
 tl_eq 'no transcript is no opinion' 'allow' "$(verdict 'gh issue create --title x')"
 
 printf '\nmerge\n'
