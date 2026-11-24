@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Exercises scripts/issue.sh with a fake gh on the PATH: the check of a body, the check of an issue
-# with its amendments and dependencies, and the creation.
+# with its amendments and dependencies, the creation, and the close after a merge.
 . "$(dirname "$0")/../lib/testlib.sh"
 
 # gh answers from files: issue-<n>.json for the issue of this repository, state-<owner_repo>-<n> (or
 # state-here-<n>) for a dependency. Each call is logged with the token it ran with (fake values), and
-# `auth token -u <user>` prints token-<user> or fails, as gh does for an account not signed in.
+# `auth token -u <user>` prints token-<user> or fails, as gh does for an account not signed in. For the
+# close, pr-<n>.json and close-<n>.json are what GitHub holds, and the writes change close-<n>.json.
 stubs="$TL_TMP/stubs"
 mkdir -p "$stubs"
 cat > "$stubs/gh" <<'GH'
@@ -24,8 +25,23 @@ for a in "$@"; do
 done
 case "$1 $2" in
   'auth token') cat "$GH_FIXTURES/token-$user" 2>/dev/null || exit 1 ;;
+  'pr view') cat "$GH_FIXTURES/pr-$3.json" 2>/dev/null || fail "GraphQL: Could not resolve to a PullRequest with the number of $3." ;;
+  'issue edit' | 'issue comment' | 'issue close')
+    [ ! -f "$GH_FIXTURES/$2-fails" ] || fail "HTTP 403: no $2 for you"
+    node -e '
+      const {readFileSync, writeFileSync} = require("fs");
+      const [file, verb, ...rest] = process.argv.slice(1);
+      const issue = JSON.parse(readFileSync(file, "utf8"));
+      const of = flag => rest[rest.indexOf(flag) + 1];
+      if (verb === "close") issue.state = "CLOSED";
+      if (verb === "comment") issue.comments.push({author: {login: "x"}, authorAssociation: "OWNER", body: readFileSync(of("--body-file"), "utf8")});
+      if (rest.includes("--add-label")) issue.labels.push({name: of("--add-label")});
+      if (rest.includes("--remove-label")) issue.labels = issue.labels.filter(l => l.name !== of("--remove-label"));
+      writeFileSync(file, JSON.stringify(issue));
+    ' "$GH_FIXTURES/close-$3.json" "$2" "$@" ;;
   'issue view')
     case "$fields" in
+      *url*) cat "$GH_FIXTURES/close-$3.json" 2>/dev/null || fail "GraphQL: Could not resolve to an issue with the number of $3." ;;
       *body*) cat "$GH_FIXTURES/issue-$3.json" 2>/dev/null || fail "GraphQL: Could not resolve to an issue with the number of $3." ;;
       *) cat "$GH_FIXTURES/state-$repo-$3" 2>/dev/null || fail "HTTP 404: not found ($repo $3)" ;;
     esac ;;
@@ -401,6 +417,190 @@ tl_has '  without origin reached, it says the last fetch judged' 'judged by the 
 tl_lacks '  the token is not printed' 'token-of-rologr35' "$(out)"
 unset GIT_ALLOW_PROTOCOL
 git remote set-url origin "$remote"
+
+printf '\nclose\n'
+# pr_json <n> <state> <base> <body line>...: a pull request of rologr35/fixture as gh answers it.
+pr_json() {
+  local n="$1" state="$2" base="$3"
+  shift 3
+  node -e '
+    const [out, n, state, base, ...lines] = process.argv.slice(1);
+    require("fs").writeFileSync(out, JSON.stringify({number: Number(n), url: `https://github.com/rologr35/fixture/pull/${n}`, state, baseRefName: base, body: lines.join("\n")}));
+  ' "$GH_FIXTURES/pr-$n.json" "$n" "$state" "$base" "$@"
+}
+# issue_of <n> <state> [<url>]: an issue without labels or comments.
+issue_of() {
+  printf '{"url":"%s","state":"%s","labels":[],"comments":[]}' \
+    "${3:-https://github.com/rologr35/fixture/issues/$1}" "$2" > "$GH_FIXTURES/close-$1.json"
+}
+close_of() { rm -f "$GH_FIXTURES/calls.log"; status_of close "$@"; }
+writes() { calls | grep -E '^(issue\|(edit|comment|close)|label\|create)' | sed -E 's/ token=.*//; s#\|/[^|]*\|#|<file>|#'; }
+state_is() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).state' "$GH_FIXTURES/close-$1.json"; }
+labels_of() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).labels.map(l => l.name).join()' "$GH_FIXTURES/close-$1.json"; }
+comments_of() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).comments.map(c => c.body).join("\n====\n")' "$GH_FIXTURES/close-$1.json"; }
+count_of() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).comments.length' "$GH_FIXTURES/close-$1.json"; }
+printf 'M\n' > "$GH_FIXTURES/labels"
+
+pr_json 40 MERGED develop 'Closes #12' '' '**After merging**' 'none'
+issue_of 12 OPEN
+tl_eq 'merged into the integration branch' '0' "$(close_of 40)"
+tl_eq '  closes the issue and writes nothing else' 'issue|close|12|' "$(writes)"
+tl_eq '  which is closed' 'CLOSED' "$(state_is 12)"
+tl_eq 'again' '0' "$(close_of 40)"
+tl_eq '  writes nothing' '' "$(writes)"
+issue_of 12 OPEN
+tl_eq 'with the # of the pull request' '0' "$(close_of '#40')"
+tl_eq '  closes it' 'CLOSED' "$(state_is 12)"
+pr_json 40 MERGED develop 'Closes #12'
+issue_of 12 OPEN
+tl_eq 'a body without the section has nothing pending' '0' "$(close_of 40)"
+tl_eq '  and closes it' 'issue|close|12|' "$(writes)"
+
+for case in 'OPEN develop' 'CLOSED develop' 'MERGED main'; do
+  # shellcheck disable=SC2086
+  pr_json 40 $case 'Closes #12' '' '**After merging**' '- Tag it.'
+  issue_of 12 OPEN
+  tl_eq "refuses a pull request $case" '1' "$(close_of 40)"
+  tl_eq '  and writes nothing' '' "$(writes)"
+  tl_eq '  nor with --done' '1' "$(close_of 40 --done)"
+  tl_eq '  and writes nothing' '' "$(writes)"
+done
+tl_has '  it names the branch' 'develop' "$(out)"
+
+nothing() {
+  pr_json 40 MERGED develop "${@:2}"
+  issue_of 12 OPEN
+  tl_eq "nothing to close: $1" '0' "$(close_of 40)"
+  tl_eq '  and it writes nothing' '' "$(writes)"
+}
+nothing 'another repository' 'Closes rologr35/x#12'
+nothing 'the URL of another repository' 'Closes https://github.com/rologr35/x/issues/12'
+nothing 'a fence' '```' 'Closes #12' '```'
+nothing 'a fence of tildes' '~~~' 'Closes #12' '~~~'
+nothing 'a fence that is not closed' '```' 'Closes #12'
+nothing 'an indented block' 'Text.' '' '    Closes #12'
+nothing 'an inline span' 'Write `Closes #12`.'
+nothing 'a comment' '<!-- Closes #12 -->'
+nothing 'a reference that does not close' 'See #12'
+nothing 'no body' ''
+pr_json 40 MERGED develop 'Closes #13'
+issue_of 13 OPEN 'https://github.com/rologr35/fixture/pull/13'
+tl_eq 'the number of a pull request' '0' "$(close_of 40)"
+tl_eq '  is skipped' '' "$(writes)"
+issue_of 13 OPEN 'https://github.com/rologr35/x/issues/4'
+tl_eq 'an issue moved to another repository' '0' "$(close_of 40)"
+tl_eq '  is skipped' '' "$(writes)"
+for text in 'Closes rologr35/Fixture#12' 'closes: #12' 'Fixes https://github.com/rologr35/fixture/issues/12' '- Text' ; do
+  pr_json 40 MERGED develop "$text" '' '  - Resolved #12'
+  issue_of 12 OPEN
+  tl_eq "closes: $text" '0' "$(close_of 40)"
+  tl_eq '  once' 'issue|close|12|' "$(writes)"
+done
+pr_json 40 MERGED develop 'Closes #12, closes #14'
+issue_of 12 OPEN; issue_of 14 OPEN
+tl_eq 'two issues' '0' "$(close_of 40)"
+tl_eq '  are both closed' 'CLOSED CLOSED' "$(state_is 12) $(state_is 14)"
+
+PENDING=('Closes #12' '' '## After merging' '' '- [ ] Tag it.' '  - as v1 <!-- hidden -->' '- Run `trellis doctor`.' '' '## Verification' 'ok')
+pr_json 40 MERGED develop "${PENDING[@]}"
+issue_of 12 OPEN
+tl_eq 'with actions pending' '0' "$(close_of 40)"
+tl_eq '  creates the label, labels, comments and closes, in that order' \
+  'label|create|pending-actions|--color|D93F0B|--description|Merged with actions pending|
+issue|edit|12|--add-label|pending-actions|
+issue|comment|12|--body-file|<file>|
+issue|close|12|' "$(writes)"
+tl_has '  the comment opens with the mark' '<!-- trellis:pending-actions pr=40 -->' "$(comments_of 12 | head -1)"
+tl_has '  it has the actions as they are written' '  - as v1' "$(comments_of 12)"
+tl_has '  and the code of them' 'Run `trellis doctor`.' "$(comments_of 12)"
+tl_lacks '  not what is hidden' 'hidden' "$(comments_of 12)"
+tl_lacks '  nor the next section' 'Verification' "$(comments_of 12)"
+tl_eq 'again' '0' "$(close_of 40)"
+tl_eq '  writes nothing' '' "$(writes)"
+tl_eq '  one comment and the label remain' '1 pending-actions' "$(count_of 12) $(labels_of 12)"
+printf 'M\nPending-Actions\n' > "$GH_FIXTURES/labels"
+tl_eq 'done' '0' "$(close_of 40 --done)"
+tl_eq '  takes the label off and writes nothing else' 'issue|edit|12|--remove-label|pending-actions|' "$(writes)"
+tl_eq 'done, before the number, again' '0' "$(close_of --done 40)"
+tl_eq '  writes nothing' '' "$(writes)"
+tl_eq 'a rerun after done' '0' "$(close_of 40)"
+tl_eq '  does not put the label back' '' "$(writes)"
+issue_of 12 CLOSED
+tl_eq 'an issue that is closed already' '0' "$(close_of 40)"
+tl_eq '  gets the label and the comment' '1 pending-actions' "$(count_of 12) $(labels_of 12)"
+tl_lacks '  and no close' 'issue|close' "$(writes)"
+pr_json 41 MERGED develop "${PENDING[@]}"
+tl_eq 'another pull request of the same issue' '0' "$(close_of 41)"
+tl_eq '  has its own comment' '2' "$(count_of 12)"
+node -e '
+  const fs = require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({url: "https://github.com/rologr35/fixture/issues/12", state: "OPEN", labels: [], comments: [{author: {login: "x"}, authorAssociation: "NONE", body: "<!-- trellis:pending-actions pr=40 -->"}, {author: {login: "y"}, authorAssociation: "OWNER", body: "quoted: <!-- trellis:pending-actions pr=40 -->"}]}));
+' "$GH_FIXTURES/close-12.json"
+tl_eq 'the mark of someone outside, or inside a text' '0' "$(close_of 40)"
+tl_eq '  is not the mark' '3' "$(count_of 12)"
+node -e '
+  const fs = require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({url: "https://github.com/rologr35/fixture/issues/12", state: "OPEN", labels: [], comments: [{author: {login: "github-actions"}, authorAssociation: "NONE", body: "<!-- trellis:pending-actions pr=40 -->"}]}));
+' "$GH_FIXTURES/close-12.json"
+tl_eq 'the mark of the workflow' '0' "$(close_of 40)"
+tl_eq '  is the mark' 'issue|close|12|' "$(writes)"
+pr_json 40 MERGED develop 'Closes #12' '' '**After merging**: tag it'
+issue_of 12 OPEN
+tl_eq 'actions written as prose' '0' "$(close_of 40)"
+tl_has '  are pending too' 'tag it' "$(comments_of 12)"
+
+pr_json 40 MERGED develop "${PENDING[@]}"
+for verb in edit comment; do
+  issue_of 12 OPEN
+  touch "$GH_FIXTURES/$verb-fails"
+  tl_eq "a failure of the $verb fails" '1' "$(close_of 40)"
+  tl_eq '  and leaves it open' 'OPEN' "$(state_is 12)"
+  tl_has '  with the error of gh' "no $verb for you" "$(out)"
+  rm "$GH_FIXTURES/$verb-fails"
+  tl_eq '  the rerun ends it' '0' "$(close_of 40)"
+  tl_eq '  with one comment and the label' 'CLOSED 1 pending-actions' "$(state_is 12) $(count_of 12) $(labels_of 12)"
+done
+issue_of 12 OPEN
+touch "$GH_FIXTURES/close-fails"
+tl_eq 'a failure of the close fails' '1' "$(close_of 40)"
+rm "$GH_FIXTURES/close-fails"
+tl_eq '  and the rerun only closes' '0' "$(close_of 40)"
+tl_eq '  it' 'issue|close|12|' "$(writes)"
+pr_json 40 MERGED develop 'Closes #99, closes #12'
+issue_of 12 OPEN
+tl_eq 'an issue that cannot be read fails' '1' "$(close_of 40)"
+tl_has '  it is named' '#99' "$(out)"
+tl_eq '  and the next one is still closed' 'CLOSED' "$(state_is 12)"
+rm "$GH_FIXTURES/close-12.json"
+tl_eq 'a pull request that cannot be read fails' '1' "$(close_of 77)"
+tl_has '  with the error of gh' 'Could not resolve' "$(out)"
+echo '' > "$GH_FIXTURES/pr-78.json"
+tl_eq 'an answer that does not parse fails' '1' "$(close_of 78)"
+pr_json 40 MERGED develop '**After merging**' '- Tag it.'
+tl_eq 'actions pending without an issue' '0' "$(close_of 40)"
+tl_has '  it says where they are' 'no issue' "$(out)"
+printf '[project]\n\tlocale = es\n[git]\n\tintegrationBranch = develop\n' > trellis.config
+pr_json 40 MERGED develop 'Closes #12' '' '**Después de mezclar**' '- Poner el tag.'
+issue_of 12 OPEN
+tl_eq 'es: the section of the locale' '0' "$(close_of 40)"
+tl_has '  es: its actions' 'Poner el tag.' "$(comments_of 12)"
+tl_has '  es: under its words' 'Pendiente tras mezclar #40' "$(comments_of 12)"
+git config -f trellis.config --unset project.locale
+git remote set-url origin https://github.com/rologr35/fixture.git
+pr_json 40 MERGED develop "${PENDING[@]}"
+issue_of 12 OPEN
+tl_eq 'a repository whose owner is signed in' '0' "$(close_of 40)"
+tl_lacks '  asks and writes nothing as another account' 'token=none' "$(calls | grep -v '^auth')"
+git remote set-url origin "$remote"
+for wrong in '' 'abc' '40 41' '40 --force'; do
+  # shellcheck disable=SC2086
+  tl_eq "a wrong use: close $wrong" '2' "$(close_of $wrong)"
+done
+tl_has 'the usage of trellis lists close' 'trellis issue close <pr> [--done]' "$("$TRELLIS" help 2>&1)"
+git config -f trellis.config tracker.kind none
+tl_eq 'tracker.kind = none exits 2' '2' "$(close_of 40)"
+tl_eq '  with no gh call' '' "$(calls)"
+git config -f trellis.config --unset tracker.kind
 
 printf '\nusage\n'
 tl_eq 'no arguments' '2' "$(status_of)"

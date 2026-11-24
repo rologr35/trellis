@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #
-# issue: the plan of an issue, written from the mould (templates/<locale>/issue.md) and checked.
+# issue: the plan of an issue, written from the mould (templates/<locale>/issue.md) and checked, and
+# the close of the issue when its pull request is merged.
 #
 #   trellis issue check --body <file>    a body, before it is published
 #   trellis issue check <n>              the plan of an issue of this repository, at pick-up
 #   trellis issue check <n> --print      prints that plan and judges nothing
 #   trellis issue create --title <t> --body-file <file>
 #                                        checks the body, creates the issue, prints its URL
+#   trellis issue close <pr> [--done]    closes the issues of a merged pull request; --done when its
+#                                        pending actions are done
 #
 # The check: the five sections of project.locale present, once, in order and not empty; each item of
 # Out of scope with its Source; the last line with text `Complexity: S`, M or L; every path in
@@ -21,6 +24,14 @@
 #
 # The label of the issue created is the class of its complexity line. S, M and L are created when the
 # repository lacks them.
+#
+# The close refuses a pull request that is not merged into git.integrationBranch. It takes the issues
+# of this repository its body closes outside code (Closes, Fixes, Resolves) and skips the number of a
+# pull request. With actions in the section After merging, each issue first gets the label
+# pending-actions, created when the repository lacks it, and one comment with them, whose first line
+# marks the pull request; then, whatever is pending, it is closed. The mark makes a rerun harmless: it
+# writes neither the comment nor the label again. --done only takes the label off. A failure on one
+# issue leaves it open and goes on with the next.
 #
 # GitHub is asked as the account of the repository's owner (lib/gh.sh).
 #
@@ -39,6 +50,7 @@ usage() {
   {
     printf 'usage: trellis issue check --body <file> | check <n> [--print]\n'
     printf '       trellis issue create --title <t> --body-file <file>\n'
+    printf '       trellis issue close <pr> [--done]\n'
   } >&2
   exit 2
 }
@@ -109,23 +121,23 @@ check_issue() {
   return "$status"
 }
 
-# Makes sure the repository has the label $1. GitHub compares the names of labels without case.
+# ensure_label <name> <colour> <description> <owner>: makes sure the repository has the label. GitHub
+# compares the names of labels without case.
 ensure_label() {
-  local class="$1" owner="$2" colour
+  local name="$1" colour="$2" description="$3" owner="$4"
   if ! gh_as_owner . "$owner" label list --limit 1000 --json name --jq '.[].name'; then
     printf 'issue: the labels could not be read as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
     return 1
   fi
-  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$class" && return 0
-  case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
-  if ! gh_as_owner . "$owner" label create "$class" --color "$colour" --description "Complexity $class"; then
-    printf 'issue: the label %s could not be created as %s: %s\n' "$class" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$name" && return 0
+  if ! gh_as_owner . "$owner" label create "$name" --color "$colour" --description "$description"; then
+    printf 'issue: the label %s could not be created as %s: %s\n' "$name" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
     return 1
   fi
 }
 
 create_issue() {
-  local title='' file='' class owner
+  local title='' file='' class owner colour
   while [ $# -gt 0 ]; do
     case "$1" in
       --title) [ $# -gt 1 ] || usage; title="$2"; shift ;;
@@ -142,12 +154,78 @@ create_issue() {
   judge body "$file" || return 1
   class="$(judge class "$file")"
   owner="$(gh_owner .)"
-  ensure_label "$class" "$owner" || return 1
+  case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
+  ensure_label "$class" "$colour" "Complexity $class" "$owner" || return 1
   if ! gh_as_owner . "$owner" issue create --title "$title" --body-file "$file" --label "$class"; then
     printf 'issue: it could not be created as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
     return 1
   fi
   printf '%s\n' "$GH_AS_OUT"
+}
+
+# close_write <what> <n> <gh arguments>: one call on issue <n>, and the error of gh when it fails.
+close_write() {
+  local what="$1" n="$2"
+  shift 2
+  gh_as_owner . "$CLOSE_OWNER" "$@" && return 0
+  printf 'issue close: #%s: %s failed as %s: %s\n' "$n" "$what" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+  return 1
+}
+
+# One issue of the pull request <pr> of <repo>. The label comes before the comment, whose mark says
+# both are done, and the close comes last.
+close_one() {
+  local n="$1" repo="$2" pr="$3" done="$4" comment="$ISSUE_TMP/comment" answer state labelled commented
+  close_write 'the read' "$n" issue view "$n" --json url,state,labels,comments || return 1
+  printf '%s' "$GH_AS_OUT" > "$ISSUE_TMP/issue.json"
+  answer="$(node "$TRELLIS_ROOT/scripts/issue-close.mjs" issue "$ISSUE_TMP/issue.json" "$repo" "$pr")" && [ -n "$answer" ] || return 1
+  if [ "$answer" = 'skip' ]; then
+    printf 'issue close: #%s is not an issue of %s\n' "$n" "$repo"
+    return 0
+  fi
+  read -r state labelled commented <<< "$answer"
+  if [ "$done" = true ]; then
+    [ "$labelled" = true ] || return 0
+    close_write 'the label' "$n" issue edit "$n" --remove-label pending-actions || return 1
+    printf 'issue close: #%s: no actions pending\n' "$n"
+    return 0
+  fi
+  if [ -s "$comment" ] && [ "$commented" = false ]; then
+    if [ "$labelled" = false ]; then
+      ensure_label pending-actions D93F0B 'Merged with actions pending' "$CLOSE_OWNER" || return 1
+      close_write 'the label' "$n" issue edit "$n" --add-label pending-actions || return 1
+    fi
+    close_write 'the comment' "$n" issue comment "$n" --body-file "$comment" || return 1
+    printf 'issue close: #%s: actions pending, in a comment\n' "$n"
+  fi
+  if [ "$state" = 'OPEN' ]; then
+    close_write 'the close' "$n" issue close "$n" || return 1
+    printf 'issue close: #%s: closed\n' "$n"
+  fi
+}
+
+close_issues() {
+  local pr="${1#\#}" done="$2" answer repo='' n count=0 status=0
+  case "$pr" in '' | *[!0-9]*) usage ;; esac
+  CLOSE_OWNER="$(gh_owner .)"
+  if ! gh_as_owner . "$CLOSE_OWNER" pr view "$pr" --json number,url,state,baseRefName,body; then
+    printf 'issue close: the pull request #%s could not be read as %s: %s\n' "$pr" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 1
+  fi
+  ISSUE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/trellis-issue.XXXXXX")" || return 1
+  trap 'rm -rf "$ISSUE_TMP"' EXIT
+  printf '%s' "$GH_AS_OUT" > "$ISSUE_TMP/pr.json"
+  answer="$(node "$TRELLIS_ROOT/scripts/issue-close.mjs" pr "$ISSUE_TMP/pr.json" "$ISSUE_TMP/comment")" && [ -n "$answer" ] || return 1
+  while IFS= read -r n <&4; do
+    if [ -z "$repo" ]; then repo="$n"; continue; fi
+    count=$((count + 1))
+    close_one "$n" "$repo" "$pr" "$done" || status=1
+  done 4<<< "$answer"
+  if [ "$count" -eq 0 ]; then
+    printf 'issue close: #%s closes no issue of %s\n' "$pr" "$repo"
+    [ ! -s "$ISSUE_TMP/comment" ] || printf 'issue close: its pending actions are only in its body\n'
+  fi
+  return "$status"
 }
 
 [ $# -gt 0 ] || usage
@@ -172,5 +250,17 @@ case "$action" in
     esac
     ;;
   create) create_issue "$@" ;;
+  close)
+    number=''
+    done=false
+    for arg in "$@"; do
+      case "$arg" in
+        --done) done=true ;;
+        -*) usage ;;
+        *) [ -z "$number" ] || usage; number="$arg" ;;
+      esac
+    done
+    close_issues "$number" "$done"
+    ;;
   *) usage ;;
 esac
