@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {CYCLE, ISSUE, LOCALES, PRINCIPLE_ID, PR_SECTIONS} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -219,6 +219,30 @@ test('the plan-reviewer takes its report labels from one table, with a row per l
   for (const word of ['Verdict', 'Errors', 'Omissions', 'Not established']) {
     assert.ok(!outside.includes(`**${word}**`), `the label ${word} is written only in the table`);
   }
+});
+
+test('plan-check takes the words of its report from one table, the one of lib/locale.mjs', () => {
+  const agent = readFileSync(path.join(TRELLIS_ROOT, 'agents', 'plan-check.md'), 'utf8');
+  const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
+  assert.deepEqual(rows.map(row => row[0]), LOCALES, 'one row per locale, in the order of LOCALES');
+  for (const [locale, ...words] of rows) assert.deepEqual(words, Object.values(PLAN_CHECK[locale]), `words of ${locale}`);
+  const header = agent.split('\n').find(line => line.startsWith('| Language |')).split('|').slice(1, -1);
+  assert.equal(header.length, rows[0].length, 'a column per word');
+  // What reads the report looks for these lines.
+  const lines = {
+    en: ['Verdict: satisfied', 'Verdict: changes requested', 'Not established:'],
+    es: ['Veredicto: satisfecho', 'Veredicto: cambios pedidos', 'No establecido:'],
+  };
+  for (const locale of LOCALES) {
+    const W = PLAN_CHECK[locale];
+    assert.deepEqual([`${W.verdict}: ${W.satisfied}`, `${W.verdict}: ${W.changesRequested}`, `${W.notEstablished}:`], lines[locale]);
+  }
+  const front = /^---\n([\s\S]*?)\n---/.exec(agent)[1];
+  assert.match(front, /^model: sonnet$/m);
+  for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent']) assert.match(front, new RegExp(`^disallowedTools: .*\\b${tool}\\b`, 'm'));
+  assert.match(agent, /At most 300 words/);
+  assert.match(agent, /trellis issue check <n> --print/);
+  assert.ok(Buffer.byteLength(agent) <= 4096, `${Buffer.byteLength(agent)} bytes`);
 });
 
 test('the templates of every locale use the same placeholder names; only the text around them is translated', () => {
