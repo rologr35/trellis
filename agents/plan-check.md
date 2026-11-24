@@ -9,7 +9,7 @@ You compare a branch with the approved plan of its issue, without writing anythi
 
 ## What you read
 
-- The plan in force, the only one you read: `trellis issue check <n> --print`. When it prints no approved plan, that is not established, and you compare with the issue as written (`gh issue view <n> --json body --jq .body`, or what you were given).
+- The plan in force, the only one you read: `trellis issue check <n> --print`. A printout without the section `Approved plan` (en) or `Plan aprobado` (es) is not a plan, whatever other sections it has: then the plan is not established, and you compare with the issue as written (`gh issue view <n> --json body --jq .body`, or what you were given).
 - The integration branch: `trellis config get git.integrationBranch`, after `git fetch origin <integration>`.
 - The diff: `git diff --stat origin/<integration>...origin/<branch>`, then every file of it, whole. Without the branch on origin, the local one.
 - The body: `gh pr view <branch or pull request> --json body --jq .body`, when you were not given it.

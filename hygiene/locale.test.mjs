@@ -245,6 +245,8 @@ test('plan-check takes the words of its report from one table, the one of lib/lo
     const W = PLAN_CHECK[locale];
     assert.deepEqual([`${W.verdict}: ${W.satisfied}`, `${W.verdict}: ${W.changesRequested}`, `${W.notEstablished}:`], lines[locale]);
     for (const line of lines[locale]) assert.ok(agent.includes(`\`${line}\``), `the agent spells ${line}`);
+    // A printout without this section is not a plan, whatever else it prints.
+    assert.ok(agent.includes(`\`${ISSUE[locale].sections[1]}\``), `the agent names the section ${ISSUE[locale].sections[1]}`);
   }
   const front = /^---\n([\s\S]*?)\n---/.exec(agent)[1];
   assert.match(front, /^model: sonnet$/m);
