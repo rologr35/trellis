@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {CYCLE, ISSUE, LOCALES, PRINCIPLE_ID} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LOCALES, PRINCIPLE_ID, PR_SECTIONS} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -190,6 +190,19 @@ test('every locale defines the same issue labels, and as many sections', () => {
   for (const locale of rest) {
     assert.deepEqual(Object.keys(ISSUE[locale]), Object.keys(ISSUE[first]));
     assert.equal(ISSUE[locale].sections.length, ISSUE[first].sections.length);
+  }
+});
+
+test('every locale defines the same pull request sections', () => {
+  const [first, ...rest] = LOCALES;
+  for (const locale of LOCALES) {
+    const {none, noneWord, beforeMerging, afterMerging} = PR_SECTIONS[locale];
+    assert.match(noneWord, none, `${locale}: the word of an empty section is one`);
+    assert.notEqual(beforeMerging, afterMerging);
+  }
+  for (const locale of rest) {
+    assert.deepEqual(Object.keys(PR_SECTIONS[locale]), Object.keys(PR_SECTIONS[first]));
+    assert.equal(PR_SECTIONS[locale].required.length, PR_SECTIONS[first].required.length);
   }
 });
 

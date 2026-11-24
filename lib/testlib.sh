@@ -24,6 +24,8 @@ export GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 unset TRELLIS_CONFIG CLAUDE_CODE_REMOTE CLAUDE_PROJECT_DIR ANTHROPIC_API_KEY GH_TOKEN GITHUB_TOKEN GH_HOST GH_REPO 2>/dev/null || true
+# GitHub Actions sets them, and pr-check reads the branches of a pull request from them.
+unset GITHUB_HEAD_REF GITHUB_BASE_REF 2>/dev/null || true
 
 TL_PASSED=0
 TL_FAILED=0

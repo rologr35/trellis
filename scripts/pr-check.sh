@@ -13,6 +13,11 @@
 # **Verificación**); a **Setback** (es: **Retroceso**) that says what regresses, its cost and why it
 # was accepted, required when the branch has the ratchet's escape (ratchet-loosened). The names
 # live in lib/locale.mjs.
+# The body of a cycle pull request, the one of an issue branch (git.issueBranch) into the integration
+# branch with tracker.kind = github, also closes the branch's issue (`Closes #n`) and carries
+# **Before merging** and **After merging** (es: **Antes de mezclar**, **Después de mezclar**), each
+# `none` (es: `nada`) or a list. In CI the two branches are GITHUB_HEAD_REF and GITHUB_BASE_REF;
+# locally the head is the checked-out branch and the base is assumed to be the integration branch.
 # A commit: `type(scope): message (#n)` on the first line when tracker.kind = github, the same
 # without (#n) otherwise; on an issue branch <n>-..., the #n is that issue. Merge, revert, fixup!
 # and squash! messages that git writes are not judged.
@@ -22,6 +27,8 @@
 set -uo pipefail
 
 TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# shellcheck source=../lib/config.sh
+. "$TRELLIS_ROOT/lib/config.sh"
 
 usage='usage: trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>'
 mode=''
@@ -42,4 +49,17 @@ branch="$(git branch --show-current 2>/dev/null || true)"
 loosened=''
 [ -n "$branch" ] && loosened="$(git config --get "branch.${branch}.ratchet-loosened" 2>/dev/null || true)"
 
-exec node "$TRELLIS_ROOT/scripts/pr-check.mjs" "$mode" "$file" "$setback" "${branch:--}" "${loosened:-false}"
+integration="$(tc_get git.integrationBranch)"
+issue_regex="$(tc_get git.issueBranch)"
+head="$branch"
+base="$integration"
+if [ -n "${GITHUB_HEAD_REF:-}" ]; then
+  head="$GITHUB_HEAD_REF"
+  base="${GITHUB_BASE_REF:-}"
+fi
+cycle='-'
+if [ "$(tc_get tracker.kind)" = 'github' ] && [ "$base" = "$integration" ] && [ -n "$head" ] && [[ "$head" =~ $issue_regex ]]; then
+  cycle="$head"
+fi
+
+exec node "$TRELLIS_ROOT/scripts/pr-check.mjs" "$mode" "$file" "$setback" "${branch:--}" "${loosened:-false}" "$cycle"

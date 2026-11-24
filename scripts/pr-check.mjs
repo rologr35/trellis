@@ -1,12 +1,13 @@
 // The judgment of `trellis pr-check` (scripts/pr-check.sh holds the contract).
-//   node pr-check.mjs <body|commit> <file> <has-setback:true|false> <branch|-> <loosened:true|false>
+//   node pr-check.mjs <body|commit> <file> <has-setback:true|false> <branch|-> <loosened:true|false> <cycle head|->
 
 import {readFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
+import {closedIssues, kindOf, readBody, sectionOf} from './issue-close.mjs';
 
-const [, , mode, file, hasSetback, branchArg, loosened] = process.argv;
+const [, , mode, file, hasSetback, branchArg, loosened, cycleArg = '-'] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
 const config = loadConfig();
 const tracker = config.get('tracker.kind');
@@ -14,18 +15,6 @@ const SECTIONS = PR_SECTIONS[localeOf(config)];
 
 const misses = [];
 const style = (text, what) => misses.push(...styleMisses(text, what));
-
-// A section is a heading or a bold label naming it, with its content after the label or below it,
-// up to the next heading or bold label.
-function sectionOf(lines, name) {
-  const heading = new RegExp(`^\\s*(?:#+\\s*|\\*\\*)${name}(?:\\*\\*)?\\s*:?(?:\\*\\*)?(.*)$`, 'i');
-  const start = lines.findIndex(l => heading.test(l));
-  if (start === -1) return null;
-  const inline = heading.exec(lines[start])[1].trim();
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex(l => /^\s*(#+\s|\*\*[^*]+\*\*\s*:?(\s|$))/.test(l));
-  return [inline, ...(end === -1 ? rest : rest.slice(0, end))].map(l => l.trim()).filter(Boolean);
-}
 
 const text = readFileSync(file, 'utf8');
 
@@ -61,6 +50,20 @@ if (mode === 'commit') {
   }
   if (loosened === 'true' && setback.length === 0) {
     misses.push(`body: the branch loosens a ratchet (ratchet-loosened): **${SECTIONS.setback}** says what regresses, its cost and why it was accepted`);
+  }
+  if (cycleArg !== '-') {
+    const body = readBody(text);
+    const closed = closedIssues(body);
+    // A branch whose shape does not start with a number does not say which issue is its own.
+    const own = /^(\d+)-/.exec(cycleArg)?.[1];
+    if (own ? !closed.includes(Number(own)) : closed.length === 0) {
+      misses.push(`body: does not close the issue of ${cycleArg}; write \`Closes #${own ?? '<n>'}\` outside code`);
+    }
+    for (const name of [SECTIONS.beforeMerging, SECTIONS.afterMerging]) {
+      const kind = kindOf(sectionOf(body.prose, name, body.lines), SECTIONS.none);
+      if (kind === 'missing') misses.push(`body: missing the section **${name}**`);
+      if (kind === 'prose') misses.push(`body: **${name}** is \`${SECTIONS.noneWord}\` or a list`);
+    }
   }
   style(text, 'body');
 }
