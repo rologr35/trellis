@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {LOCALES, PRINCIPLE_ID} from '../lib/locale.mjs';
+import {ISSUE, LOCALES, PRINCIPLE_ID} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -139,6 +139,29 @@ test('the templates of every locale are the same files with the same blocks and 
       assert.deepEqual(markers(template(locale, file)), markers(template(first, file)), `${locale}/${file} has the blocks of ${first}`);
     }
     assert.deepEqual(configLines(template(locale, 'trellis.config')), configLines(template(first, 'trellis.config')), `${locale}/trellis.config has the keys of ${first}`);
+  }
+});
+
+test('the issue mould of every locale has the sections of its locale, in order, and its labels', () => {
+  for (const locale of LOCALES) {
+    const text = template(locale, 'issue.md');
+    const lines = text.split('\n');
+    assert.deepEqual(lines.filter(l => l.startsWith('#')), ISSUE[locale].sections.map(s => `## ${s}`), `${locale}/issue.md has the sections of lib/locale.mjs`);
+    const has = re => assert.ok(lines.some(l => re.test(l)), `${locale}/issue.md has no line like ${re}`);
+    const L = ISSUE[locale];
+    has(new RegExp(`^${L.dependsOn}: `));
+    has(new RegExp(`^${L.outOfScope}:$`));
+    has(new RegExp(`^- .*\\b${L.source}: `));
+    has(new RegExp(`^- \\*\\*${L.newFiles}\\*\\*: `));
+    assert.equal(text.trimEnd().split('\n').at(-1), `${L.complexity}: S`, `${locale}/issue.md ends with the complexity line`);
+  }
+});
+
+test('every locale defines the same issue labels, and as many sections', () => {
+  const [first, ...rest] = LOCALES;
+  for (const locale of rest) {
+    assert.deepEqual(Object.keys(ISSUE[locale]), Object.keys(ISSUE[first]));
+    assert.equal(ISSUE[locale].sections.length, ISSUE[first].sections.length);
   }
 });
 
