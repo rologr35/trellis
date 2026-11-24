@@ -10,7 +10,7 @@
 #     touches .md, .claude/, docs/ or trellis.config. The aggregate limits run only in CI: two
 #     branches under a shared budget can merge over it, and a local absolute check would block
 #     somebody else's commit.
-# Without trellis at hand (PATH or the plugin's installPath) it warns and lets the commit through.
+# Without trellis at hand (lib/find-trellis.sh) it warns and lets the commit through.
 
 set -uo pipefail
 
@@ -19,7 +19,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/find-trellis.sh"
 trellis="$(find_trellis)"
 if [ -z "$trellis" ]; then
-  echo 'pre-commit: trellis not found (PATH or the installed plugin), checks skipped' >&2
+  echo 'pre-commit: trellis not found (.trellis and node, PATH or the installed plugin), checks skipped' >&2
   exit 0
 fi
 # A config that does not parse stops the hook with its error (trellis exits 3).
