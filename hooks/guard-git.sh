@@ -228,6 +228,25 @@ repo_flag() {
   return 1
 }
 
+# Whether a word of `gh pr merge` is a group of short flags whose value is the next word: letters are
+# read left to right, the boolean ones (d m r s) take nothing, and the first of b F t A takes the rest of
+# the group, or the next word when it is the group's last letter. A group with any other letter before
+# that is one gh refuses, and is read as it always was. -R is repo_flag's.
+short_group_takes_next() {
+  local w="$1" letters c i
+  case "$w" in --* | -) return 1 ;; -*) ;; *) return 1 ;; esac
+  letters="${w#-}"
+  for ((i = 0; i < ${#letters}; i++)); do
+    c="${letters:i:1}"
+    case "$c" in
+      [dmrs]) ;;
+      [bFtA]) [ $((i + 1)) -eq ${#letters} ]; return ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
 guard_gh_merge() {
   [ "${1:-}" = 'pr' ] && [ "${2:-}" = 'merge' ] || return 0
   fail_closed
@@ -245,7 +264,10 @@ guard_gh_merge() {
     fi
     case "$word" in
       -b | --body | -F | --body-file | -t | --subject | -A | --author-email | --match-head-commit) shift ;;
-      -*) ;;
+      -*)
+        # A group of short flags ends in a value flag: -sb takes the next word, -sbtext took its own.
+        if short_group_takes_next "$word"; then shift; fi
+        ;;
       *) [ -z "$target" ] && target="$word" ;;
     esac
     shift
