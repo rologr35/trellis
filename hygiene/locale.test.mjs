@@ -244,6 +244,7 @@ test('plan-check takes the words of its report from one table, the one of lib/lo
   for (const locale of LOCALES) {
     const W = PLAN_CHECK[locale];
     assert.deepEqual([`${W.verdict}: ${W.satisfied}`, `${W.verdict}: ${W.changesRequested}`, `${W.notEstablished}:`], lines[locale]);
+    for (const line of lines[locale]) assert.ok(agent.includes(`\`${line}\``), `the agent spells ${line}`);
   }
   const front = /^---\n([\s\S]*?)\n---/.exec(agent)[1];
   assert.match(front, /^model: sonnet$/m);
