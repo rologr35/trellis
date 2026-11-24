@@ -342,10 +342,18 @@ tl_eq 'without a search' 'deny' "$(verdict 'gh issue create --title x' "$repo" "
 tl_eq 'trellis issue create without a search' 'deny' "$(verdict 'trellis issue create --title x --body-file b.md' "$repo" "$transcript")"
 tl_eq 'after a cd and an assignment, too' 'deny' "$(verdict "cd $repo && X=1 trellis issue create --title x --body-file b.md" "$plain" "$transcript")"
 tl_eq 'by the path of the script, too' 'deny' "$(verdict './bin/trellis issue create --title x --body-file b.md' "$repo" "$transcript")"
+for form in 'issue new' '-R a/b issue new' '--repo a/b issue new' '--repo=a/b issue new' '-Ra/b issue new' 'issue -R a/b new' 'issue --repo=a/b new' 'issue new -R a/b' '-R a/b issue create' 'issue -R a/b create'; do
+  tl_eq "gh $form without a search" 'deny' "$(verdict "gh $form --title x" "$repo" "$transcript")"
+done
+tl_eq 'gh issue list needs no search' 'allow' "$(verdict 'gh issue -R a/b list' "$repo" "$transcript")"
+tl_eq 'a view of something named new needs no search' 'allow' "$(verdict 'gh issue view new' "$repo" "$transcript")"
 tl_eq 'trellis issue check needs no search' 'allow' "$(verdict 'trellis issue check --body b.md' "$repo" "$transcript")"
 tl_eq 'a title of trellis issue create without a search is denied for the search' 'deny' "$(verdict "trellis issue create --title 'never push to main' --body-file b.md" "$repo" "$transcript")"
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "gh issue list --search login"}}]}}\n' >> "$transcript"
 tl_eq 'after a search' 'allow' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
+for form in 'issue new' '-R a/b issue new' 'issue -R a/b new' 'issue new -R a/b' 'issue -R a/b create'; do
+  tl_eq "gh $form after a search" 'allow' "$(verdict "gh $form --title x" "$repo" "$transcript")"
+done
 tl_eq 'trellis issue create after a search' 'allow' "$(verdict 'trellis issue create --title x --body-file b.md' "$repo" "$transcript")"
 tl_eq 'the words of its title are data, as those of gh issue create are' 'allow' "$(verdict "trellis issue create --title 'never push to main, nor gh pr merge' --body-file b.md" "$repo" "$transcript")"
 tl_eq 'a push in a substitution of its title is judged' 'deny' "$(verdict 'trellis issue create --title "$(git push origin main)" --body-file b.md' "$repo" "$transcript")"
