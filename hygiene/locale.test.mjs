@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {LOCALES, PRINCIPLE_ID} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LOCALES, PRINCIPLE_ID} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -68,8 +68,8 @@ const namesOf = text => {
 };
 
 /** A project written from the templates of a locale, the way /trellis:init leaves it. */
-function initProject(locale) {
-  const root = path.join(scratch, `init-${locale}`);
+function initProject(locale, values = {}) {
+  const root = path.join(scratch, ['init', locale, ...Object.values(values)].join('-'));
   mkdirSync(root);
   const write = (file, text) => {
     assert.ok(!text.includes('{{'), `${locale}: ${file} is written with a placeholder left unfilled`);
@@ -78,7 +78,7 @@ function initProject(locale) {
   };
   const trellis = (...args) => spawnSync('bash', [TRELLIS, ...args], {cwd: root, env, encoding: 'utf8'});
   execFileSync('git', ['init', '-q'], {cwd: root, env});
-  write('trellis.config', fill(template(locale, 'trellis.config'), locale));
+  write('trellis.config', fill(template(locale, 'trellis.config'), locale, values));
   write('CLAUDE.md', fill(template(locale, 'CLAUDE.root.md'), locale));
   write('app/CLAUDE.md', fill(template(locale, 'CLAUDE.package.md'), locale));
   write('app/lib/main.dart', 'void main() {}\n');
@@ -94,6 +94,7 @@ function initProject(locale) {
   return {root, trellis, read: file => readFileSync(path.join(root, file), 'utf8')};
 }
 
+const CYCLE_HEADING = {en: '### Cycle', es: '### Ciclo'};
 const METHOD_HEADING = {en: '## Working method', es: '## Método de trabajo'};
 
 for (const locale of LOCALES) {
@@ -105,6 +106,19 @@ for (const locale of LOCALES) {
     assert.ok(claude.includes(METHOD_HEADING[locale]), `the method block is the ${locale} one`);
     for (const other of LOCALES.filter(l => l !== locale)) assert.ok(!claude.includes(METHOD_HEADING[other]));
     assert.doesNotMatch(claude, /<!-- p:/, 'the principle ids stay in the plugin');
+    assert.ok(claude.includes(`\n\n${CYCLE_HEADING[locale]}\n\n- `), 'the method has the Cycle section');
+    assert.doesNotMatch(claude, /<!-- \/?cycle/, 'its markers stay in the plugin');
+  });
+
+  test(`an ${locale} project with tracker.kind = none has no Cycle section and passes the hygiene`, () => {
+    const p = initProject(locale, {'tracker.kind': 'none'});
+    const r = p.trellis('hygiene');
+    assert.equal(r.status, 0, `hygiene of an ${locale} project without a tracker:\n${r.stdout}${r.stderr}`);
+    const claude = p.read('CLAUDE.md');
+    assert.ok(claude.includes(METHOD_HEADING[locale]));
+    assert.ok(!claude.includes(CYCLE_HEADING[locale]), 'the Cycle section is out');
+    assert.doesNotMatch(claude, /trellis issue|<!-- \/?cycle|\n\n\n/, 'with its content and its markers');
+    assert.ok(claude.includes(`\n\n### ${{en: 'Releases', es: 'Entregas'}[locale]}\n\n`), 'the section after it stays');
   });
 }
 
@@ -128,6 +142,20 @@ test('the methods of every locale carry the same principles: the same count and 
   }
 });
 
+test('the Cycle section of every method is marked once, takes at most 1.5 KB and says the same', () => {
+  for (const locale of LOCALES) {
+    const found = [...methodOf(locale).matchAll(CYCLE)];
+    assert.equal(found.length, 1, `${locale}: one section between <!-- cycle --> and <!-- /cycle -->`);
+    const [, section] = found[0];
+    assert.ok(section.startsWith(`${CYCLE_HEADING[locale]}\n`));
+    assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
+    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue']);
+    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', `templates/${locale}/issue.md`]) {
+      assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
+    }
+  }
+});
+
 test('the templates of every locale are the same files with the same blocks and config keys', () => {
   const files = locale => readdirSync(path.join(TEMPLATES, locale)).sort();
   const markers = text => [...text.matchAll(/<!-- \/?trellis:[a-z]+ -->/g)].map(m => m[0]);
@@ -139,6 +167,29 @@ test('the templates of every locale are the same files with the same blocks and 
       assert.deepEqual(markers(template(locale, file)), markers(template(first, file)), `${locale}/${file} has the blocks of ${first}`);
     }
     assert.deepEqual(configLines(template(locale, 'trellis.config')), configLines(template(first, 'trellis.config')), `${locale}/trellis.config has the keys of ${first}`);
+  }
+});
+
+test('the issue mould of every locale has the sections of its locale, in order, and its labels', () => {
+  for (const locale of LOCALES) {
+    const text = template(locale, 'issue.md');
+    const lines = text.split('\n');
+    assert.deepEqual(lines.filter(l => l.startsWith('#')), ISSUE[locale].sections.map(s => `## ${s}`), `${locale}/issue.md has the sections of lib/locale.mjs`);
+    const has = re => assert.ok(lines.some(l => re.test(l)), `${locale}/issue.md has no line like ${re}`);
+    const L = ISSUE[locale];
+    has(new RegExp(`^${L.dependsOn}: `));
+    has(new RegExp(`^${L.outOfScope}:$`));
+    has(new RegExp(`^- .*\\b${L.source}: `));
+    has(new RegExp(`^- \\*\\*${L.newFiles}\\*\\*: `));
+    assert.equal(text.trimEnd().split('\n').at(-1), `${L.complexity}: S`, `${locale}/issue.md ends with the complexity line`);
+  }
+});
+
+test('every locale defines the same issue labels, and as many sections', () => {
+  const [first, ...rest] = LOCALES;
+  for (const locale of rest) {
+    assert.deepEqual(Object.keys(ISSUE[locale]), Object.keys(ISSUE[first]));
+    assert.equal(ISSUE[locale].sections.length, ISSUE[first].sections.length);
   }
 });
 

@@ -67,6 +67,15 @@ A conflict in a `CLAUDE.md`, a rule or a skill is resolved from the branch's own
 - No plan lives in a folder git ignores. Business context goes to `docs/`. <!-- p:plan-tracked -->
 - What is learned from the code goes to the `CLAUDE.md` or the rule closest to that code, at the height of the concept. <!-- p:learned-near-code -->
 
+<!-- cycle -->
+### Cycle
+
+- The approved plan lives in the issue, written from the mould (`templates/en/issue.md` of the plugin) and created with `trellis issue create --title <t> --body-file <file>`, which checks it and labels it with its complexity. <!-- p:plan-in-issue -->
+- The body of an issue is never edited. A change of the plan is a comment headed `## Amendment (<date>)`, with the sections it replaces, whole, as `###` headings. <!-- p:issue-amendment -->
+- Before starting an issue, `trellis issue check <n>` passes: the plan is complete, its paths exist and what it depends on is closed. `trellis issue check <n> --print` is the plan in force. <!-- p:issue-check -->
+- An issue without a plan (a symptom, a lesson) is legitimate. It is created with `gh issue create`, unclassed, and gets its plan later, as an amendment with the five sections and the complexity line. <!-- p:planless-issue -->
+
+<!-- /cycle -->
 ### Releases
 
 - Every pull request is a releasable increment. <!-- p:releasable -->

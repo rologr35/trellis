@@ -4,6 +4,7 @@
 import {readFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {styleMisses} from '../lib/style.mjs';
 
 const [, , mode, file, hasSetback, branchArg, loosened] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
@@ -11,27 +12,8 @@ const config = loadConfig();
 const tracker = config.get('tracker.kind');
 const SECTIONS = PR_SECTIONS[localeOf(config)];
 
-const LONG_DASH = /[\u2014\u2013]/;
-const ATTRIBUTION = /co-authored-by:|generated with|claude\.ai\/code|\u{1F916}/iu;
-// The words a reference follows, the es ones included (Ver, depende de, parte de) for es bodies.
-const KEYWORD = /(?:^|[\s(])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|see|ver|issue|pr|pull request|depende de|parte de|part of)\s+$/i;
-
 const misses = [];
-
-function style(text, what) {
-  if (LONG_DASH.test(text)) misses.push(`${what}: has a long dash; use a comma, a colon or parentheses`);
-  if (ATTRIBUTION.test(text)) misses.push(`${what}: has an attribution (Co-Authored-By, "Generated with", a session link)`);
-  const prose = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
-  for (const line of prose.split('\n')) {
-    for (const m of line.matchAll(/(?<![\w&/])#(\d+)\b/g)) {
-      const before = line.slice(0, m.index);
-      const parenthesized = before.endsWith('(') && line.slice(m.index + m[0].length).startsWith(')');
-      if (!parenthesized && !KEYWORD.test(before)) {
-        misses.push(`${what}: bare ${m[0]} that GitHub links to an issue ("${line.trim()}"); write it after Closes/Refs/See, or in backticks`);
-      }
-    }
-  }
-}
+const style = (text, what) => misses.push(...styleMisses(text, what));
 
 // A section is a heading or a bold label naming it, with its content after the label or below it,
 // up to the next heading or bold label.
