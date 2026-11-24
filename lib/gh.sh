@@ -30,7 +30,7 @@ GH_TOKEN_CACHE=$'\n'
 gh_owner_of() {
   local s="${1%%[?#]*}" host path owner
   case "$s" in
-    http://* | https://*) s="${s#*://}"; s="${s#*@}"; host="${s%%/*}"; path="${s#*/}" ;;
+    http://* | https://*) s="${s#*://}"; s="${s#*@}"; host="${s%%/*}"; host="${host%%:*}"; path="${s#*/}" ;;
     ssh://*) s="${s#ssh://}"; s="${s#*@}"; host="${s%%/*}"; host="${host%%:*}"; path="${s#*/}" ;;
     *@*:*) s="${s#*@}"; host="${s%%:*}"; path="${s#*:}" ;;
     */*/*) host="${s%%/*}"; path="${s#*/}" ;;
@@ -57,21 +57,23 @@ gh_owner() {
   printf '%s' "$owner"
 }
 
-# Prints the token of <owner>'s account when gh holds one, from the cache after the first lookup.
+# Sets GH_TOK to the token of <owner>'s account when gh holds one (empty otherwise), from the cache
+# after the first lookup. Not run in a command substitution: the cache would be lost with the subshell.
 gh_token_of() {
   local owner="$1" rest record tok
+  GH_TOK=
   rest="$GH_TOKEN_CACHE"
   while [ -n "$rest" ]; do
     record="${rest%%$'\n'*}"
     rest="${rest#*$'\n'}"
     if [ "${record%%$'\001'*}" = "$owner" ] && [ -n "$record" ]; then
-      printf '%s' "${record#*$'\001'}"
+      GH_TOK="${record#*$'\001'}"
       return 0
     fi
   done
   tok="$(GH_PROMPT_DISABLED=1 gh auth token -h github.com -u "$owner" 2>/dev/null </dev/null)" || tok=''
   GH_TOKEN_CACHE="$GH_TOKEN_CACHE$owner"$'\001'"$tok"$'\n'
-  printf '%s' "$tok"
+  GH_TOK="$tok"
 }
 
 # gh_as_owner <dir> <owner> <gh arguments>: runs gh in <dir>, as <owner>'s account when it can.
@@ -83,7 +85,8 @@ gh_as_owner() {
   GH_AS_ACCOUNT='the active account'
   if [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}${GH_HOST:-}${GH_REPO:-}" ] && [ -n "$owner" ] \
      && command -v gh >/dev/null 2>&1; then
-    tok="$(gh_token_of "$owner")"
+    gh_token_of "$owner"
+    tok="$GH_TOK"
     [ -n "$tok" ] && GH_AS_ACCOUNT="the owner's account ($owner)"
   fi
   errfile="$(mktemp "${TMPDIR:-/tmp}/trellis-gh.XXXXXX")" || errfile=/dev/null
@@ -95,7 +98,7 @@ gh_as_owner() {
   status=$?
   IFS= read -r line < "$errfile" 2>/dev/null || true
   rm -f "$errfile"
-  [ -n "$tok" ] && line="${line//$tok/***}"
+  [ -n "$tok" ] && line="${line//"$tok"/***}"
   GH_AS_ERR="$line"
   return "$status"
 }

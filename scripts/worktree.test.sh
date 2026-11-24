@@ -75,6 +75,13 @@ git merge -q --no-ff -m "Merge branch '9-ghmerge'" 9-ghmerge
 git push -q origin develop
 git push -q origin --delete 9-ghmerge
 gtip="$(git rev-parse 9-ghmerge)"
+# 10: the same, so that one prune asks GitHub twice for one owner.
+gpath2="$(add 10 ghmerge-again)"
+(cd "$gpath2" && printf 'h\n' > h.txt && git add h.txt && git commit -q -m 'feat: h (#10)' && git push -q origin 10-ghmerge-again)
+git merge -q --no-ff -m "Merge branch '10-ghmerge-again'" 10-ghmerge-again
+git push -q origin develop
+git push -q origin --delete 10-ghmerge-again
+gtip2="$(git rev-parse 10-ghmerge-again)"
 shim="$TL_TMP/shim"
 mkdir -p "$shim"
 export REAL_GIT="$(command -v git)"
@@ -101,7 +108,7 @@ GH
 chmod +x "$shim/git" "$shim/gh"
 export GH_CALLS="$TL_TMP/gh-calls.log" GH_TOKEN_FILE="$TL_TMP/gh-token" GH_FAIL="$TL_TMP/gh-fail" GH_HEADS="$TL_TMP/gh-heads"
 printf 'tok-acme\n' > "$GH_TOKEN_FILE"
-printf '%s\n' "$gtip" > "$GH_HEADS"
+printf '%s\n%s\n' "$gtip" "$gtip2" > "$GH_HEADS"
 : > "$GH_CALLS"
 : > "$GH_FAIL"
 out="$(PATH="$shim:$PATH" "$TRELLIS" worktree prune 2>&1)"
@@ -114,7 +121,9 @@ rm "$GH_FAIL"
 out="$(PATH="$shim:$PATH" "$TRELLIS" worktree prune 2>&1)"
 tl_has 'a merged pull request is seen and the worktree removed' "removed $gpath (9-ghmerge)" "$out"
 tl_has 'with the owner token' 'pr list token=tok-acme' "$(cat "$GH_CALLS")"
-tl_eq 'one lookup of the token' '1' "$(grep -c 'auth token' "$GH_CALLS")"
+tl_has 'and the second one too' "removed $gpath2 (10-ghmerge-again)" "$out"
+tl_eq 'two reads, one lookup of the token' '1' "$(grep -c 'auth token' "$GH_CALLS")"
+tl_eq 'for two reads' '2' "$(grep -c 'pr list' "$GH_CALLS")"
 tl_lacks 'the token is not printed either' 'tok-acme' "$out"
 
 tl_done

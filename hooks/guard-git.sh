@@ -216,6 +216,7 @@ guard_gh_merge() {
     case "$word" in
       -R | --repo) repo="${2:-}"; shift ;;
       --repo=*) repo="${word#*=}" ;;
+      -R?*) repo="${word#-R}" ;;
       -b | --body | -F | --body-file | -t | --subject | -A | --author-email | --match-head-commit) shift ;;
       -*) ;;
       *) [ -z "$target" ] && target="$word" ;;
@@ -227,10 +228,10 @@ guard_gh_merge() {
   if [ -z "$target" ]; then
     deny "A merge names its pull request (number, URL or branch), so its base can be read first: gh pr merge <n>. The assistant merges only into: ${allowed:-nothing}."
   fi
-  # The account that sees the repository is its owner's: of -R, of the URL naming the pull request,
+  # The account that sees the repository is its owner's: of the URL naming the pull request, of -R,
   # or of the origin remote.
   local hint="$repo"
-  [ -n "$hint" ] || case "$target" in http://* | https://*) hint="$target" ;; esac
+  case "$target" in http://* | https://*) hint="$target" ;; esac
   if [ -n "$repo" ]; then
     gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName --repo "$repo"
   else

@@ -403,7 +403,13 @@ tl_has 'by --repo= with a URL' 'pr view 14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge https://github.com/other/thing/pull/14' >/dev/null
 tl_has 'by the URL of the pull request' 'pr view https://github.com/other/thing/pull/14 token=tok-other' "$(calls)"
-for form in 'https://github.com/acme/thing' 'https://someone@github.com/acme/thing.git' 'git@github.com:acme/thing.git' \
+reset
+verdict 'gh pr merge 14 --merge -Rother/thing' >/dev/null
+tl_has 'by -R with the value attached' 'pr view 14 token=tok-other' "$(calls)"
+reset
+verdict 'gh pr merge https://github.com/other/thing/pull/14 -R acme/thing' >/dev/null
+tl_has 'the URL of the pull request wins over -R' 'pr view https://github.com/other/thing/pull/14 token=tok-other' "$(calls)"
+for form in 'https://github.com:443/acme/thing.git' 'https://github.com/acme/thing' 'https://someone@github.com/acme/thing.git' 'git@github.com:acme/thing.git' \
             'ssh://git@github.com/acme/thing.git' 'ssh://git@github.com:22/acme/thing.git'; do
   set_origin "$form"
   reset
@@ -468,6 +474,11 @@ out="$(rawout 'git switch develop && git push origin main')"
 tl_eq 'a deny after it is one object holding the message' 'yes' "$(printf '%s' "$out" | node -e 'const o = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(o.hookSpecificOutput.permissionDecision === "deny" && /issue 4/.test(o.systemMessage) ? "yes" : "no")' 2>/dev/null)"
 out="$(rawout 'git switch develop && git status')"
 tl_eq 'no deny after it is still one object' 'yes' "$(printf '%s' "$out" | node -e 'const o = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(!o.hookSpecificOutput && /issue 4/.test(o.systemMessage) ? "yes" : "no")' 2>/dev/null)"
+printf 'CLOSED\n' > "$GH_FIXTURES/issue-4"
+reset
+rawout 'git switch develop && git switch develop' >/dev/null
+tl_eq 'two reads for one owner, one lookup of the token' '1' "$(calls | grep -c 'auth token')"
+tl_eq 'for two reads' '2' "$(calls | grep -c 'issue view')"
 git switch -q develop
 
 tl_done
