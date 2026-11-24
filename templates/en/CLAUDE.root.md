@@ -46,4 +46,4 @@ The project's instruction files and when each one loads. `trellis sync` writes t
 - [ ] `trellis check` green.
 - [ ] `trellis hygiene` green if the change touches instructions.
 - [ ] New tests per the map of `TESTING.md`, seen failing before passing.
-- [ ] Commit on the issue's branch, push with an explicit refspec, pull request with **Summary** and **Verification**.
+- [ ] Commit on the issue's branch, push with an explicit refspec, pull request with **Summary**, **Verification**, **Before merging** and **After merging**.

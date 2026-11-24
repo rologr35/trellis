@@ -149,10 +149,18 @@ test('the Cycle section of every method is marked once, takes at most 1.5 KB and
     const [, section] = found[0];
     assert.ok(section.startsWith(`${CYCLE_HEADING[locale]}\n`));
     assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
-    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue']);
-    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', `templates/${locale}/issue.md`]) {
+    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue', 'pr-facts', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
+    const {beforeMerging, afterMerging, noneWord} = PR_SECTIONS[locale];
+    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', 'gh issue new', `templates/${locale}/issue.md`, 'plan-check', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis:merge', 'gh issue list --state closed --label pending-actions']) {
       assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
     }
+  }
+});
+
+test('the root template names the sections of a pull request', () => {
+  for (const locale of LOCALES) {
+    const {required, beforeMerging, afterMerging} = PR_SECTIONS[locale];
+    for (const name of [...required, beforeMerging, afterMerging]) assert.ok(template(locale, 'CLAUDE.root.md').includes(`**${name}**`), `${locale}: ${name}`);
   }
 });
 
