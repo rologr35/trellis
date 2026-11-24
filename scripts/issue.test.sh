@@ -208,6 +208,15 @@ fails 'a path after the New list' 's|^  `scripts/new.sh`$|  `scripts/new.sh`\
 tl_eq 'a New list as bullets below its label' '0' "$(case_of 's|^- \*\*New\*\*: `lib/b.sh`,|\
 New:\
 - `lib/b.sh`|; s|^  `scripts/new.sh`|- `scripts/new.sh`|')"
+fails 'a list apart from a New line that has its paths' 's|^- \*\*New\*\*: `lib/b.sh`,|\
+New: `lib/b.sh`\
+\
+- `lib/nope.sh`|' '`lib/nope.sh` is not in origin/develop'
+fails 'a Depends on line does not empty the list after it' '/^A thing is broken/d; s|^Depends on: .*|Depends on: #8\
+\
+- A thing is broken.\
+- {{}}|; s/^## Risks/## Risk/' 'no section `## Risks`'
+tl_lacks '  Context is not empty' 'Context is empty' "$(out)"
 tl_eq 'a New heading with its list' '0' "$(case_of 's|^- \*\*New\*\*: `lib/b.sh`,|\
 ### New\
 - `lib/b.sh`|; s|^  `scripts/new.sh`|- `scripts/new.sh`|')"

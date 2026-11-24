@@ -146,7 +146,8 @@ const written = text => text.replace(/<!--[\s\S]*?(?:-->|$)/g, '').replace(/\{\{
 /**
  * The lists a label opens (`Out of scope:`, `- **New**: ...`, `### New`), each one the text after
  * the label and the lines that belong to it: the more indented ones for a bullet, the ones up to
- * the next heading of its level for a heading, and the paragraph or the list for a label alone.
+ * the next heading of its level for a heading, the rest of the paragraph for a label with text, and
+ * the paragraph or the list that follows for a label alone.
  */
 function labelled(lines, label) {
   const name = escape(label);
@@ -172,6 +173,8 @@ function labelled(lines, label) {
         if (isHeading(text)) break;
         if (inline[2]) {
           if (indentOf(text) <= inline[1].length) break;
+        } else if (indentOf(text) === 0 && blank && group.inline !== '') {
+          break;
         } else if (indentOf(text) === 0 && !isBullet(text) && ((blank && seen) || /^(?:\*\*|__)[^*_]+(?:\*\*\s*:|:\*\*|__\s*:|:__)/.test(text))) {
           break;
         }
