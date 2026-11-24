@@ -33,4 +33,4 @@ One change per metric at a time, so its effect can be attributed.
 
 In the chat: the lesson in one sentence, the incident that shows it (what happened, where it is recorded), its classification and the proposed text or change with its exact destination. Claude does not apply it: a person decides.
 
-For a framework lesson, with the person's approval: search first in the plugin's repository (`trellis config get trellis.upstream`) with `gh issue list -R <upstream> --state all --search '<concept>'`, and if it does not exist, open an issue there with the lesson, the incident and the proposed text (`gh issue create -R <upstream> --body-file`). The project receives it when it updates the plugin's pinned sha.
+For a framework lesson, with the person's approval: search first in the repository of trellis (`trellis config get trellis.upstream`) with `gh issue list -R <upstream> --state all --search '<concept>'`, and if it does not exist, open an issue there with the lesson, the incident and the proposed text (`gh issue create -R <upstream> --body-file`). The project receives it when it runs `trellis update` with a version that has it.

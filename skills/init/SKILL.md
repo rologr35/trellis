@@ -1,16 +1,16 @@
 ---
 name: init
-description: Puts a project under trellis. Interviews the person and writes trellis.config, the root CLAUDE.md with the method, a CLAUDE.md per package, TESTING.md, .claude/settings.json, the git hooks, the .gitignore and the CI workflow.
+description: Puts a project under trellis. Interviews the person and writes trellis.config, the root CLAUDE.md with the method, a CLAUDE.md per package, TESTING.md, .claude/settings.json, the git hooks, the .gitignore, the copy of trellis and the CI workflow.
 disable-model-invocation: true
 ---
 
 # init
 
-The templates live in the plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis)")/.." && pwd)"`. The prose templates and `trellis.config` are in `$PLUGIN/templates/<locale>/`, one folder per `project.locale` (`en`, `es`); the language-neutral ones (`settings.json`, `githooks/`, `gitignore.fragment`, `workflows/`) are in `$PLUGIN/templates/`.
+The project consumes a copy of trellis that it commits (`.trellis/`); the plugin is installed only to run this skill. The templates live in the plugin: `PLUGIN="$(cd "$(dirname "$(command -v trellis)")/.." && pwd)"`. The prose templates and `trellis.config` are in `$PLUGIN/templates/<locale>/`, one folder per `project.locale` (`en`, `es`); the language-neutral ones (`settings.json`, `githooks/`, `gitignore.fragment`, `workflows/`) are in `$PLUGIN/templates/`.
 
 ## 0. A worktree for init
 
-The plugin is installed at the local scope (`claude plugin marketplace add <upstream>@<sha> --scope local`, then `claude plugin install trellis@trellis --scope local`; both write `.claude/settings.local.json`, which git ignores), so the main checkout has no uncommitted change. If it was installed at the project scope instead, `.claude/settings.json` has an uncommitted change there: section 3 writes the same keys in the worktree, and after the merge on GitHub, before pulling, it is the person's to discard (the generated `deny` leaves it to them): `git restore .claude/settings.json` if the file is tracked, delete it if it is untracked (`git restore` fails on it and the pull then aborts over the file it would overwrite), because the pull brings the same file.
+The plugin is installed at the local scope (`claude plugin marketplace add <upstream>@<sha> --scope local`, then `claude plugin install trellis@trellis --scope local`; both write `.claude/settings.local.json`, which git ignores), so the main checkout has no uncommitted change. If it was installed at the project scope instead, `.claude/settings.json` has an uncommitted change there, which would collide with the merge of this branch: before anything else, the person is asked to uninstall it there and to install it at the local scope.
 
 The main checkout stays on the integration branch, clean: as soon as `trellis.config` exists, `guard-git` prevents going back to it from an open issue branch. Since there is no config yet, the worktree is created with plain git, from the main checkout and in simple lines:
 
@@ -45,11 +45,12 @@ Every file below is written in the chosen language, from `$PLUGIN/templates/<loc
 2. `CLAUDE.md` from `CLAUDE.root.md`: the layout, the anti-duplication and the conventions deduced from the code, and the **Never** section with what is irreversible. If one existed, its current content is spread over those sections.
 3. The `scaffold` skill for a `CLAUDE.md` per package.
 4. `TESTING.md` from its template, one section per rung.
-5. `.claude/settings.json` from `$PLUGIN/templates/settings.json`, merged with the existing one: `allow` and `deny` are joined, everything else of the person's is kept. The marketplace sha is the `gitCommitSha` of `trellis@trellis` in `~/.claude/plugins/installed_plugins.json`, in full (40 characters). The file holds one entry per scope: read the one with `scope: "local"` whose `projectPath` is the top level of the main checkout (`git rev-parse --show-toplevel` there), or the `user` one if that is how it was installed; `extraKnownMarketplaces.trellis.source.ref` carries it, and `autoUpdate: false` sits beside `source`: `claude plugin marketplace add` does not write it.
+5. `.claude/settings.json` from `$PLUGIN/templates/settings.json`, merged with the existing one: `allow` and `deny` are joined, everything else of the person's is kept. It names no plugin: `extraKnownMarketplaces.trellis` and `enabledPlugins."trellis@trellis"` of an earlier version are taken out.
 6. `.githooks/` from `$PLUGIN/templates/githooks/`, executable.
 7. Each line of `$PLUGIN/templates/gitignore.fragment` that `.gitignore` lacks.
-8. `.github/workflows/trellis.yml` from `$PLUGIN/templates/workflows/trellis.yml`, with the same sha, if the remote is GitHub.
+8. The copy: `trellis update <sha>`, with the full sha of the installed plugin (`gitCommitSha` of `trellis@trellis` in `~/.claude/plugins/installed_plugins.json`; the file holds one entry per scope: the one with `scope: "local"` whose `projectPath` is the top level of the main checkout (`git rev-parse --show-toplevel` there), or the `user` one if that is how it was installed). It writes `.trellis/`, `.claude/skills/trellis-*` and `.claude/agents/trellis-*.md`, and ends with `trellis sync`, which writes the hooks of the copy in `.claude/settings.json`. The project's own linters and formatters leave `.trellis/` out, in their own configuration.
+9. `.github/workflows/trellis.yml` from `$PLUGIN/templates/workflows/trellis.yml`, with the sha of `.trellis/VERSION`, if the remote is GitHub.
 
 ## 4. Close
 
-In this order: `trellis setup`, `trellis sync`, `trellis hygiene --freeze`, `trellis hygiene` and `trellis doctor`. Whatever is left in FAIL is fixed, or told to the person with its cause. Then a commit on the worktree's branch (`chore(trellis): init (#n)`), the push with an explicit refspec (`git push origin <n>-trellis-init`), `ExitWorktree` with `keep`, and the summary: what was written, what was deduced and what was asked, what is left as a warning, and that the package `CLAUDE.md` files wait for human review.
+In this order, with the copy (`.trellis/bin/trellis <command>`): `setup`, `sync`, `hygiene --freeze`, `hygiene`, `verify --upstream` and `doctor`. Whatever is left in FAIL is fixed, or told to the person with its cause. Then a commit on the worktree's branch (`chore(trellis): init (#n)`), the push with an explicit refspec (`git push origin <n>-trellis-init`), `ExitWorktree` with `keep`, and the summary: what was written, what was deduced and what was asked, what is left as a warning, that the package `CLAUDE.md` files wait for human review, and that after the merge the person removes the plugin from the machine: `claude plugin uninstall trellis@trellis --scope local`, and `extraKnownMarketplaces.trellis` out of `.claude/settings.local.json`.

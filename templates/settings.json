@@ -25,18 +25,5 @@
       "Bash(git restore *)",
       "Bash(git clean *)"
     ]
-  },
-  "extraKnownMarketplaces": {
-    "trellis": {
-      "source": {
-        "source": "github",
-        "repo": "{{trellis.upstream}}",
-        "ref": "{{sha}}"
-      },
-      "autoUpdate": false
-    }
-  },
-  "enabledPlugins": {
-    "trellis@trellis": true
   }
 }

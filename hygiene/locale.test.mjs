@@ -85,7 +85,7 @@ function initProject(locale, values = {}) {
   write('.claude/rules/app.md', fill(template(locale, 'rule.md').replace(/\{\{glob[^}]*\}\}/, 'app/lib/**/*.dart'), locale));
   write('.claude/skills/x/SKILL.md', fill(template(locale, 'SKILL.md'), locale));
   write('TESTING.md', fill(template(locale, 'TESTING.md'), locale));
-  write('.claude/settings.json', fill(readFileSync(path.join(TEMPLATES, 'settings.json'), 'utf8'), locale, {sha: '0'.repeat(40)}));
+  write('.claude/settings.json', fill(readFileSync(path.join(TEMPLATES, 'settings.json'), 'utf8'), locale));
   cpSync(path.join(TEMPLATES, 'githooks'), path.join(root, '.githooks'), {recursive: true});
   for (const step of [['sync'], ['hygiene', '--freeze']]) {
     const r = trellis(...step);
@@ -151,10 +151,31 @@ test('the Cycle section of every method is marked once, takes at most 1.5 KB and
     assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
     assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue', 'pr-facts', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
     const {beforeMerging, afterMerging, noneWord} = PR_SECTIONS[locale];
-    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', 'gh issue new', `templates/${locale}/issue.md`, 'plan-check', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis:merge', 'gh issue list --state closed --label pending-actions']) {
+    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
       assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
     }
   }
+});
+
+test('what a project reads names the skills and agents of the copy', () => {
+  const texts = [
+    ...LOCALES.flatMap(locale => [[`method/${locale}.md`, methodOf(locale)], ...readdirSync(path.join(TEMPLATES, locale)).map(f => [`${locale}/${f}`, template(locale, f)])]),
+    ...readdirSync(path.join(TRELLIS_ROOT, 'skills')).filter(s => s !== 'init').map(s => [`skills/${s}`, readFileSync(path.join(TRELLIS_ROOT, 'skills', s, 'SKILL.md'), 'utf8')]),
+  ];
+  for (const [name, text] of texts) {
+    assert.doesNotMatch(text, /(?<!<!-- )\/trellis:[a-z]/, `${name} names a skill of the plugin`);
+    assert.doesNotMatch(text, /`plan-(?:check|reviewer)`/, `${name} names an agent of the plugin`);
+  }
+  for (const locale of LOCALES) assert.ok(methodOf(locale).includes('`trellis-plan-reviewer`'), locale);
+});
+
+test('the settings of a project install no plugin, and its workflow pins one sha', () => {
+  const settings = JSON.parse(readFileSync(path.join(TEMPLATES, 'settings.json'), 'utf8'));
+  assert.ok(!('extraKnownMarketplaces' in settings) && !('enabledPlugins' in settings));
+  const workflow = readFileSync(path.join(TEMPLATES, 'workflows', 'trellis.yml'), 'utf8');
+  assert.equal(workflow.match(/consumer-(?:check|closed)\.yml@\{\{sha\}\}/g).length, 2);
+  assert.equal(workflow.match(/trellis-ref: \{\{sha\}\}/g).length, 2);
+  assert.ok(workflow.includes('.trellis/VERSION'), 'it says where the sha is read');
 });
 
 test('the root template names the sections of a pull request', () => {

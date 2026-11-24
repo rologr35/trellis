@@ -21,11 +21,11 @@ on:
   workflow_call:
     inputs:
       trellis-ref:
-        description: The full sha of the plugin the project pins.
+        description: The full sha of trellis the project pins, the one of .trellis/VERSION.
         required: true
         type: string
       trellis-repo:
-        description: The plugin repository.
+        description: The repository of trellis.
         required: false
         type: string
         default: rologr35/trellis
