@@ -20,7 +20,8 @@
 # warn: a rung with pr = true that no file under .github/workflows/ runs (it holds the command's
 # run text, or its ci text when set: a plain substring search, so a folded `run: >-`, a comment or
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
-# parser); the installed plugin is not at the sha the project pins; no secret scanner configured; uncommitted changes, unpushed
+# parser); .github/workflows/trellis.yml that does not name consumer-closed.yml, with tracker.kind =
+# github; the installed plugin is not at the sha the project pins; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail
@@ -230,6 +231,17 @@ if [ "$checked" -eq 0 ]; then
   info 'no rung with pr = true'
 elif [ -z "$unrun" ]; then
   ok 'every rung with pr = true is run by a workflow of the project'
+fi
+
+# ------------------------------------------------------------------------------------------------
+# A merge made on GitHub closes its issue, and leaves written what is pending, by the second workflow.
+if [ "$(tc_get tracker.kind)" = 'github' ] && [ -f .github/workflows/trellis.yml ]; then
+  section 'the close of a merged issue'
+  if grep -qF 'consumer-closed.yml' .github/workflows/trellis.yml; then
+    ok 'trellis.yml calls consumer-closed.yml'
+  else
+    warn 'trellis.yml does not name consumer-closed.yml: a merge made on GitHub leaves its issue open and what is pending unwritten; add the closed type and the second job of the template templates/workflows/trellis.yml'
+  fi
 fi
 
 # ------------------------------------------------------------------------------------------------

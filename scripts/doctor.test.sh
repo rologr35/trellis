@@ -183,7 +183,24 @@ doctor > /dev/null
 tl_lacks 'a rung with pr = false is not asked for a workflow' 'rung unit has pr = true but' "$(out)"
 git config -f trellis.config --remove-section rung.unit
 git config -f trellis.config --remove-section command.unit
-rmdir .github/workflows .github
+rm -rf .github
+
+printf '\nthe close of a merged issue\n'
+CLOSED='does not name consumer-closed.yml'
+doctor > /dev/null
+tl_lacks 'a project without the workflow is not asked' "$CLOSED" "$(out)"
+mkdir -p .github/workflows
+printf 'jobs:\n  trellis:\n    uses: x/y/.github/workflows/consumer-check.yml@1\n' > .github/workflows/trellis.yml
+tl_eq 'a caller that only checks passes with a warning' '0' "$(doctor)"
+tl_has 'naming what is missing' "$CLOSED" "$(out)"
+git config -f trellis.config tracker.kind none
+doctor > /dev/null
+tl_lacks 'without a tracker it is not asked' "$CLOSED" "$(out)"
+git config -f trellis.config --unset tracker.kind
+printf '  closed:\n    uses: x/y/.github/workflows/consumer-closed.yml@1\n' >> .github/workflows/trellis.yml
+doctor > /dev/null
+tl_lacks 'a caller of both does not warn' "$CLOSED" "$(out)"
+rm -rf .github
 
 git config -f trellis.config rung.ghost.command nowhere
 doctor > /dev/null

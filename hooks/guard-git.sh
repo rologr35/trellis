@@ -11,8 +11,8 @@
 #   3. on the main checkout, a checkout or switch while the current branch is <n>-... and issue n is
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
-#   4. a `gh issue create` or a `trellis issue create` when the session's transcript holds no earlier
-#      `gh issue list` with --search: a plan written without reading what was decided around it
+#   4. a `gh issue create`, its alias `gh issue new` or a `trellis issue create` when the session's
+#      transcript holds no earlier `gh issue list` with --search: a plan written without reading what was decided around it
 #      repeats a decision;
 #   5. a `gh pr merge` that names no pull request, whose base cannot be read, that runs in a cloud
 #      session (CLAUDE_CODE_REMOTE), or whose base is not in git.assistantMayMergeInto. Silence is not
@@ -196,8 +196,25 @@ session_searched_backlog() {
   [ $? -ne 1 ]
 }
 
+# The flags of gh may come before its subcommand, with their value in the next word: -R o/r issue new.
 guard_gh_issue() {
-  [ "${1:-}" = 'issue' ] && [ "${2:-}" = 'create' ] || return 0
+  local group=''
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help | -h | --*=* | -[!-]?*) ;;
+      -?*) shift ;;
+      *)
+        if [ -z "$group" ]; then
+          [ "$1" = 'issue' ] || return 0
+          group="$1"
+        else
+          case "$1" in create | new) break ;; *) return 0 ;; esac
+        fi
+        ;;
+    esac
+    [ $# -gt 0 ] && shift
+  done
+  [ $# -gt 0 ] || return 0
   [ "$TRACKER" = 'github' ] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   session_searched_backlog && return 0

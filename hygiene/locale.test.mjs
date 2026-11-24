@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {CYCLE, ISSUE, LOCALES, PRINCIPLE_ID} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -149,10 +149,18 @@ test('the Cycle section of every method is marked once, takes at most 1.5 KB and
     const [, section] = found[0];
     assert.ok(section.startsWith(`${CYCLE_HEADING[locale]}\n`));
     assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
-    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue']);
-    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', `templates/${locale}/issue.md`]) {
+    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue', 'pr-facts', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
+    const {beforeMerging, afterMerging, noneWord} = PR_SECTIONS[locale];
+    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', 'gh issue new', `templates/${locale}/issue.md`, 'plan-check', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis:merge', 'gh issue list --state closed --label pending-actions']) {
       assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
     }
+  }
+});
+
+test('the root template names the sections of a pull request', () => {
+  for (const locale of LOCALES) {
+    const {required, beforeMerging, afterMerging} = PR_SECTIONS[locale];
+    for (const name of [...required, beforeMerging, afterMerging]) assert.ok(template(locale, 'CLAUDE.root.md').includes(`**${name}**`), `${locale}: ${name}`);
   }
 });
 
@@ -193,6 +201,19 @@ test('every locale defines the same issue labels, and as many sections', () => {
   }
 });
 
+test('every locale defines the same pull request sections', () => {
+  const [first, ...rest] = LOCALES;
+  for (const locale of LOCALES) {
+    const {none, noneWord, beforeMerging, afterMerging} = PR_SECTIONS[locale];
+    assert.match(noneWord, none, `${locale}: the word of an empty section is one`);
+    assert.notEqual(beforeMerging, afterMerging);
+  }
+  for (const locale of rest) {
+    assert.deepEqual(Object.keys(PR_SECTIONS[locale]), Object.keys(PR_SECTIONS[first]));
+    assert.equal(PR_SECTIONS[locale].required.length, PR_SECTIONS[first].required.length);
+  }
+});
+
 test('the plan-reviewer takes its report labels from one table, with a row per locale', () => {
   const agent = readFileSync(path.join(TRELLIS_ROOT, 'agents', 'plan-reviewer.md'), 'utf8');
   const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
@@ -206,6 +227,33 @@ test('the plan-reviewer takes its report labels from one table, with a row per l
   for (const word of ['Verdict', 'Errors', 'Omissions', 'Not established']) {
     assert.ok(!outside.includes(`**${word}**`), `the label ${word} is written only in the table`);
   }
+});
+
+test('plan-check takes the words of its report from one table, the one of lib/locale.mjs', () => {
+  const agent = readFileSync(path.join(TRELLIS_ROOT, 'agents', 'plan-check.md'), 'utf8');
+  const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
+  assert.deepEqual(rows.map(row => row[0]), LOCALES, 'one row per locale, in the order of LOCALES');
+  for (const [locale, ...words] of rows) assert.deepEqual(words, Object.values(PLAN_CHECK[locale]), `words of ${locale}`);
+  const header = agent.split('\n').find(line => line.startsWith('| Language |')).split('|').slice(1, -1);
+  assert.equal(header.length, rows[0].length, 'a column per word');
+  // What reads the report looks for these lines.
+  const lines = {
+    en: ['Verdict: satisfied', 'Verdict: changes requested', 'Not established:'],
+    es: ['Veredicto: satisfecho', 'Veredicto: cambios pedidos', 'No establecido:'],
+  };
+  for (const locale of LOCALES) {
+    const W = PLAN_CHECK[locale];
+    assert.deepEqual([`${W.verdict}: ${W.satisfied}`, `${W.verdict}: ${W.changesRequested}`, `${W.notEstablished}:`], lines[locale]);
+    for (const line of lines[locale]) assert.ok(agent.includes(`\`${line}\``), `the agent spells ${line}`);
+    // A printout without this section is not a plan, whatever else it prints.
+    assert.ok(agent.includes(`\`${ISSUE[locale].sections[1]}\``), `the agent names the section ${ISSUE[locale].sections[1]}`);
+  }
+  const front = /^---\n([\s\S]*?)\n---/.exec(agent)[1];
+  assert.match(front, /^model: sonnet$/m);
+  for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent']) assert.match(front, new RegExp(`^disallowedTools: .*\\b${tool}\\b`, 'm'));
+  assert.match(agent, /At most 300 words/);
+  assert.match(agent, /trellis issue check <n> --print/);
+  assert.ok(Buffer.byteLength(agent) <= 4096, `${Buffer.byteLength(agent)} bytes`);
 });
 
 test('the templates of every locale use the same placeholder names; only the text around them is translated', () => {
