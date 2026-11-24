@@ -56,6 +56,16 @@ TRANSCRIPT="$(field transcript_path)"
 
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/gh.sh
+. "$TRELLIS_ROOT/lib/gh.sh"
+
+# A note for the person that the hook prints with its answer (a `systemMessage`): what it could not
+# ask GitHub. Held until the end, because the hook prints one JSON object.
+HELD_MESSAGE=''
+hold_message() {
+  case "$HELD_MESSAGE" in *"$1"*) return 0 ;; esac
+  HELD_MESSAGE="${HELD_MESSAGE:+$HELD_MESSAGE }$1"
+}
 
 # The config is the one of the repository a segment runs in, after its `cd` or `git -C`: a session
 # standing outside a project can still push into it. A repository without trellis.config is no
@@ -84,8 +94,18 @@ load_config() {
 
 DENY_NOTE=''
 deny() {
-  node -e 'console.log(JSON.stringify({hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: process.argv[1]}}));' "$1$DENY_NOTE"
+  node -e '
+    const out = {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: process.argv[1]}};
+    if (process.argv[2]) out.systemMessage = process.argv[2];
+    console.log(JSON.stringify(out));
+  ' "$1$DENY_NOTE" "$HELD_MESSAGE"
   exit 0
+}
+
+# The held message alone, when no decision was made.
+print_held_message() {
+  [ -n "$HELD_MESSAGE" ] || return 0
+  node -e 'console.log(JSON.stringify({systemMessage: process.argv[1]}));' "$HELD_MESSAGE"
 }
 
 in_list() {
@@ -139,7 +159,12 @@ guard_branch_switch() {
   branch="$(git -C "$dir" branch --show-current 2>/dev/null)" || return 0
   issue="$(branch_issue "$branch")"
   [ -n "$issue" ] || return 0
-  state="$(cd "$dir" && GH_PROMPT_DISABLED=1 gh issue view "$issue" --json state --jq .state 2>/dev/null </dev/null)" || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  if ! gh_as_owner "$dir" "$(gh_owner "$dir")" issue view "$issue" --json state --jq .state; then
+    hold_message "trellis guard-git: the state of issue $issue could not be read as $GH_AS_ACCOUNT (${GH_AS_ERR:-gh failed}), so the open-issue check of this switch was skipped."
+    return 0
+  fi
+  state="$GH_AS_OUT"
   if [ "$state" = 'OPEN' ]; then
     deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
   fi
@@ -178,6 +203,31 @@ guard_gh_issue() {
   deny "An issue is created after the backlog was searched by concept, because the closed issues record what was already decided. Search first: gh issue list --state all --limit 60 --search '<concept>', read what is related, then repeat the creation."
 }
 
+# Whether a word of `gh pr merge` is the -R / --repo flag, in any form gh reads: -R x/y, -Rx/y, -R=x/y,
+# --repo x/y, --repo=x/y, and -R at the end of a group of the boolean short flags (-dR x/y, -dRx/y).
+# Sets REPO_FLAG_VALUE, and REPO_FLAG_NEXT when the value is the next word.
+REPO_FLAG_VALUE=''
+REPO_FLAG_NEXT=false
+repo_flag() {
+  local w="$1" pre rest
+  REPO_FLAG_VALUE=''
+  REPO_FLAG_NEXT=false
+  case "$w" in
+    --repo) REPO_FLAG_NEXT=true; return 0 ;;
+    --repo=*) REPO_FLAG_VALUE="${w#*=}"; return 0 ;;
+    --*) return 1 ;;
+    -*R*)
+      pre="${w%%R*}"
+      pre="${pre#-}"
+      case "$pre" in *[!dmrs]*) return 1 ;; esac
+      rest="${w#*R}"
+      if [ -z "$rest" ]; then REPO_FLAG_NEXT=true; else REPO_FLAG_VALUE="${rest#=}"; fi
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 guard_gh_merge() {
   [ "${1:-}" = 'pr' ] && [ "${2:-}" = 'merge' ] || return 0
   fail_closed
@@ -188,9 +238,12 @@ guard_gh_merge() {
   shift 2
   while [ $# -gt 0 ]; do
     word="$1"
+    if repo_flag "$word"; then
+      if [ "$REPO_FLAG_NEXT" = true ]; then repo="${2:-}"; shift; else repo="$REPO_FLAG_VALUE"; fi
+      shift
+      continue
+    fi
     case "$word" in
-      -R | --repo) repo="${2:-}"; shift ;;
-      --repo=*) repo="${word#*=}" ;;
       -b | --body | -F | --body-file | -t | --subject | -A | --author-email | --match-head-commit) shift ;;
       -*) ;;
       *) [ -z "$target" ] && target="$word" ;;
@@ -202,14 +255,18 @@ guard_gh_merge() {
   if [ -z "$target" ]; then
     deny "A merge names its pull request (number, URL or branch), so its base can be read first: gh pr merge <n>. The assistant merges only into: ${allowed:-nothing}."
   fi
+  # The account that sees the repository is its owner's: of the URL naming the pull request, of -R,
+  # or of the origin remote.
+  local hint="$repo"
+  case "$target" in http://* | https://*) hint="$target" ;; esac
   if [ -n "$repo" ]; then
-    base="$(cd "$dir" 2>/dev/null && GH_PROMPT_DISABLED=1 gh pr view "$target" --json baseRefName --jq .baseRefName --repo "$repo" 2>/dev/null </dev/null)"
+    gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName --repo "$repo"
   else
-    base="$(cd "$dir" 2>/dev/null && GH_PROMPT_DISABLED=1 gh pr view "$target" --json baseRefName --jq .baseRefName 2>/dev/null </dev/null)"
+    gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName
   fi
-  base="${base//[[:space:]]/}"
+  base="${GH_AS_OUT//[[:space:]]/}"
   if [ -z "$base" ]; then
-    deny "The base branch of pull request $target could not be read (gh pr view failed or answered nothing), and a merge whose base is unknown is refused. Check the pull request and gh's session, then repeat."
+    deny "The base branch of pull request $target could not be read as $GH_AS_ACCOUNT (${GH_AS_ERR:-gh failed or answered nothing}), and a merge whose base is unknown is refused. Check the pull request and gh's session, then repeat."
   fi
   if ! in_list "$base" "$MERGE_INTO"; then
     deny "Pull request $target merges into $base, and the assistant merges only into: ${allowed:-nothing}. A merge into $base is a person's."
@@ -815,9 +872,9 @@ judge_gh() {
       DENY_NOTE=''
       # Nothing here or in the session has a config, and gh reaches a repository by name.
       for word in "${rest[@]}"; do
-        case "$word" in
-          -R | --repo | --repo=*) deny 'A merge into a repository named by -R, with no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository, without -R: cd <repo> && gh pr merge <n>.' ;;
-        esac
+        if repo_flag "$word"; then
+          deny 'A merge into a repository named by -R, with no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository, without -R: cd <repo> && gh pr merge <n>.'
+        fi
       done
       [ "$ENV_SEEN" = true ] && deny 'A merge with GH_REPO set, and no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository: cd <repo> && gh pr merge <n>.'
     fi
@@ -1017,4 +1074,5 @@ while next_segment; do
 done 3< <(split_segments)
 
 backstop
+print_held_message
 exit 0

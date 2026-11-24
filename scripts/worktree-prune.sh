@@ -25,6 +25,8 @@ TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 . "$TRELLIS_ROOT/lib/config.sh"
 # shellcheck source=../lib/ff-integration.sh
 . "$TRELLIS_ROOT/lib/ff-integration.sh"
+# shellcheck source=../lib/gh.sh
+. "$TRELLIS_ROOT/lib/gh.sh"
 
 caller_dir="$(pwd -P)"
 main_worktree="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0, 10); exit}')"
@@ -33,6 +35,9 @@ cd "$main_worktree" || exit 1
 
 integration="$(tc_get git.integrationBranch)"
 tracker="$(tc_get tracker.kind)"
+# GitHub is asked as the account of the repository's owner, which is not always the active one.
+gh_account_owner=''
+[ "$tracker" = 'github' ] && gh_account_owner="$(gh_owner "$main_worktree")"
 
 if ! GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
      fetch --prune --quiet origin 2>/dev/null; then
@@ -113,9 +118,13 @@ while IFS= read -r path; do
       fi
     done <<< "$(git log --first-parent --merges --format='%H %P %s' "origin/$integration")"
     if [ -z "$own_merge" ] && [ "$tracker" = 'github' ]; then
-      merged_heads="$(GH_PROMPT_DISABLED=1 gh pr list --head "$branch" --state merged --json headRefOid --jq '.[].headRefOid' </dev/null 2>/dev/null || true)"
-      if [[ $'\n'"$merged_heads"$'\n' == *$'\n'"$tip"$'\n'* ]]; then
-        own_merge="github:$branch"
+      if gh_as_owner "$main_worktree" "$gh_account_owner" pr list --head "$branch" --state merged --json headRefOid --jq '.[].headRefOid'; then
+        if [[ $'\n'"$GH_AS_OUT"$'\n' == *$'\n'"$tip"$'\n'* ]]; then
+          own_merge="github:$branch"
+        fi
+      else
+        keep "$path ($branch): GitHub could not be asked as $GH_AS_ACCOUNT: ${GH_AS_ERR:-gh failed}"
+        continue
       fi
     fi
     if [ -z "$own_merge" ]; then
