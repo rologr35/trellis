@@ -1,7 +1,6 @@
-# The project's calls to the plugin's workflows, pinned to the same sha as the marketplace of
-# .claude/settings.json: the check of an open pull request, and the close of the issue of a merged
-# one. `edited` reruns the check when the body changes, so a **Setback** (es: **Retroceso**) added
-# later is read.
+# The project's calls to the workflows of trellis, pinned to the sha of .trellis/VERSION: the check of
+# an open pull request, which requires that sha, and the close of the issue of a merged one. `edited`
+# reruns the check when the body changes, so a **Setback** (es: **Retroceso**) added later is read.
 name: trellis
 
 on:

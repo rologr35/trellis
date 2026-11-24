@@ -123,6 +123,30 @@ git checkout -q HEAD -- lib/main.dart
 cp "$TL_TMP/good.config" trellis.config && git add -A
 git commit -q --no-verify -m 'chore: repaired (#7)'
 
+printf '\nthe copy of trellis\n'
+upstream="$(tl_upstream)"
+tl_copy "$upstream" && git add -A
+tl_eq 'the copy is not judged, whatever its files hold' '0' "$(judge)"
+git commit -q --no-verify -m 'chore: the copy (#7)'
+mkdir -p .trellis/lib && printf '// ignore: x\n' > .trellis/lib/own.dart && git add -A
+tl_eq 'a file of .trellis/ out of the manifest is' '1' "$(judge)"
+reset
+git rm -q test/a_test.dart
+printf '%064d  test/a_test.dart\n' 0 >> .trellis/MANIFEST && git add -A
+tl_eq 'a manifest does not hide a test of the project' '1' "$(judge)"
+reset
+mkdir -p .trellis/test && git mv test/a_test.dart .trellis/test/a_test.dart
+printf '%064d  .trellis/test/a_test.dart\n' 0 >> .trellis/MANIFEST && git add -A
+tl_eq 'a test moved into the copy is a test deleted' '1' "$(judge)"
+tl_has 'and named' 'deletes the test test/a_test.dart' "$(cat "$OUT")"
+reset
+printf 'void main() {}\n' > "$upstream/lib/x_test.dart"
+git -C "$upstream" add -A && git -C "$upstream" commit -q -m 'chore: x (#1)' && git -C "$upstream" tag v2
+bash "$TRELLIS" update v2 >/dev/null && git add -A && git commit -q --no-verify -m 'chore: v2 (#7)'
+bash "$TRELLIS" update v1 >/dev/null && git add -A
+tl_eq 'a file the next copy does not have is not a test deleted' '0' "$(judge)"
+reset
+
 printf '\nescape, merge and base\n'
 printf '// ignore: x\n' >> lib/main.dart && git add -A
 git config branch.7-work.ratchet-loosened true

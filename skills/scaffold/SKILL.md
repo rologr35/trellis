@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # scaffold
 
-One `CLAUDE.md` for each `workspace.package` of `trellis.config` that lacks one, from the plugin's `CLAUDE.package.md` template of the project's language (`$(cd "$(dirname "$(command -v trellis)")/.." && pwd)/templates/<locale>/`, where `<locale>` is `trellis config get project.locale`). The draft is written in that language. A package that already has one is not touched; a package at the root (`.`) has the root `CLAUDE.md`, which init writes.
+One `CLAUDE.md` for each `workspace.package` of `trellis.config` that lacks one, from trellis's `CLAUDE.package.md` template of the project's language (`$(cd "$(dirname "$(command -v trellis)")/.." && pwd)/templates/<locale>/`, where `<locale>` is `trellis config get project.locale`). The draft is written in that language. A package that already has one is not touched; a package at the root (`.`) has the root `CLAUDE.md`, which init writes.
 
 ## What is deduced and from where
 

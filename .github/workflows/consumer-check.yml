@@ -7,7 +7,10 @@
 #       with:
 #         trellis-ref: <the same sha>
 #
-# The plugin is cloned at that sha outside the workspace, so the project's hygiene never sees it.
+# The sha is the one of .trellis/VERSION, and the copy the project commits is compared with it: a file
+# edited together with its line of the manifest does not pass.
+#
+# trellis is cloned at that sha outside the workspace, so the project's hygiene never sees it.
 # The ratchet compares HEAD with the pull request's base over the full history (fetch-depth 0): a
 # shallow clone gives false results. It runs with --allow-loosen only when the body carries a valid
 # **Setback** (**Retroceso** in es), so an accepted setback is written where the person reviews it.
@@ -18,11 +21,11 @@ on:
   workflow_call:
     inputs:
       trellis-ref:
-        description: The full sha of the plugin the project pins.
+        description: The full sha of trellis the project pins, the one of .trellis/VERSION.
         required: true
         type: string
       trellis-repo:
-        description: The plugin repository.
+        description: The repository of trellis.
         required: false
         type: string
         default: rologr35/trellis
@@ -54,6 +57,10 @@ jobs:
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: printf '%s\n' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+      - name: the copy is the one of the pinned sha
+        env:
+          REF: ${{ inputs.trellis-ref }}
+        run: bash "$TRELLIS" verify --upstream --ref "$REF"
       - name: hygiene
         run: bash "$TRELLIS" hygiene
       - name: pr-check

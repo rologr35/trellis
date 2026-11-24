@@ -5,8 +5,10 @@
 #   trellis config get <key> | all <key> | list | subsections <section> | unknown | invalid
 #   trellis doctor                          read-only diagnosis, FAIL exits 1
 #   trellis sync                            rewrites the generated blocks and the generated deny
+#   trellis update <tag|sha>                writes the project's copy of trellis
+#   trellis verify [--staged | --upstream] [--ref <sha>]
 #   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
-#   trellis setup [--quiet]                 core.hooksPath = .githooks when it is missing
+#   trellis setup [--quiet]                 core.hooksPath and the PATH of a session
 #   trellis worktree add <n> <slug> | prune
 #   trellis ratchet [--base <ref>] [--allow-loosen]
 #   trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>
@@ -30,7 +32,7 @@ TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,16p' "$self" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,18p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -65,6 +67,8 @@ case "$sub" in
     ;;
   doctor) exec bash "$TRELLIS_ROOT/scripts/doctor.sh" "$@" ;;
   sync) exec bash "$TRELLIS_ROOT/scripts/sync.sh" "$@" ;;
+  update) exec bash "$TRELLIS_ROOT/scripts/update.sh" "$@" ;;
+  verify) exec node "$TRELLIS_ROOT/scripts/verify.mjs" "$@" ;;
   hygiene) exec node "$TRELLIS_ROOT/hygiene/hygiene.mjs" "$@" ;;
   setup) exec bash "$TRELLIS_ROOT/scripts/setup.sh" "$@" ;;
   worktree)

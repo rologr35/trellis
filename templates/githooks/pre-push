@@ -11,7 +11,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/find-trellis.sh"
 trellis="$(find_trellis)"
 if [ -z "$trellis" ]; then
-  echo 'pre-push: trellis not found (PATH or the installed plugin), check skipped' >&2
+  echo 'pre-push: trellis not found (.trellis and node, PATH or the installed plugin), check skipped' >&2
   exit 0
 fi
 # A config that does not parse stops the hook with its error (trellis exits 3).

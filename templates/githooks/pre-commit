@@ -4,11 +4,13 @@
 #   - refuses a commit on git.releaseBranch (the integration branch has no mechanical guard on
 #     purpose: a person may commit a small change there; for Claude the rule is in the method);
 #   - runs [command] secretScan (configured and missing: a warning, and `trellis doctor` FAILs);
+#   - runs `trellis verify --staged`, in a project with a copy of trellis: nobody edits it by hand, and
+#     it is not removed while .claude/settings.json loads its hooks;
 #   - runs `trellis ratchet` on every commit, and `trellis hygiene --staged` when the staged change
 #     touches .md, .claude/, docs/ or trellis.config. The aggregate limits run only in CI: two
 #     branches under a shared budget can merge over it, and a local absolute check would block
 #     somebody else's commit.
-# Without trellis at hand (PATH or the plugin's installPath) it warns and lets the commit through.
+# Without trellis at hand (lib/find-trellis.sh) it warns and lets the commit through.
 
 set -uo pipefail
 
@@ -17,7 +19,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/find-trellis.sh"
 trellis="$(find_trellis)"
 if [ -z "$trellis" ]; then
-  echo 'pre-commit: trellis not found (PATH or the installed plugin), checks skipped' >&2
+  echo 'pre-commit: trellis not found (.trellis and node, PATH or the installed plugin), checks skipped' >&2
   exit 0
 fi
 # A config that does not parse stops the hook with its error (trellis exits 3).
@@ -28,6 +30,10 @@ release="$("$trellis" config get git.releaseBranch)"
 if [ -n "$branch" ] && [ "$branch" = "$release" ]; then
   echo "pre-commit: no commit on $release, the release branch. Work on an issue branch." >&2
   exit 1
+fi
+
+if [ -n "$(git ls-files .trellis)" ] || git grep -q --cached -F '.trellis/' -- .claude/settings.json; then
+  "$trellis" verify --staged || exit 1
 fi
 
 scan="$("$trellis" config get command.secretScan)"

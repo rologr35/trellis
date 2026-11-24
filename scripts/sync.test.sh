@@ -83,4 +83,36 @@ tl_has 'with locale es, the es method' '## Método de trabajo' "$claude_md"
 tl_has 'and the es labels' '| `app/CLAUDE.md` | al leer un fichero de `app/` | App package |' "$claude_md"
 tl_has 'and the es rungs table' '| Escalón | Comando | Lo corre Claude |' "$(cat TESTING.md)"
 
+printf '\nwith a copy\n'
+node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+  s.model = "sonnet";
+  s.hooks = {PostToolUse: [{matcher: "Edit", hooks: [{type: "command", command: "fmt"}]}], PreToolUse: [{matcher: "Bash", hooks: [{type: "command", command: "own"}]}]};
+  fs.writeFileSync(".claude/settings.json", JSON.stringify(s, null, 2) + "\n");
+'
+before="$(cat .claude/settings.json)"
+"$TRELLIS" sync >/dev/null 2>&1
+tl_eq 'without one no hook is written' "$before" "$(cat .claude/settings.json)"
+mkdir -p .trellis && printf '0.6.0 0123456789012345678901234567890123456789\n' > .trellis/VERSION
+"$TRELLIS" sync >/dev/null 2>&1
+at() { node -p "const s = require('$repo/.claude/settings.json'); JSON.stringify($1)"; }
+tl_eq 'the guard is a hook of Bash' '[{"matcher":"Bash","hooks":[{"type":"command","command":"own"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/hooks/guard-git.sh"}]}]' "$(at s.hooks.PreToolUse)"
+tl_eq 'setup is the one of the session start' '[{"hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/bin/trellis setup --quiet"}]}]' "$(at s.hooks.SessionStart)"
+tl_eq 'another hook of the project stays' '[{"matcher":"Edit","hooks":[{"type":"command","command":"fmt"}]}]' "$(at s.hooks.PostToolUse)"
+tl_eq 'and another key' '"sonnet"' "$(at s.model)"
+tl_has 'the copy is not edited' '"Edit(/.trellis/**)"' "$(at s.permissions.deny)"
+tl_eq 'a second run changes nothing' 'sync: nothing to change' "$("$TRELLIS" sync 2>&1)"
+node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+  s.hooks.PreToolUse[1].hooks[0].async = true;
+  fs.writeFileSync(".claude/settings.json", JSON.stringify(s, null, 2) + "\n");
+'
+"$TRELLIS" sync >/dev/null 2>&1
+tl_eq 'a guard that does not wait does not stand for the guard' '3' "$(at s.hooks.PreToolUse.length)"
+rm .claude/settings.json
+"$TRELLIS" sync >/dev/null 2>&1
+tl_eq 'the settings are written when there are none' '1' "$(at s.hooks.PreToolUse.length)"
+
 tl_done

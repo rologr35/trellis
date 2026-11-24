@@ -45,6 +45,25 @@ tl_has 'naming the parse error' 'does not parse' "$(cat "$TL_TMP/out.txt")"
 cp "$TL_TMP/good.config" trellis.config
 git rm -q --cached w.txt && rm w.txt
 
+printf '\nthe copy\n'
+tl_copy "$(tl_upstream)"
+git add -A
+tl_eq 'a whole copy passes' '0' "$(commit -m 'chore: the copy (#1)')"
+printf '# x\n' >> .trellis/lib/schema && git add -A
+tl_eq 'a copy edited by hand is refused' '1' "$(commit -m 'chore: edit (#1)')"
+tl_has 'naming the file' '.trellis/lib/schema' "$(cat "$TL_TMP/out.txt")"
+git reset -q --hard
+tl_eq 'the copy is the one found, without a PATH or a plugin that has it' "$repo/.trellis/bin/trellis" "$(. "$TRELLIS_ROOT/lib/find-trellis.sh"; PATH="$(dirname "$(command -v node)"):/usr/bin:/bin" find_trellis)"
+tl_eq 'before the one of the PATH' "$repo/.trellis/bin/trellis" "$(. "$TRELLIS_ROOT/lib/find-trellis.sh"; PATH="$bin:$PATH" find_trellis)"
+tl_eq 'from a folder of the project too' "$repo/.trellis/bin/trellis" "$(cd lib && . "$TRELLIS_ROOT/lib/find-trellis.sh"; PATH="$bin:$PATH" find_trellis)"
+chmod -x .trellis/bin/trellis
+printf 'w\n' > w.txt && git add w.txt
+tl_eq 'a command that cannot run refuses the commit: no other one stands for it' '1' "$(commit -m 'chore: w (#1)')"
+git reset -q --hard && rm -f w.txt
+git rm -rq .trellis
+tl_eq 'a commit that removes the copy is refused' '1' "$(commit -m 'chore: gone (#1)')"
+git reset -q --hard
+
 printf '\ncommit-msg\n'
 printf 'x\n' > a.txt && git add -A
 tl_eq 'an AI attribution is refused' '1' "$(commit -m 'feat: a (#1)' -m 'Co-Authored-By: Claude <noreply@anthropic.com>')"
@@ -60,6 +79,7 @@ tl_eq 'the release branch is a person'"'"'s to push' '0' "$(push main)"
 
 printf '\nwithout trellis\n'
 printf 'y\n' > b.txt && git add -A
+tl_eq 'the copy is not found without node, which runs it' '' "$(. "$TRELLIS_ROOT/lib/find-trellis.sh"; PATH=/usr/bin:/bin find_trellis)"
 tl_eq 'the hooks let the commit through' '0' "$(PATH="/usr/bin:/bin" git commit -q -m 'whatever' > "$TL_TMP/out.txt" 2>&1; echo $?)"
 tl_has 'and warn' 'trellis not found' "$(cat "$TL_TMP/out.txt")"
 

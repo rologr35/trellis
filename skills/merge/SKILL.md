@@ -1,6 +1,6 @@
 ---
 name: merge
-description: Closes a pull request of the project (/trellis:merge <pr>) when a person says to merge it. What is done before, the merge, the close of its issue, what is left after, and the worktrees.
+description: Closes a pull request of the project (/trellis-merge <pr>) when a person says to merge it. What is done before, the merge, the close of its issue, what is left after, and the worktrees.
 ---
 
 # merge
@@ -15,7 +15,7 @@ Read it whole:
 gh pr view <pr> --json url,state,isDraft,baseRefName,headRefName,mergeable,mergeStateStatus,statusCheckRollup,body
 ```
 
-- It is not a draft. A draft goes back to `plan-check` and `gh pr ready`.
+- It is not a draft. A draft goes back to `trellis-plan-check` and `gh pr ready`.
 - Its base is `trellis config get git.integrationBranch`. Another base is said, and a person decides.
 - Every check is green. One pending is waited for; one red is fixed on its branch.
 - `mergeable` is `MERGEABLE`. A conflict is solved on its branch, never here.

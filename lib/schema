@@ -22,6 +22,7 @@ git.issueBranch|single|^[0-9]+-[a-z0-9-]+$
 git.protected|multi|main
 git.protected|multi|develop
 git.assistantMayMergeInto|multi|develop
+git.hooksPath|single|.githooks
 
 tracker.kind|enum:github,none|github
 

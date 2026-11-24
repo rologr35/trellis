@@ -21,8 +21,11 @@
 //   - every [workspace] package has its CLAUDE.md (a package at the root, `.`, is the root one);
 //   - the orientation block lists every nested file and every rule;
 //   - every generated block matches what `trellis sync` generates, the root carries the method
-//     block, the deny of .claude/settings.json keeps every entry sync generates, and
-//     .githooks/find-trellis.sh is the plugin's copy.
+//     block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks the
+//     ones of the copy, and
+//     .githooks/find-trellis.sh is trellis's copy;
+//   - the copy of trellis is whole, as `trellis verify` says, and its files are not judged by anything
+//     above: the project does not write them.
 //
 // Prints one line per finding and exits 1 when there is any. Node only, no dependencies.
 
@@ -39,9 +42,11 @@ import {
   generateBlocks,
   generatedDeny,
   instructionIndex,
+  missingHooks,
   rulePaths,
 } from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
+import {COPY_DIR, hasCopy, ownTree, verifyCopy} from '../lib/copy.mjs';
 import {localeOf} from '../lib/locale.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
@@ -125,7 +130,8 @@ export function globToRegExp(glob) {
 const allowlist = values => new Set(values.map(v => v.split('|')[0].trim()));
 
 export function hygiene(root, {staged = false} = {}) {
-  const tree = projectTree(root, {staged});
+  const whole = projectTree(root, {staged});
+  const tree = ownTree(whole);
   let config;
   if (staged) {
     const scratch = mkdtempSync(path.join(tmpdir(), 'trellis-hygiene-'));
@@ -254,29 +260,38 @@ export function hygiene(root, {staged = false} = {}) {
     }
   }
   const settingsText = tree.read('.claude/settings.json');
-  if (settingsText !== null) {
-    let deny = null;
+  const copy = hasCopy(whole);
+  if (settingsText === null) {
+    if (copy) fail('.claude/settings.json', 'is not there, and it loads the hooks of the copy: run trellis sync');
+  } else {
+    let settings = null;
     try {
-      deny = JSON.parse(settingsText).permissions?.deny ?? [];
+      settings = JSON.parse(settingsText);
     } catch {
       fail('.claude/settings.json', 'does not parse as JSON');
     }
-    if (deny) {
-      for (const entry of generatedDeny(config)) {
+    if (settings) {
+      const deny = settings.permissions?.deny ?? [];
+      for (const entry of generatedDeny(config, {copy})) {
         if (!deny.includes(entry)) fail('.claude/settings.json', `permissions.deny lacks ${entry}: run trellis sync`);
+      }
+      for (const {event, group} of copy ? missingHooks(settings) : []) {
+        fail('.claude/settings.json', `hooks.${event} lacks ${group.hooks[0].command}: run trellis sync`);
       }
     }
   }
   if (tree.files.some(f => f.startsWith('.githooks/')) && tree.read(FIND_TRELLIS_COPY) !== findTrellisSource()) {
-    fail(FIND_TRELLIS_COPY, 'is not the plugin\'s lib/find-trellis.sh: run trellis sync');
+    fail(FIND_TRELLIS_COPY, 'is not trellis\'s lib/find-trellis.sh: run trellis sync');
   }
+  // The settings that load the copy's hooks need it there.
+  if (copy || (settingsText ?? '').includes(`${COPY_DIR}/`)) findings.push(...verifyCopy(whole));
 
   return findings;
 }
 
 /** Records the size of every frozen file in [hygiene] frozen; returns the lines that rose. */
 export function freeze(root) {
-  const tree = projectTree(root);
+  const tree = ownTree(projectTree(root));
   const config = loadConfig({cwd: root});
   const was = new Map(config.all('hygiene.frozen').map(v => v.trim().split(/\s+/)).map(([file, size]) => [file, Number(size)]));
   const files = tree.files.filter(f => /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f) || /^docs\/.*\.md$/.test(f));
