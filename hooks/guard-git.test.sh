@@ -360,6 +360,13 @@ tl_eq 'into an allowed base' 'allow' "$(verdict 'gh pr merge 12 --merge')"
 tl_eq 'into a base not allowed' 'deny' "$(verdict 'gh pr merge 13 --merge')"
 tl_eq 'without naming the pull request' 'deny' "$(verdict 'gh pr merge --merge')"
 tl_eq 'with an unreadable base' 'deny' "$(verdict 'gh pr merge 99')"
+# A group of short flags whose last letter takes a value: 12 is that value (develop, allowed) and 13 is
+# the pull request (main, not allowed), so a guard that judges 12 lets the merge through.
+for form in '-sb 12 13' '-mF 12 13' '-dt 12 13' '-rsA 12 13' '-bs 13' '-sbtext 13' '-dR x/y 13'; do
+  tl_eq "a group of short flags $form judges pull request 13" 'deny' "$(verdict "gh pr merge $form")"
+done
+tl_eq 'a group ending in a value flag, then an allowed pull request' 'allow' "$(verdict 'gh pr merge -sb 13 12')"
+tl_eq 'a group with a letter gh refuses keeps today'"'"'s reading' 'allow' "$(verdict 'gh pr merge -xb 12 13')"
 tl_eq 'from a cloud session' 'deny' "$(CLAUDE_CODE_REMOTE=1 verdict 'gh pr merge 12')"
 
 printf '\na config that does not parse\n'
