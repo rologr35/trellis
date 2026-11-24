@@ -29,6 +29,16 @@ case "$1 $2" in
       *body*) cat "$GH_FIXTURES/issue-$3.json" 2>/dev/null || fail "GraphQL: Could not resolve to an issue with the number of $3." ;;
       *) cat "$GH_FIXTURES/state-$repo-$3" 2>/dev/null || fail "HTTP 404: not found ($repo $3)" ;;
     esac ;;
+  'label list') cat "$GH_FIXTURES/labels" 2>/dev/null || fail 'HTTP 404: no labels' ;;
+  'label create') [ ! -f "$GH_FIXTURES/label-fails" ] || fail 'HTTP 403: no label for you' ;;
+  'issue create')
+    [ ! -f "$GH_FIXTURES/create-fails" ] || fail 'HTTP 403: no issue for you'
+    prev=''
+    for a in "$@"; do
+      [ "$prev" = '--body-file' ] && cp "$a" "$GH_FIXTURES/created-body"
+      prev="$a"
+    done
+    echo 'https://github.com/rologr35/fixture/issues/12' ;;
   *) fail "unexpected call: $*" ;;
 esac
 GH
@@ -318,6 +328,70 @@ sed 's/^## /### /; s/^Depende de: .*//' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
 issue_json 7 "$TL_TMP/symptom.md" OWNER "$TL_TMP/plan-es.md"
 tl_eq 'es: a plan in an Enmienda passes' '0' "$(status_of check 7)"
 git config -f trellis.config --unset project.locale
+
+printf '\ncreate\n'
+calls() { cat "$GH_FIXTURES/calls.log" 2>/dev/null; }
+# Runs a create with a clean log.
+create_of() { rm -f "$GH_FIXTURES/calls.log" "$GH_FIXTURES/created-body"; status_of create "$@"; }
+printf 'bug\nM\n' > "$GH_FIXTURES/labels"
+tl_eq 'a good body is created' '0' "$(create_of --title 'A flag for x' --body-file "$TL_TMP/good.md")"
+tl_eq '  and only its URL is printed' 'https://github.com/rologr35/fixture/issues/12' "$(out)"
+tl_has '  with the label of its complexity line' '--label|M|' "$(calls)"
+tl_has '  and its title' '--title|A flag for x|' "$(calls)"
+tl_lacks '  the label exists, so none is created' 'label|create' "$(calls)"
+tl_eq '  the body is the one of the file' '' "$(diff "$TL_TMP/good.md" "$GH_FIXTURES/created-body" 2>&1)"
+for class in S L; do
+  sed "s/^Complexity: M/Complexity: $class/" "$TL_TMP/good.md" > "$TL_TMP/case.md"
+  tl_eq "a body of class $class is created" '0' "$(create_of --title x --body-file "$TL_TMP/case.md")"
+  tl_has '  its label is created first' "label|create|$class|" "$(calls)"
+  tl_has '  and used' "--label|$class|" "$(calls)"
+done
+printf 'm\n' > "$GH_FIXTURES/labels"
+tl_eq 'a label in lower case is the same label' '0' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_lacks '  and is not created again' 'label|create' "$(calls)"
+printf 'bug\n' > "$GH_FIXTURES/labels"
+(cd "$TL_TMP" && cp good.md "$repo/relative.md")
+tl_eq 'a relative body file, the flags with = and in another order' '0' "$(create_of --body-file=relative.md --title='With = sign')"
+tl_has '  keep the title' '--title|With = sign|' "$(calls)"
+tl_eq '  and the body' '' "$(diff relative.md "$GH_FIXTURES/created-body" 2>&1)"
+rm -f relative.md
+sed 's/^Complexity: M//' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+tl_eq 'a body that fails the check is not created' '1' "$(create_of --title x --body-file "$TL_TMP/case.md")"
+tl_has '  it says why' 'last line is not' "$(out)"
+tl_eq '  and makes no gh call' '' "$(calls)"
+touch "$GH_FIXTURES/label-fails"
+tl_eq 'a label that cannot be created fails' '1' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_has '  with the error of gh' 'no label for you' "$(out)"
+tl_lacks '  and no issue is created' 'issue|create' "$(calls)"
+rm "$GH_FIXTURES/label-fails" "$GH_FIXTURES/labels"
+tl_eq 'labels that cannot be read fail' '1' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_lacks '  and no issue is created' 'issue|create' "$(calls)"
+printf 'M\n' > "$GH_FIXTURES/labels"
+touch "$GH_FIXTURES/create-fails"
+tl_eq 'an issue that cannot be created fails' '1' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_has '  with the error of gh' 'no issue for you' "$(out)"
+rm "$GH_FIXTURES/create-fails"
+tl_eq 'no title' '2' "$(create_of --body-file "$TL_TMP/good.md")"
+tl_eq 'an empty title' '2' "$(create_of --title '' --body-file "$TL_TMP/good.md")"
+tl_eq 'no body' '2' "$(create_of --title x)"
+tl_eq 'a body that does not exist' '2' "$(create_of --title x --body-file "$TL_TMP/none.md")"
+tl_eq 'a flag without its value' '2' "$(create_of --title x --body-file)"
+tl_eq 'a flag it does not know' '2' "$(create_of --title x --body-file "$TL_TMP/good.md" --label L)"
+tl_has '  which it names in the usage' 'trellis issue create' "$(out)"
+tl_has 'the usage of trellis lists create' 'issue create' "$("$TRELLIS" help 2>&1)"
+git config -f trellis.config tracker.kind none
+tl_eq 'tracker.kind = none exits 2' '2' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_eq '  with no gh call' '' "$(calls)"
+git config -f trellis.config --unset tracker.kind
+git remote set-url origin https://github.com/rologr35/fixture.git
+export GIT_ALLOW_PROTOCOL=file
+tl_eq 'a repository whose owner is signed in' '0' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_lacks '  asks nothing as another account' 'token=none' "$(calls | grep -v '^auth')"
+tl_has '  and creates as its owner' 'token=token-of-rologr35' "$(calls | grep '^issue|create')"
+tl_has '  without origin reached, it says the last fetch judged' 'judged by the last fetch' "$(out)"
+tl_lacks '  the token is not printed' 'token-of-rologr35' "$(out)"
+unset GIT_ALLOW_PROTOCOL
+git remote set-url origin "$remote"
 
 printf '\nusage\n'
 tl_eq 'no arguments' '2' "$(status_of)"

@@ -11,6 +11,7 @@
 #   trellis ratchet [--base <ref>] [--allow-loosen]
 #   trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>
 #   trellis issue check --body <file> | check <n> [--print]
+#   trellis issue create --title <t> --body-file <file>
 #   trellis check                           runs [command] check in order, fail-fast
 #
 # The plugin's bin/ is on the PATH of Claude's Bash tool only; a person, a git hook or a hook of the
@@ -28,7 +29,7 @@ TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,14p' "$self" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,15p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 

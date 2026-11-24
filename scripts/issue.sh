@@ -5,6 +5,8 @@
 #   trellis issue check --body <file>    a body, before it is published
 #   trellis issue check <n>              the plan of an issue of this repository, at pick-up
 #   trellis issue check <n> --print      prints that plan and judges nothing
+#   trellis issue create --title <t> --body-file <file>
+#                                        checks the body, creates the issue, prints its URL
 #
 # The check: the five sections of project.locale present, once, in order and not empty; each item of
 # Out of scope with its Source; the last line with text `Complexity: S`, M or L; every path in
@@ -16,6 +18,9 @@
 # headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only the comments of an
 # owner, a member or a collaborator count. At pick-up, also: every #n and owner/repo#n of the
 # Depends on line of Context is closed. Other text there is printed for a person.
+#
+# The label of the issue created is the class of its complexity line. S, M and L are created when the
+# repository lacks them.
 #
 # GitHub is asked as the account of the repository's owner (lib/gh.sh).
 #
@@ -31,7 +36,10 @@ TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 . "$TRELLIS_ROOT/lib/gh.sh"
 
 usage() {
-  printf 'usage: trellis issue check --body <file> | check <n> [--print]\n' >&2
+  {
+    printf 'usage: trellis issue check --body <file> | check <n> [--print]\n'
+    printf '       trellis issue create --title <t> --body-file <file>\n'
+  } >&2
   exit 2
 }
 
@@ -101,6 +109,47 @@ check_issue() {
   return "$status"
 }
 
+# Makes sure the repository has the label $1. GitHub compares the names of labels without case.
+ensure_label() {
+  local class="$1" owner="$2" colour
+  if ! gh_as_owner . "$owner" label list --limit 1000 --json name --jq '.[].name'; then
+    printf 'issue: the labels could not be read as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 1
+  fi
+  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$class" && return 0
+  case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
+  if ! gh_as_owner . "$owner" label create "$class" --color "$colour" --description "Complexity $class"; then
+    printf 'issue: the label %s could not be created as %s: %s\n' "$class" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 1
+  fi
+}
+
+create_issue() {
+  local title='' file='' class owner
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --title) [ $# -gt 1 ] || usage; title="$2"; shift ;;
+      --title=*) title="${1#*=}" ;;
+      --body-file) [ $# -gt 1 ] || usage; file="$2"; shift ;;
+      --body-file=*) file="${1#*=}" ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  [ -n "$title" ] && [ -f "$file" ] || usage
+  case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
+  fetch_integration
+  judge body "$file" || return 1
+  class="$(judge class "$file")"
+  owner="$(gh_owner .)"
+  ensure_label "$class" "$owner" || return 1
+  if ! gh_as_owner . "$owner" issue create --title "$title" --body-file "$file" --label "$class"; then
+    printf 'issue: it could not be created as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 1
+  fi
+  printf '%s\n' "$GH_AS_OUT"
+}
+
 [ $# -gt 0 ] || usage
 action="$1"
 shift
@@ -122,5 +171,6 @@ case "$action" in
         ;;
     esac
     ;;
+  create) create_issue "$@" ;;
   *) usage ;;
 esac

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Asking GitHub as the account that owns the repository, for the hook and for worktree prune.
+# Asking GitHub as the account that owns the repository, for the hook, worktree prune and trellis issue.
 #
 #   . "$TRELLIS_ROOT/lib/gh.sh"
 #   owner="$(gh_owner <dir> [<-R value or pull request URL>])"
@@ -8,8 +8,9 @@
 #
 # The account gh has active is not always the one that sees the repository: a person signed in on
 # two accounts keeps one active, and a private repository of the other answers "not found". The
-# calls here are reads (`view`, `list`), so they borrow the token of the owner's account for that
-# one gh call. The token is never printed, written or exported.
+# calls here are reads (`view`, `list`), and the writes a person asks for with `trellis issue create`
+# (`issue create`, `label create`). Each borrows the token of the owner's account for that one gh
+# call. The token is never printed, written or exported.
 #
 # gh_as_owner is not run in a command substitution: it sets, in the caller's shell,
 #   GH_AS_OUT      what gh printed on stdout
