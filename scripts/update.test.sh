@@ -107,6 +107,12 @@ tl_eq 'a file of the project with the name of a copied one stops it' '1' "$(upda
 tl_has 'naming it' '.claude/skills/trellis-merge/SKILL.md' "$(out)"
 tl_eq 'the file stays' '# Mine' "$(cat .claude/skills/trellis-merge/SKILL.md)"
 restore
+mkdir -p .claude/skills/trellis-merge && sed 's/^name: merge$/name: trellis-merge/' "$upstream/skills/merge/SKILL.md" > .claude/skills/trellis-merge/SKILL.md
+printf 'x\n' > .claude/agents
+tl_eq 'a file where a folder goes stops it' '1' "$(update v2)"
+rm .claude/agents
+tl_eq 'one equal to the copied one is not in the way' '0' "$(update v2)"
+restore
 printf 'bin/\n' > .gitignore
 tl_eq 'a copy git would ignore stops it' '1' "$(update v2)"
 tl_has 'naming a file' '.trellis/bin/trellis' "$(out)"

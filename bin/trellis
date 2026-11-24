@@ -8,7 +8,7 @@
 #   trellis update <tag|sha>                writes the project's copy of trellis
 #   trellis verify [--staged | --upstream] [--ref <sha>]
 #   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
-#   trellis setup [--quiet]                 core.hooksPath = .githooks when it is missing
+#   trellis setup [--quiet]                 core.hooksPath and the PATH of a session
 #   trellis worktree add <n> <slug> | prune
 #   trellis ratchet [--base <ref>] [--allow-loosen]
 #   trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>

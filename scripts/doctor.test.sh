@@ -147,6 +147,60 @@ ln -s "$NODE" "$tools/node"
 rm -r .claude
 cp "$TL_TMP/plugins.keep" "$plugins"
 
+printf '\na copy in place of the plugin\n'
+mv "$plugins" "$TL_TMP/plugins.json"
+git add -A && git commit -q -m 'chore: start (#1)'
+tl_copy "$(tl_upstream)"
+tl_eq 'with a whole copy no plugin is asked for' '0' "$(doctor)"
+tl_has 'and its version is said' "ok    verify: trellis $(cut -d' ' -f1 .trellis/VERSION)" "$(out)"
+tl_lacks 'the plugin is not' 'plugin trellis' "$(out)"
+printf '# x\n' >> .trellis/hooks/guard-git.sh
+tl_eq 'an edited copy fails' '1' "$(doctor)"
+tl_has 'naming the file' 'FAIL  .trellis/hooks/guard-git.sh: is not the file that was copied' "$(out)"
+rm .trellis/hooks/guard-git.sh
+tl_eq 'a guard that is missing fails' '1' "$(doctor)"
+tl_has 'naming it' 'FAIL  .trellis/hooks/guard-git.sh: is in the manifest and is not there' "$(out)"
+rm -r .trellis
+tl_eq 'the copy gone with the settings that load it fails' '1' "$(doctor)"
+tl_has 'naming the manifest' 'FAIL  .trellis/MANIFEST' "$(out)"
+bash "$TRELLIS" update v1 >/dev/null 2>&1
+enabled='warn  the plugin trellis is enabled too'
+mkdir -p "$HOME/.claude"
+printf '{"enabledPlugins": {"trellis@trellis": true}}\n' > "$HOME/.claude/settings.json"
+tl_eq 'the plugin enabled for the user too is a warning' '0' "$(doctor)"
+tl_has 'saying why' "$enabled" "$(out)"
+printf '{"enabledPlugins": {"trellis@trellis": false}}\n' > .claude/settings.local.json
+doctor > /dev/null
+tl_lacks 'unless this checkout turns it off' "$enabled" "$(out)"
+printf '{"enabledPlugins": {"other@trellis-like": true}}\n' > "$HOME/.claude/settings.json"
+rm .claude/settings.local.json
+doctor > /dev/null
+tl_lacks 'another plugin is not trellis' "$enabled" "$(out)"
+printf '{"enabledPlugins": {"trellis@trellis": true}}\n' > .claude/settings.local.json
+doctor > /dev/null
+tl_has 'enabled in the local settings' "$enabled" "$(out)"
+rm .claude/settings.local.json "$HOME/.claude/settings.json"
+node -e 'const fs = require("fs"); const f = ".claude/settings.json"; const s = JSON.parse(fs.readFileSync(f)); s.enabledPlugins = {"trellis@trellis": true}; fs.writeFileSync(f, JSON.stringify(s));'
+doctor > /dev/null
+tl_has 'or in the ones of the project' "$enabled" "$(out)"
+rm "$tools/node"
+tl_eq 'without node it fails' '1' "$(doctor)"
+tl_has 'saying the copy was not verified' 'info  the copy was not verified (node not found)' "$(out)"
+tl_has 'and that the hooks need it' 'node not found while hooks are active' "$(out)"
+ln -s "$NODE" "$tools/node"
+git reset -q --hard && git clean -qfd
+mv "$TL_TMP/plugins.json" "$plugins"
+
+printf '\ngit.hooksPath\n'
+git config -f trellis.config git.hooksPath tool/hooks
+tl_eq 'core.hooksPath out of it fails' '1' "$(doctor)"
+tl_has 'naming both' 'core.hooksPath is .githooks, expected tool/hooks' "$(out)"
+git config core.hooksPath tool/hooks
+tl_eq 'and at it passes' '0' "$(doctor)"
+tl_has 'saying which' 'git hooks installed (core.hooksPath = tool/hooks)' "$(out)"
+git config core.hooksPath .githooks
+git config -f trellis.config --unset git.hooksPath
+
 printf '\nbilling, secrets, env files\n'
 tl_eq 'ANTHROPIC_API_KEY exported fails' '1' "$(ANTHROPIC_API_KEY=x doctor)"
 tl_has 'and says why' 'billed as API usage' "$(out)"

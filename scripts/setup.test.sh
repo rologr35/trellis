@@ -26,6 +26,15 @@ other="$(tl_repo)"
 (cd "$other" && CLAUDE_PROJECT_DIR="$repo" "$TRELLIS" setup --quiet)
 tl_eq 'CLAUDE_PROJECT_DIR names the project' '.githooks' "$(git config --get core.hooksPath)"
 
+git config --unset core.hooksPath
+git config -f trellis.config git.hooksPath tool/hooks
+"$TRELLIS" setup >/dev/null
+tl_eq 'a folder that does not exist is not set' '' "$(git config --get core.hooksPath)"
+mkdir -p tool/hooks
+"$TRELLIS" setup >/dev/null
+tl_eq 'git.hooksPath names another folder' 'tool/hooks' "$(git config --get core.hooksPath)"
+tl_has 'idempotent' 'already tool/hooks' "$("$TRELLIS" setup)"
+
 printf '\nthe command of the copy on the PATH of a session\n'
 spaced="$TL_TMP/a b"
 mkdir "$spaced" && cd "$spaced" && git init -q && touch trellis.config

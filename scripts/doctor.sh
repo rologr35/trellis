@@ -11,8 +11,9 @@
 # FAIL: a key of trellis.config outside lib/schema, a value outside the accepted ones of an enum
 # key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), workspace.kind =
 # other without [hygiene] namedExt, or a command name that names no [command]; a tool of
-# [toolchain] require missing or older than its minimum; core.hooksPath unset; the plugin
-# not installed or Claude Code older than the minimum; node missing while hooks are active;
+# [toolchain] require missing or older than its minimum; core.hooksPath other than git.hooksPath;
+# a copy of trellis that is not whole, as `trellis verify` says, or, without a copy, the plugin not
+# installed; Claude Code older than the minimum; node missing while hooks are active;
 # ANTHROPIC_API_KEY exported (the subscription stops being used and every token is billed as API
 # usage, silently, so it is a FAIL and not a warning); a branch that is neither the integration
 # branch, the release branch nor an issue branch; a [command] secretScan configured and missing;
@@ -21,7 +22,8 @@
 # run text, or its ci text when set: a plain substring search, so a folded `run: >-`, a comment or
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
 # parser); .github/workflows/trellis.yml that does not name consumer-closed.yml, with tracker.kind =
-# github; the installed plugin is not at the sha the project pins; no secret scanner configured; uncommitted changes, unpushed
+# github; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
+# sha the project pins; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail
@@ -130,7 +132,7 @@ while IFS= read -r requirement; do
 done <<< "$(tc_all toolchain.require)"
 
 # ------------------------------------------------------------------------------------------------
-section 'claude code and plugin'
+section 'claude code and trellis'
 claude_version="$(command -v claude >/dev/null 2>&1 && version_of claude)"
 if [ -z "$claude_version" ]; then
   fail "claude not found (Claude Code $CLAUDE_MIN or later)"
@@ -140,7 +142,31 @@ else
   fail "Claude Code $claude_version is older than $CLAUDE_MIN (the pinned marketplace and --scope local need it)"
 fi
 plugin_installed=false
-if grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
+copy=false
+if [ -e .trellis ] || grep -qF '.trellis/' .claude/settings.json 2>/dev/null; then copy=true; fi
+if [ "$copy" = true ] && ! command -v node >/dev/null 2>&1; then
+  info 'the copy was not verified (node not found)'
+elif [ "$copy" = true ]; then
+  if verified="$(node "$TRELLIS_ROOT/scripts/verify.mjs" 2>&1)"; then
+    ok "$verified"
+  else
+    case "$verified" in *'  FAIL  '*) ;; *) fail "the copy could not be verified: $verified" ;; esac
+    while IFS= read -r line; do
+      case "$line" in '  FAIL  '*) fail "${line#  FAIL  }" ;; esac
+    done <<< "$verified"
+  fi
+  # The nearest settings that name it decide, as Claude Code merges them key by key.
+  if [ "$(node -e '
+    const fs = require("fs");
+    let on = {};
+    for (const file of process.argv.slice(1)) {
+      try { on = {...on, ...JSON.parse(fs.readFileSync(file, "utf8")).enabledPlugins}; } catch {}
+    }
+    process.stdout.write(String(Object.entries(on).some(([k, v]) => k.startsWith("trellis@") && v === true)));
+  ' "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json)" = true ]; then
+    warn 'the plugin trellis is enabled too: every hook runs twice; turn it off here (claude plugin disable trellis@trellis) or take it out of the settings that enable it'
+  fi
+elif grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
   plugin_installed=true
   ok 'plugin trellis installed'
 else
@@ -186,17 +212,18 @@ if [ "$plugin_installed" = true ]; then
 fi
 
 hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
-if [ "$hooks_path" = '.githooks' ]; then
-  ok 'git hooks installed (core.hooksPath = .githooks)'
+hooks_expected="$(tc_get git.hooksPath)"
+if [ "$hooks_path" = "$hooks_expected" ]; then
+  ok "git hooks installed (core.hooksPath = $hooks_expected)"
 elif [ -z "$hooks_path" ]; then
   fail 'core.hooksPath is unset: trellis setup sets it'
 else
-  fail "core.hooksPath is $hooks_path, expected .githooks"
+  fail "core.hooksPath is $hooks_path, expected $hooks_expected"
 fi
 
 if command -v node >/dev/null 2>&1; then
   ok "node $(version_of node)"
-elif [ "$plugin_installed" = true ] || [ -n "$hooks_path" ]; then
+elif [ "$plugin_installed" = true ] || [ "$copy" = true ] || [ -n "$hooks_path" ]; then
   fail 'node not found while hooks are active: guard-git has no opinion and the git hooks skip their checks'
 else
   warn 'node not found (trellis hygiene, ratchet and pr-check need it)'

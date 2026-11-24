@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# setup: point git at the project's hooks, core.hooksPath = .githooks, when it is unset and the
-# folder exists; and, at the start of a session, put the .trellis/bin of the project's copy on its
+# setup: point git at the project's hooks, core.hooksPath = git.hooksPath (.githooks by
+# default), when it is unset and the folder exists; and, at the start of a session, put the .trellis/bin of the project's copy on its
 # PATH, through CLAUDE_ENV_FILE. Idempotent. Run by `init` and by the SessionStart hook, so every
 # clone where Claude runs, a cloud one included, gets the git hooks.
 #
@@ -11,6 +11,8 @@
 # touches other repositories. A core.hooksPath set to something else is left alone and reported.
 
 set -uo pipefail
+
+TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 quiet=false
 [ "${1:-}" = '--quiet' ] && quiet=true
@@ -29,14 +31,17 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -f "$top/.trellis/bin/trellis" ]; then
   fi
 fi
 
-[ -d "$top/.githooks" ] || { say 'no .githooks/, nothing to do'; exit 0; }
+# shellcheck source=../lib/config.sh
+. "$TRELLIS_ROOT/lib/config.sh"
+hooks="$(cd "$top" && tc_get git.hooksPath)"
+[ -d "$top/$hooks" ] || { say "no $hooks/, nothing to do"; exit 0; }
 
 current="$(git -C "$top" config --get core.hooksPath 2>/dev/null || true)"
 case "$current" in
-  .githooks) say 'core.hooksPath already .githooks' ;;
+  "$hooks") say "core.hooksPath already $hooks" ;;
   '')
-    git -C "$top" config core.hooksPath .githooks
-    say 'core.hooksPath set to .githooks'
+    git -C "$top" config core.hooksPath "$hooks"
+    say "core.hooksPath set to $hooks"
     ;;
   *) say "core.hooksPath is $current, left alone (trellis doctor reports it)" ;;
 esac
