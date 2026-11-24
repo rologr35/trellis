@@ -1,0 +1,75 @@
+# What closes the issue of a trellis project when its pull request is merged, by a person on GitHub
+# included: a reusable workflow the project calls when a pull request is closed. It runs `trellis
+# issue close`, which closes the issues and leaves written what is pending after the merge.
+#
+#   jobs:
+#     closed:
+#       if: github.event.action == 'closed' && github.event.pull_request.merged
+#       uses: rologr35/trellis/.github/workflows/consumer-closed.yml@<sha>
+#       with:
+#         trellis-ref: <the same sha>
+#       permissions:
+#         contents: read
+#         issues: write
+#         pull-requests: read
+#
+# It is not a job of consumer-check.yml: a called workflow that asks for more than its caller grants
+# fails at startup, and the caller of the check grants no write on issues. The base branch is what is
+# checked out, so the configuration is the one of what is merged. A pull request of a fork is
+# skipped, its token being read-only, and so is one merged into another branch than the integration
+# branch, and a project with tracker.kind = none.
+
+name: trellis consumer closed
+
+on:
+  workflow_call:
+    inputs:
+      trellis-ref:
+        description: The full sha of the plugin the project pins.
+        required: true
+        type: string
+      trellis-repo:
+        description: The plugin repository.
+        required: false
+        type: string
+        default: rologr35/trellis
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed'
+      && github.event.pull_request.merged
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: plugin at the pinned sha
+        env:
+          REPO: ${{ inputs.trellis-repo }}
+          REF: ${{ inputs.trellis-ref }}
+        run: |
+          git clone -q "https://github.com/$REPO.git" "$RUNNER_TEMP/trellis"
+          git -C "$RUNNER_TEMP/trellis" checkout -q "$REF"
+          echo "TRELLIS=$RUNNER_TEMP/trellis/bin/trellis" >> "$GITHUB_ENV"
+      - name: issues of the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          integration="$(bash "$TRELLIS" config get git.integrationBranch)"
+          if [ "$(bash "$TRELLIS" config get tracker.kind)" != github ] || [ "$BASE" != "$integration" ]; then
+            echo "nothing to close: base $BASE, integration branch $integration"
+            exit 0
+          fi
+          bash "$TRELLIS" issue close "$NUMBER"
