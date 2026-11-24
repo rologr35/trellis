@@ -1,10 +1,10 @@
 // The writing of `trellis sync` (scripts/sync.sh holds the contract).
 
-import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
-import {BLOCK_FILES, FIND_TRELLIS_COPY, findTrellisSource, generateBlocks, generatedDeny, pushDenyBranch, replaceBlocks} from '../lib/blocks.mjs';
+import {BLOCK_FILES, FIND_TRELLIS_COPY, findTrellisSource, generateBlocks, generatedDeny, missingHooks, pushDenyBranch, replaceBlocks} from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
-import {ownTree} from '../lib/copy.mjs';
+import {VERSION_FILE, ownTree} from '../lib/copy.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
 const root = topLevel();
@@ -17,6 +17,7 @@ const write = (file, text) => {
   const full = path.join(root, file);
   const was = existsSync(full) ? readFileSync(full, 'utf8') : null;
   if (was === text) return;
+  mkdirSync(path.dirname(full), {recursive: true});
   writeFileSync(full, text);
   changed.push(file);
 };
@@ -29,15 +30,20 @@ for (const [file, ids] of Object.entries(BLOCK_FILES)) {
 }
 
 const settingsFile = '.claude/settings.json';
-if (existsSync(path.join(root, settingsFile))) {
-  const settings = JSON.parse(readFileSync(path.join(root, settingsFile), 'utf8'));
+const hasSettings = existsSync(path.join(root, settingsFile));
+const copy = existsSync(path.join(root, VERSION_FILE));
+if (hasSettings || copy) {
+  const settings = hasSettings ? JSON.parse(readFileSync(path.join(root, settingsFile), 'utf8')) : {};
   settings.permissions ??= {};
   const protectedBranches = new Set(config.all('git.protected'));
   const kept = (settings.permissions.deny ?? []).filter(entry => {
     const branch = pushDenyBranch(entry);
     return branch === null || protectedBranches.has(branch);
   });
-  settings.permissions.deny = [...new Set([...kept, ...generatedDeny(config)])];
+  settings.permissions.deny = [...new Set([...kept, ...generatedDeny(config, {copy})])];
+  if (copy) {
+    for (const {event, group} of missingHooks(settings)) ((settings.hooks ??= {})[event] ??= []).push(group);
+  }
   write(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
 }
 

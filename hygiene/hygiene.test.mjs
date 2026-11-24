@@ -132,6 +132,17 @@ test('a copy that is not whole fails', () => {
   fails(p, '.trellis/lib/schema: is not the file that was copied', '--staged');
 });
 
+test('settings that lost a hook of the copy, or its deny, fail', () => {
+  const p = withCopy(project());
+  const settings = p.read('.claude/settings.json');
+  for (const [lost, needle] of [['guard-git.sh', 'hooks.PreToolUse lacks'], ['setup --quiet', 'hooks.SessionStart lacks'], ['Edit(/.trellis/**)', 'permissions.deny lacks Edit(/.trellis/**)']]) {
+    p.write('.claude/settings.json', settings.replace(lost, 'x'));
+    fails(p, needle);
+  }
+  rmSync(path.join(p.root, '.claude/settings.json'));
+  fails(p, '.claude/settings.json: is not there');
+});
+
 test('the copy gone, with the settings that name it, fails', () => {
   const p = withCopy(project());
   p.write('.claude/settings.json', p.read('.claude/settings.json').replace('"deny": [', '"deny": ["Edit(/.trellis/**)",'));

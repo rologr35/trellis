@@ -21,7 +21,8 @@
 //   - every [workspace] package has its CLAUDE.md (a package at the root, `.`, is the root one);
 //   - the orientation block lists every nested file and every rule;
 //   - every generated block matches what `trellis sync` generates, the root carries the method
-//     block, the deny of .claude/settings.json keeps every entry sync generates, and
+//     block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks the
+//     ones of the copy, and
 //     .githooks/find-trellis.sh is the plugin's copy;
 //   - the copy of trellis is whole, as `trellis verify` says, and its files are not judged by anything
 //     above: the project does not write them.
@@ -41,6 +42,7 @@ import {
   generateBlocks,
   generatedDeny,
   instructionIndex,
+  missingHooks,
   rulePaths,
 } from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
@@ -258,16 +260,23 @@ export function hygiene(root, {staged = false} = {}) {
     }
   }
   const settingsText = tree.read('.claude/settings.json');
-  if (settingsText !== null) {
-    let deny = null;
+  const copy = hasCopy(whole);
+  if (settingsText === null) {
+    if (copy) fail('.claude/settings.json', 'is not there, and it loads the hooks of the copy: run trellis sync');
+  } else {
+    let settings = null;
     try {
-      deny = JSON.parse(settingsText).permissions?.deny ?? [];
+      settings = JSON.parse(settingsText);
     } catch {
       fail('.claude/settings.json', 'does not parse as JSON');
     }
-    if (deny) {
-      for (const entry of generatedDeny(config)) {
+    if (settings) {
+      const deny = settings.permissions?.deny ?? [];
+      for (const entry of generatedDeny(config, {copy})) {
         if (!deny.includes(entry)) fail('.claude/settings.json', `permissions.deny lacks ${entry}: run trellis sync`);
+      }
+      for (const {event, group} of copy ? missingHooks(settings) : []) {
+        fail('.claude/settings.json', `hooks.${event} lacks ${group.hooks[0].command}: run trellis sync`);
       }
     }
   }
@@ -275,7 +284,7 @@ export function hygiene(root, {staged = false} = {}) {
     fail(FIND_TRELLIS_COPY, 'is not the plugin\'s lib/find-trellis.sh: run trellis sync');
   }
   // The settings that load the copy's hooks need it there.
-  if (hasCopy(whole) || (settingsText ?? '').includes(`${COPY_DIR}/`)) findings.push(...verifyCopy(whole));
+  if (copy || (settingsText ?? '').includes(`${COPY_DIR}/`)) findings.push(...verifyCopy(whole));
 
   return findings;
 }
