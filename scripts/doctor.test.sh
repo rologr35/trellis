@@ -98,6 +98,55 @@ git config --unset core.hooksPath
 tl_eq 'core.hooksPath unset fails' '1' "$(doctor)"
 git config core.hooksPath .githooks
 
+printf '\nthe installed plugin against the pinned sha\n'
+plugins="$HOME/.claude/plugins/installed_plugins.json"
+cp "$plugins" "$TL_TMP/plugins.keep"
+main_path="$(git rev-parse --show-toplevel)"
+pin_settings() { mkdir -p .claude; printf '{"extraKnownMarketplaces": {"trellis": {"source": {"source": "github", "repo": "rologr35/trellis", "ref": "%s"}, "autoUpdate": false}}}\n' "$1" > .claude/settings.json; }
+install_entry() { printf '{"plugins": {"trellis@trellis": [{"scope": "%s", "projectPath": "%s", "gitCommitSha": "%s"}]}}\n' "$1" "$2" "$3" > "$plugins"; }
+long_a=0323c98aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+long_b=c6050747bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+pin_settings "$long_a"
+install_entry project "$main_path" "$long_a"
+doctor > /dev/null
+tl_has 'an install at the pinned sha is ok' 'ok    plugin trellis is at the pinned sha 0323c98' "$(out)"
+install_entry project "$main_path" "$long_b"
+tl_eq 'a different sha is a warning, not a FAIL' '0' "$(doctor)"
+tl_has 'showing both short shas' 'warn  plugin trellis is at c605074, the project pins 0323c98' "$(out)"
+tl_has 'naming the marketplace command' 'claude plugin marketplace add rologr35/trellis@0323c98aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --scope project' "$(out)"
+tl_has 'naming the update command' 'claude plugin update trellis@trellis --scope project' "$(out)"
+tl_has 'and the restore of settings.json' 'git checkout -- .claude/settings.json' "$(out)"
+install_entry project "$TL_TMP/elsewhere" "$long_b"
+doctor > /dev/null
+tl_lacks 'an entry of another project is not the one that applies' 'plugin trellis is at c605074' "$(out)"
+tl_has 'so there is nothing to compare' 'info  plugin trellis: no install entry applies to this project' "$(out)"
+install_entry user "" "$long_a"
+doctor > /dev/null
+tl_has 'a user-scope entry applies' 'ok    plugin trellis is at the pinned sha 0323c98' "$(out)"
+install_entry project "$main_path" "$long_b"
+git worktree add -q -b 5-wt "$TL_TMP/wt"
+pin_settings "$long_a"
+mkdir -p "$TL_TMP/wt/.claude"; cp .claude/settings.json "$TL_TMP/wt/.claude/settings.json"
+(cd "$TL_TMP/wt" && PATH="$tools" bash "$TRELLIS_ROOT/scripts/doctor.sh" > "$TL_TMP/out.txt" 2>&1)
+tl_has 'from a worktree, the entry is found by the main checkout path' 'warn  plugin trellis is at c605074, the project pins 0323c98' "$(out)"
+git worktree remove --force "$TL_TMP/wt"
+git branch -q -D 5-wt
+install_entry project "$main_path" ""
+doctor > /dev/null
+tl_has 'an entry without gitCommitSha is info' 'info  plugin trellis: the install entry has no gitCommitSha' "$(out)"
+install_entry project "$main_path" "$long_b"
+rm -r .claude
+doctor > /dev/null
+tl_has 'with no pin, the line is info' 'info  plugin trellis: the project does not pin a sha' "$(out)"
+tl_lacks 'and no warning' 'plugin trellis is at' "$(out)"
+pin_settings "$long_a"
+rm "$tools/node"
+doctor > /dev/null
+tl_has 'without node the check is skipped with info' 'info  plugin trellis: pinned sha not compared (node not found)' "$(out)"
+ln -s "$NODE" "$tools/node"
+rm -r .claude
+cp "$TL_TMP/plugins.keep" "$plugins"
+
 printf '\nbilling, secrets, env files\n'
 tl_eq 'ANTHROPIC_API_KEY exported fails' '1' "$(ANTHROPIC_API_KEY=x doctor)"
 tl_has 'and says why' 'billed as API usage' "$(out)"

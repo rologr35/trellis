@@ -20,7 +20,7 @@
 # warn: a rung with pr = true that no file under .github/workflows/ runs (it holds the command's
 # run text, or its ci text when set: a plain substring search, so a folded `run: >-`, a comment or
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
-# parser); no secret scanner configured; uncommitted changes, unpushed
+# parser); the installed plugin is not at the sha the project pins; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail
@@ -144,6 +144,44 @@ if grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/nul
   ok 'plugin trellis installed'
 else
   fail 'plugin trellis not installed (/plugin install trellis@trellis; enabledPlugins does not install)'
+fi
+
+# The pin is changed in a pull request, the install on the machine is not: compare the project's
+# pinned sha with the one installed for this project (its main checkout, not a worktree, or the
+# user scope). A warning, never a FAIL: no pin, or an install at another scope, blocks nothing.
+if [ "$plugin_installed" = true ]; then
+  if ! command -v node >/dev/null 2>&1; then
+    info 'plugin trellis: pinned sha not compared (node not found)'
+  else
+    main_checkout="$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
+    pin_pair="$(node -e '
+      const fs = require("fs");
+      const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+      const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+      const [settings, plugins, main] = process.argv.slice(1);
+      const pin = (((((read(settings) || {}).extraKnownMarketplaces || {}).trellis || {}).source || {}).ref) || "";
+      const entries = Object.entries((read(plugins) || {}).plugins || {})
+        .filter(([k]) => k.startsWith("trellis@")).flatMap(([, v]) => v);
+      const mine = entries.filter((e) => e.scope === "project" && e.projectPath && real(e.projectPath) === real(main));
+      const entry = mine[0] || entries.find((e) => e.scope === "user");
+      process.stdout.write(pin + "|" + (entry ? "found" : "none") + "|" + ((entry && entry.gitCommitSha) || ""));
+    ' "$top/.claude/settings.json" "$HOME/.claude/plugins/installed_plugins.json" "$main_checkout" 2>/dev/null)"
+    pinned="${pin_pair%%|*}"
+    rest="${pin_pair#*|}"
+    entry_state="${rest%%|*}"
+    installed_sha="${rest#*|}"
+    if [ -z "$pinned" ]; then
+      info 'plugin trellis: the project does not pin a sha (.claude/settings.json extraKnownMarketplaces.trellis.source.ref)'
+    elif [ "$entry_state" = none ]; then
+      info 'plugin trellis: no install entry applies to this project (main checkout or user scope)'
+    elif [ -z "$installed_sha" ]; then
+      info 'plugin trellis: the install entry has no gitCommitSha, so the pin is not compared'
+    elif [[ "$installed_sha" == "$pinned"* || "$pinned" == "$installed_sha"* ]]; then
+      ok "plugin trellis is at the pinned sha ${pinned:0:7}"
+    else
+      warn "plugin trellis is at ${installed_sha:0:7}, the project pins ${pinned:0:7}: bring the install in line with 'claude plugin marketplace add rologr35/trellis@$pinned --scope project' then 'claude plugin update trellis@trellis --scope project'; the add rewrites .claude/settings.json (key order, autoUpdate: false dropped), so restore it with 'git checkout -- .claude/settings.json'"
+    fi
+  fi
 fi
 
 hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
