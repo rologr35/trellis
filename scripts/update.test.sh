@@ -3,18 +3,8 @@
 # the refs it takes, and that no test is copied.
 . "$(dirname "$0")/../lib/testlib.sh"
 
-# The upstream: this working tree, committed in a repository of its own.
-upstream="$TL_TMP/upstream"
-mkdir "$upstream"
-(cd "$TRELLIS_ROOT" && git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
-  [ -f "$f" ] || continue
-  mkdir -p "$upstream/$(dirname "$f")" && cp -p "$f" "$upstream/$f"
-done)
-up() { git -C "$upstream" -c commit.gpgsign=false "$@"; }
-up init -q
-up symbolic-ref HEAD refs/heads/main
-up add -A && up commit -q -m 'chore: first (#1)'
-up tag v1
+upstream="$(tl_upstream)"
+up() { git -C "$upstream" "$@"; }
 sha1="$(up rev-parse HEAD)"
 
 repo="$(tl_repo)"

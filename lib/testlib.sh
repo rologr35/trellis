@@ -5,6 +5,7 @@
 #
 #   . "$(dirname "$0")/../lib/testlib.sh"
 #   repo="$(tl_repo)"
+#   upstream="$(tl_upstream)"
 #   tl_eq 'name' 'expected' "$actual"
 #   tl_has 'name' 'needle' "$haystack"
 #   tl_lacks 'name' 'needle' "$haystack"
@@ -39,6 +40,25 @@ tl_repo() {
   git -C "$dir" config commit.gpgsign false
   git -C "$dir" commit -q --allow-empty -m 'chore: start'
   printf '%s\n' "$dir"
+}
+
+# A repository on main that holds this working tree in one commit, with the tag v1: the upstream of
+# a copy; prints its path.
+tl_upstream() {
+  local dir
+  dir="$(tl_repo)"
+  (cd "$TRELLIS_ROOT" && git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
+    [ -f "$f" ] || continue
+    mkdir -p "$dir/$(dirname "$f")" && cp -p "$f" "$dir/$f"
+  done)
+  git -C "$dir" add -A && git -C "$dir" commit -q -m 'chore: trellis (#1)' && git -C "$dir" tag v1
+  printf '%s\n' "$dir"
+}
+
+# The copy of that upstream in the repository of the working directory, written and not committed.
+tl_copy() {
+  git config -f trellis.config trellis.upstream "$1"
+  bash "$TRELLIS" update v1 >/dev/null 2>&1 || printf 'testlib: the copy was not written\n' >&2
 }
 
 tl_pass() { TL_PASSED=$((TL_PASSED + 1)); printf '  ok    %s\n' "$1"; }

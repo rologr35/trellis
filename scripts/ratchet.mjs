@@ -6,6 +6,7 @@ import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
+import {MANIFEST_FILE, copiedFiles} from '../lib/copy.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 
 const [, , baseRef, branchArg, escaped] = process.argv;
@@ -42,10 +43,20 @@ const before = file => blob(`${beforeRev}:${file}`);
 const after = file => blob(`${afterRev}:${file}`);
 
 const entries = (git(...diffArgs) ?? '').split('\n').filter(Boolean).map(l => l.split('\t'));
-const deleted = entries.filter(([status]) => status === 'D').map(([, file]) => file);
-const changed = entries
-  .filter(([status]) => status !== 'D')
-  .map(e => ({file: e.at(-1), was: e[0].startsWith('R') ? e[1] : e.at(-1)}));
+// The files of the copy of trellis are left out, each side by its own manifest: the project does not
+// write them, and `trellis verify` is what judges them. A file that goes into the copy leaves the project.
+const copiedBefore = copiedFiles(before(MANIFEST_FILE));
+const copiedAfter = copiedFiles(after(MANIFEST_FILE));
+const deleted = [];
+const changed = [];
+for (const [status, ...files] of entries) {
+  const file = files.at(-1);
+  const was = files[0];
+  const gone = status === 'D' || copiedAfter.has(file);
+  if (gone) {
+    if (!copiedBefore.has(was) && before(was) !== null) deleted.push(was);
+  } else changed.push({file, was: copiedBefore.has(was) ? file : was});
+}
 const staged = new Map(changed.map(c => [c.file, c.was]));
 
 // The config on both sides, read through the one reader from temporary copies.

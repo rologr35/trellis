@@ -23,7 +23,7 @@
 #   git config branch.<branch>.ratchet-loosened true
 # It turns the findings into a warning, and `trellis pr-check` then asks the pull request for a
 # **Setback** section (**Retroceso** in es). A merge in progress is not judged: what it brings was
-# judged on its branch.
+# judged on its branch. The files of the copy of trellis, by .trellis/MANIFEST, are not judged.
 
 set -uo pipefail
 

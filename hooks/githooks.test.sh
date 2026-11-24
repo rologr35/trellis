@@ -45,6 +45,18 @@ tl_has 'naming the parse error' 'does not parse' "$(cat "$TL_TMP/out.txt")"
 cp "$TL_TMP/good.config" trellis.config
 git rm -q --cached w.txt && rm w.txt
 
+printf '\nthe copy\n'
+tl_copy "$(tl_upstream)"
+git add -A
+tl_eq 'a whole copy passes' '0' "$(commit -m 'chore: the copy (#1)')"
+printf '# x\n' >> .trellis/lib/schema && git add -A
+tl_eq 'a copy edited by hand is refused' '1' "$(commit -m 'chore: edit (#1)')"
+tl_has 'naming the file' '.trellis/lib/schema' "$(cat "$TL_TMP/out.txt")"
+git reset -q --hard
+git rm -rq .trellis
+tl_eq 'a commit that removes the copy is refused' '1' "$(commit -m 'chore: gone (#1)')"
+git reset -q --hard
+
 printf '\ncommit-msg\n'
 printf 'x\n' > a.txt && git add -A
 tl_eq 'an AI attribution is refused' '1' "$(commit -m 'feat: a (#1)' -m 'Co-Authored-By: Claude <noreply@anthropic.com>')"

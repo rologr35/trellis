@@ -3,17 +3,8 @@
 # comparison with the upstream that an edited manifest does not pass.
 . "$(dirname "$0")/../lib/testlib.sh"
 
-upstream="$TL_TMP/upstream"
-mkdir "$upstream"
-(cd "$TRELLIS_ROOT" && git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
-  [ -f "$f" ] || continue
-  mkdir -p "$upstream/$(dirname "$f")" && cp -p "$f" "$upstream/$f"
-done)
-up() { git -C "$upstream" -c commit.gpgsign=false "$@"; }
-up init -q
-up symbolic-ref HEAD refs/heads/main
-up add -A && up commit -q -m 'chore: first (#1)'
-up tag v1
+upstream="$(tl_upstream)"
+up() { git -C "$upstream" "$@"; }
 
 repo="$(tl_repo)"
 cd "$repo" || exit 1
@@ -32,7 +23,7 @@ printf '\nwithout a copy\n'
 tl_eq 'a project without a copy fails' '1' "$(verify)"
 tl_has 'and says what writes it' 'trellis update' "$(out)"
 
-bash "$TRELLIS" update v1 >/dev/null 2>&1 && git add -A && git commit -q -m 'chore: the copy (#1)'
+tl_copy "$upstream" && git add -A && git commit -q -m 'chore: the copy (#1)'
 
 printf '\na whole copy\n'
 tl_eq 'passes' '0' "$(verify)"
@@ -41,6 +32,14 @@ tl_eq 'passes against the upstream' '0' "$(verify --upstream)"
 tl_eq 'passes staged' '0' "$(verify --staged)"
 tl_eq 'an unknown option is a usage error' '2' "$(verify --nope)"
 tl_eq 'run by the copy' '0' "$(.trellis/bin/trellis verify > "$OUT" 2>&1; echo $?)"
+
+sha="$(cut -d' ' -f2 .trellis/VERSION)"
+tl_eq 'passes when the sha expected is its own' '0' "$(verify --ref "$sha")"
+tl_eq 'fails with any other' '1' "$(verify --ref 0123456789012345678901234567890123456789)"
+tl_has 'naming both' "$sha" "$(out)"
+tl_eq 'a short one is another' '1' "$(verify --ref "$(printf '%.10s' "$sha")")"
+tl_eq 'none is a usage error' '2' "$(verify --ref)"
+tl_eq 'empty too' '2' "$(verify --ref '')"
 
 printf '\na copy that is not\n'
 printf '# x\n' >> .trellis/hooks/guard-git.sh

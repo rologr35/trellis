@@ -4,11 +4,12 @@ import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {BLOCK_FILES, FIND_TRELLIS_COPY, findTrellisSource, generateBlocks, generatedDeny, pushDenyBranch, replaceBlocks} from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
+import {ownTree} from '../lib/copy.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
 const root = topLevel();
 const config = loadConfig({cwd: root});
-const tree = projectTree(root);
+const tree = ownTree(projectTree(root));
 const blocks = generateBlocks(tree, config);
 const changed = [];
 

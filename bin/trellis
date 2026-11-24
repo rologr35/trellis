@@ -6,7 +6,7 @@
 #   trellis doctor                          read-only diagnosis, FAIL exits 1
 #   trellis sync                            rewrites the generated blocks and the generated deny
 #   trellis update <tag|sha>                writes the project's copy of trellis
-#   trellis verify [--staged | --upstream]   the copy is whole
+#   trellis verify [--staged | --upstream] [--ref <sha>]
 #   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
 #   trellis setup [--quiet]                 core.hooksPath = .githooks when it is missing
 #   trellis worktree add <n> <slug> | prune

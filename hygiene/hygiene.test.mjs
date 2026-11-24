@@ -2,7 +2,7 @@
 // way /trellis:init leaves it (templates filled, `trellis sync` run, sizes frozen).
 
 import {execFileSync, spawnSync} from 'node:child_process';
-import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {after, test} from 'node:test';
@@ -87,6 +87,56 @@ test('the project /trellis:init leaves passes', () => {
   passes(p);
   assert.match(p.read('CLAUDE.md'), /## Working method/);
   assert.doesNotMatch(p.read('CLAUDE.md'), /<!-- p:/);
+});
+
+/** The project with a copy, from an upstream that is this working tree. */
+let upstream = '';
+function withCopy(p) {
+  if (!upstream) {
+    upstream = path.join(scratch, 'upstream');
+    mkdirSync(upstream);
+    const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {cwd: TRELLIS_ROOT, encoding: 'utf8'}).split('\0').filter(f => f && existsSync(path.join(TRELLIS_ROOT, f)));
+    for (const f of files) cpSync(path.join(TRELLIS_ROOT, f), path.join(upstream, f));
+    const git = (...args) => execFileSync('git', args, {cwd: upstream, env, stdio: ['ignore', 'pipe', 'pipe']});
+    git('init', '-q');
+    git('add', '-A');
+    git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'chore: trellis');
+    git('tag', 'v1');
+  }
+  p.git('config', '-f', 'trellis.config', 'trellis.upstream', upstream);
+  const r = p.trellis('update', 'v1');
+  assert.equal(r.status, 0, r.stderr);
+  return p;
+}
+
+test('the files of the copy are not judged', () => {
+  const p = withCopy(project());
+  passes(p);
+  assert.equal(p.trellis('hygiene', '--freeze').status, 0);
+  assert.doesNotMatch(p.read('trellis.config'), /frozen = .*trellis-/);
+  p.git('add', '-A');
+  passes(p, '--staged');
+});
+
+test('a skill with the name of a copied one is the project\'s, and judged', () => {
+  const p = withCopy(project());
+  p.write('.claude/skills/trellis-mine/SKILL.md', '# Mine\n');
+  fails(p, '.claude/skills/trellis-mine/SKILL.md: has no frozen size');
+});
+
+test('a copy that is not whole fails', () => {
+  const p = withCopy(project());
+  p.write('.trellis/lib/schema', 'x\n');
+  fails(p, '.trellis/lib/schema: is not the file that was copied');
+  p.git('add', '-A');
+  fails(p, '.trellis/lib/schema: is not the file that was copied', '--staged');
+});
+
+test('the copy gone, with the settings that name it, fails', () => {
+  const p = withCopy(project());
+  p.write('.claude/settings.json', p.read('.claude/settings.json').replace('"deny": [', '"deny": ["Edit(/.trellis/**)",'));
+  rmSync(path.join(p.root, '.trellis'), {recursive: true});
+  fails(p, '.trellis/MANIFEST: is not there');
 });
 
 test('the root template with the method block passes and fits its limit', () => {
