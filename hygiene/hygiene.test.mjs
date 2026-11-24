@@ -352,7 +352,7 @@ test('a deny that lost a generated entry fails', () => {
 test('the copy of find-trellis.sh must match', () => {
   const p = project();
   p.write('.githooks/pre-commit', '#!/bin/sh\n');
-  fails(p, '.githooks/find-trellis.sh: is not the plugin');
+  fails(p, '.githooks/find-trellis.sh: is not trellis\'s lib');
   p.trellis('sync');
   passes(p);
 });

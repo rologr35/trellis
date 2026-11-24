@@ -23,7 +23,7 @@
 //   - every generated block matches what `trellis sync` generates, the root carries the method
 //     block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks the
 //     ones of the copy, and
-//     .githooks/find-trellis.sh is the plugin's copy;
+//     .githooks/find-trellis.sh is trellis's copy;
 //   - the copy of trellis is whole, as `trellis verify` says, and its files are not judged by anything
 //     above: the project does not write them.
 //
@@ -281,7 +281,7 @@ export function hygiene(root, {staged = false} = {}) {
     }
   }
   if (tree.files.some(f => f.startsWith('.githooks/')) && tree.read(FIND_TRELLIS_COPY) !== findTrellisSource()) {
-    fail(FIND_TRELLIS_COPY, 'is not the plugin\'s lib/find-trellis.sh: run trellis sync');
+    fail(FIND_TRELLIS_COPY, 'is not trellis\'s lib/find-trellis.sh: run trellis sync');
   }
   // The settings that load the copy's hooks need it there.
   if (copy || (settingsText ?? '').includes(`${COPY_DIR}/`)) findings.push(...verifyCopy(whole));

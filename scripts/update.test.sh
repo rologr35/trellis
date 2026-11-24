@@ -77,6 +77,8 @@ tl_eq 'the skill of the project stays' 'yes' "$([ -f .claude/skills/trellis-own/
 git add -A && git commit -q -m 'chore: upgrade (#1)'
 
 printf '\na copy edited by hand\n'
+# What a message says of .claude beyond a copied file, or a command that discards changes.
+folders() { grep -E '\.claude/?([^/a-z]|$)|git (checkout|restore|reset|clean)' "$OUT"; }
 restore() { git reset -q --hard && git clean -qfd; }
 printf '# edit\n' >> .trellis/hooks/guard-git.sh
 printf 'x\n' >> .claude/agents/trellis-plan-check.md
@@ -84,6 +86,8 @@ before="$(tracked)"
 tl_eq 'stops the update' '1' "$(update v1)"
 tl_has 'naming the file' '.trellis/hooks/guard-git.sh' "$(out)"
 tl_has 'and the copied agent' '.claude/agents/trellis-plan-check.md' "$(out)"
+tl_has 'saying how to go on' 'Restore those files from git' "$(out)"
+tl_eq 'and naming no folder of the project' '' "$(folders)"
 tl_eq 'and nothing else changes' "$before" "$(tracked)"
 restore
 rm .trellis/lib/schema
@@ -94,6 +98,12 @@ tl_eq 'an extra file stops it' '1' "$(update v1)"
 restore
 rm .trellis/MANIFEST
 tl_eq 'a copy without its manifest stops it' '1' "$(update v1)"
+tl_has 'naming the manifest' '.trellis/MANIFEST is not there' "$(out)"
+tl_has 'saying how to go on' 'delete .trellis/ if it was never committed' "$(out)"
+tl_eq 'and naming no folder of the project' '' "$(folders)"
+tl_lacks 'and not calling it an edit' 'edited' "$(out)"
+rm -r .trellis
+tl_eq 'and then it is written' '0' "$(update v1)"
 restore
 printf '%s  CLAUDE.md\n' "$(sha_of CLAUDE.md)" >> .trellis/MANIFEST
 tl_eq 'a manifest naming a file that is not of a copy stops it' '1' "$(update v1)"
