@@ -26,6 +26,7 @@ case "$1 $2" in
     if [ -f "$GH_FIXTURES/need-$n" ] && [ "$tok" != "$(cat "$GH_FIXTURES/need-$n")" ]; then
       fail "GraphQL: Could not resolve to a PullRequest with the number of $n."
     fi
+    [ -f "$GH_FIXTURES/leak-$n" ] && fail "auth failed for token $tok"
     cat "$GH_FIXTURES/pr-$n" 2>/dev/null || fail "no pull request $n" ;;
   *) exit 0 ;;
 esac
@@ -213,6 +214,9 @@ tl_eq 'a bare push after a failed cd' 'deny' "$(verdict 'cd /nonexistent; git pu
 tl_eq 'a merge by -R in a project without config is read through -R and judged by the session config' 'allow' "$(verdict "cd $plain && gh pr merge 12 -R o/r" "$wtb")"
 tl_eq 'a gh merge in a project without config, by -R, with no config anywhere' 'deny' "$(verdict "gh pr merge 12 -R o/r" "$plain")"
 tl_eq 'a gh merge by GH_REPO with no config anywhere' 'deny' "$(verdict 'GH_REPO=o/r gh pr merge 12' "$plain")"
+for form in '-Ro/r' '-R=o/r' '-dR o/r' '-dRo/r' '-sdRo/r' '--repo=o/r'; do
+  tl_eq "a gh merge by $form with no config anywhere" 'deny' "$(verdict "gh pr merge 12 $form" "$plain")"
+done
 tl_eq 'a gh merge in another directory is judged by the session config' 'deny' "$(verdict "cd $plain && gh pr merge 13" "$wtb")"
 tl_eq 'a push after a cd whose directory is unresolved, with no config anywhere' 'allow' "$(verdict 'cd $(pwd) && git push origin main' "$plain")"
 # What stays free: a push of an issue branch in any plain form, and a project that protects other branches.
@@ -406,6 +410,15 @@ tl_has 'by the URL of the pull request' 'pr view https://github.com/other/thing/
 reset
 verdict 'gh pr merge 14 --merge -Rother/thing' >/dev/null
 tl_has 'by -R with the value attached' 'pr view 14 token=tok-other' "$(calls)"
+for form in '-R=other/thing' '-dR other/thing' '-dRother/thing'; do
+  reset
+  verdict "gh pr merge 14 --merge $form" >/dev/null
+  tl_has "by $form" 'pr view 14 token=tok-other' "$(calls)"
+done
+reset
+verdict 'gh pr merge 12 && gh pr merge 14 -R other/thing' >/dev/null
+tl_has 'two owners in one command: the first keeps its token' 'pr view 12 token=tok-acme' "$(calls)"
+tl_has 'and the second gets its own' 'pr view 14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge https://github.com/other/thing/pull/14 -R acme/thing' >/dev/null
 tl_has 'the URL of the pull request wins over -R' 'pr view https://github.com/other/thing/pull/14 token=tok-other' "$(calls)"
@@ -433,6 +446,16 @@ set_origin 'git@github.com:'
 reset
 verdict 'gh pr merge 12' >/dev/null
 tl_has 'an origin that does not parse is asked as the active account' 'pr view 12 token=none' "$(calls)"
+printf 'tok-victim\n' > "$GH_FIXTURES/token-victim"
+set_origin 'https://acme.ghe.com/x@github.com/victim/r'
+reset
+verdict 'gh pr merge 12' >/dev/null
+tl_has 'a host hidden after an @ in the path is not github.com' 'pr view 12 token=none' "$(calls)"
+tl_lacks 'and its token is not looked up' 'auth token' "$(calls)"
+set_origin 'git@github-work:acme/thing.git'
+reset
+verdict 'gh pr merge 12' >/dev/null
+tl_has 'an ssh host alias gives no owner' 'pr view 12 token=none' "$(calls)"
 set_origin https://github.com/acme/thing.git
 
 printf '\nan environment gh already reads is left alone\n'
@@ -456,6 +479,14 @@ tl_has 'an unreadable base is still a deny' '"deny"' "$out"
 tl_has 'naming the account asked' "the owner's account (acme)" "$out"
 tl_has 'and the error of gh' 'no pull request 99' "$out"
 tl_lacks 'the token is not in the denial' 'tok-acme' "$out"
+printf 'x\n' > "$GH_FIXTURES/leak-98"
+out="$(rawout 'gh pr merge 98')"
+tl_has 'an error that holds the token is still named' 'auth failed for token' "$out"
+tl_lacks 'with the token blanked' 'tok-acme' "$out"
+out="$(TMPDIR=/nonexistent/dir rawout 'gh pr merge 99' 2>&1)"
+tl_has 'with no temporary directory the denial still comes' '"deny"' "$out"
+tl_lacks 'and nothing else is printed' 'No such file' "$out"
+tl_lacks 'nor an attempt to remove /dev/null' 'rm:' "$out"
 set_origin ''
 out="$(rawout 'gh pr merge 99')"
 tl_has 'the active account when there is no owner' 'the active account' "$out"

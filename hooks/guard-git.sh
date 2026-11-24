@@ -203,6 +203,31 @@ guard_gh_issue() {
   deny "An issue is created after the backlog was searched by concept, because the closed issues record what was already decided. Search first: gh issue list --state all --limit 60 --search '<concept>', read what is related, then repeat the creation."
 }
 
+# Whether a word of `gh pr merge` is the -R / --repo flag, in any form gh reads: -R x/y, -Rx/y, -R=x/y,
+# --repo x/y, --repo=x/y, and -R at the end of a group of the boolean short flags (-dR x/y, -dRx/y).
+# Sets REPO_FLAG_VALUE, and REPO_FLAG_NEXT when the value is the next word.
+REPO_FLAG_VALUE=''
+REPO_FLAG_NEXT=false
+repo_flag() {
+  local w="$1" pre rest
+  REPO_FLAG_VALUE=''
+  REPO_FLAG_NEXT=false
+  case "$w" in
+    --repo) REPO_FLAG_NEXT=true; return 0 ;;
+    --repo=*) REPO_FLAG_VALUE="${w#*=}"; return 0 ;;
+    --*) return 1 ;;
+    -*R*)
+      pre="${w%%R*}"
+      pre="${pre#-}"
+      case "$pre" in *[!dmrs]*) return 1 ;; esac
+      rest="${w#*R}"
+      if [ -z "$rest" ]; then REPO_FLAG_NEXT=true; else REPO_FLAG_VALUE="${rest#=}"; fi
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 guard_gh_merge() {
   [ "${1:-}" = 'pr' ] && [ "${2:-}" = 'merge' ] || return 0
   fail_closed
@@ -213,10 +238,12 @@ guard_gh_merge() {
   shift 2
   while [ $# -gt 0 ]; do
     word="$1"
+    if repo_flag "$word"; then
+      if [ "$REPO_FLAG_NEXT" = true ]; then repo="${2:-}"; shift; else repo="$REPO_FLAG_VALUE"; fi
+      shift
+      continue
+    fi
     case "$word" in
-      -R | --repo) repo="${2:-}"; shift ;;
-      --repo=*) repo="${word#*=}" ;;
-      -R?*) repo="${word#-R}" ;;
       -b | --body | -F | --body-file | -t | --subject | -A | --author-email | --match-head-commit) shift ;;
       -*) ;;
       *) [ -z "$target" ] && target="$word" ;;
@@ -845,9 +872,9 @@ judge_gh() {
       DENY_NOTE=''
       # Nothing here or in the session has a config, and gh reaches a repository by name.
       for word in "${rest[@]}"; do
-        case "$word" in
-          -R | --repo | --repo=*) deny 'A merge into a repository named by -R, with no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository, without -R: cd <repo> && gh pr merge <n>.' ;;
-        esac
+        if repo_flag "$word"; then
+          deny 'A merge into a repository named by -R, with no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository, without -R: cd <repo> && gh pr merge <n>.'
+        fi
       done
       [ "$ENV_SEEN" = true ] && deny 'A merge with GH_REPO set, and no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository: cd <repo> && gh pr merge <n>.'
     fi

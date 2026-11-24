@@ -30,8 +30,8 @@ GH_TOKEN_CACHE=$'\n'
 gh_owner_of() {
   local s="${1%%[?#]*}" host path owner
   case "$s" in
-    http://* | https://*) s="${s#*://}"; s="${s#*@}"; host="${s%%/*}"; host="${host%%:*}"; path="${s#*/}" ;;
-    ssh://*) s="${s#ssh://}"; s="${s#*@}"; host="${s%%/*}"; host="${host%%:*}"; path="${s#*/}" ;;
+    http://* | https://*) s="${s#*://}"; host="${s%%/*}"; host="${host#*@}"; host="${host%%:*}"; path="${s#*/}" ;;
+    ssh://*) s="${s#ssh://}"; host="${s%%/*}"; host="${host#*@}"; host="${host%%:*}"; path="${s#*/}" ;;
     *@*:*) s="${s#*@}"; host="${s%%:*}"; path="${s#*:}" ;;
     */*/*) host="${s%%/*}"; path="${s#*/}" ;;
     */*) host='github.com'; path="$s" ;;
@@ -78,7 +78,7 @@ gh_token_of() {
 
 # gh_as_owner <dir> <owner> <gh arguments>: runs gh in <dir>, as <owner>'s account when it can.
 gh_as_owner() {
-  local dir="$1" owner="$2" tok='' errfile status line
+  local dir="$1" owner="$2" tok='' errfile status line=''
   shift 2
   GH_AS_OUT=''
   GH_AS_ERR=''
@@ -89,15 +89,14 @@ gh_as_owner() {
     tok="$GH_TOK"
     [ -n "$tok" ] && GH_AS_ACCOUNT="the owner's account ($owner)"
   fi
-  errfile="$(mktemp "${TMPDIR:-/tmp}/trellis-gh.XXXXXX")" || errfile=/dev/null
+  errfile="$(mktemp "${TMPDIR:-/tmp}/trellis-gh.XXXXXX" 2>/dev/null)" || errfile=
   if [ -n "$tok" ]; then
-    GH_AS_OUT="$(cd "$dir" 2>/dev/null && GH_TOKEN="$tok" GH_PROMPT_DISABLED=1 gh "$@" 2>"$errfile" </dev/null)"
+    GH_AS_OUT="$(cd "$dir" 2>/dev/null && GH_TOKEN="$tok" GH_PROMPT_DISABLED=1 gh "$@" 2>"${errfile:-/dev/null}" </dev/null)"
   else
-    GH_AS_OUT="$(cd "$dir" 2>/dev/null && GH_PROMPT_DISABLED=1 gh "$@" 2>"$errfile" </dev/null)"
+    GH_AS_OUT="$(cd "$dir" 2>/dev/null && GH_PROMPT_DISABLED=1 gh "$@" 2>"${errfile:-/dev/null}" </dev/null)"
   fi
   status=$?
-  IFS= read -r line < "$errfile" 2>/dev/null || true
-  rm -f "$errfile"
+  if [ -n "$errfile" ]; then IFS= read -r line < "$errfile" 2>/dev/null || true; rm -f "$errfile"; fi
   [ -n "$tok" ] && line="${line//"$tok"/***}"
   GH_AS_ERR="$line"
   return "$status"
