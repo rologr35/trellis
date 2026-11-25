@@ -10,7 +10,7 @@
 import {readFileSync, realpathSync, writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {loadConfig} from '../lib/config.mjs';
-import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {LESSON, PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 
 const LABEL = 'pending-actions';
 
@@ -65,7 +65,7 @@ export function readBody(body) {
  * in `lines` and its content is the one of `source`.
  */
 export function sectionLines(lines, name, source = lines) {
-  const heading = new RegExp(`^\\s*(?:#+\\s*|\\*\\*)${name}(?:\\*\\*)?\\s*:?(?:\\*\\*)?(.*)$`, 'i');
+  const heading = new RegExp(`^\\s*(?:#+\\s*|\\*\\*)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\*\\*)?\\s*:?(?:\\*\\*)?(.*)$`, 'i');
   const start = lines.findIndex(l => heading.test(l));
   if (start === -1) return null;
   const inline = heading.exec(source[start])?.[1].trim() ?? '';
@@ -77,12 +77,58 @@ export function sectionLines(lines, name, source = lines) {
 /** The content of a section, without blank lines, or null when there is none. */
 export const sectionOf = (lines, name, source) => sectionLines(lines, name, source)?.map(l => l.trim()).filter(Boolean) ?? null;
 
+/** The text of each item of a section of a body that is not inside another, without its bullet nor its check box. */
+export function itemsOf(body, name) {
+  const places = sectionLines(body.prose, name) ?? [];
+  const texts = sectionLines(body.prose, name, body.lines) ?? [];
+  const widthOf = text => text.replace(/\t/g, '    ').length;
+  const items = [];
+  // Where the text of the last item starts: an item from there on is inside it.
+  let column = 0;
+  let blankBefore = false;
+  places.forEach((line, i) => {
+    const bullet = /^(\s*)((?:[-*+]|\d+[.)])(?:\s{1,4}(?=\S)|\s|$))/.exec(texts[i]);
+    const indent = widthOf(/^\s*/.exec(line)[0]);
+    if (line.trim() === '') {
+      blankBefore = true;
+    } else if (bullet) {
+      blankBefore = false;
+      if (column > 0 && indent >= column) return;
+      column = widthOf(bullet[1] + bullet[2]);
+      const text = texts[i].slice(bullet[0].length).trim();
+      if (text) items.push(text.replace(/^\[[ xX]\](?:\s+|$)/, ''));
+    } else {
+      if (blankBefore && indent < column) column = 0;
+      blankBefore = false;
+    }
+  });
+  return items;
+}
+
 /** A section of what is done before or after the merge: 'missing', 'none', 'list', or 'prose'. */
 export function kindOf(content, none) {
   if (!content || content.length === 0) return 'missing';
   const items = content.map(l => /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(\S.*)$/.exec(l)?.[1]);
   if (items.some(item => item && !none.test(item))) return 'list';
   return content.every(l => none.test(l.replace(/^[-*+]\s+/, ''))) ? 'none' : 'prose';
+}
+
+/** The lesson lines of a body, outside code: where, the text of each one, and whether it is an answer of the locale. */
+export function lessonsOf(body, locale) {
+  const {label, none, local, framework} = LESSON[locale];
+  const line = new RegExp(`^ {0,3}(?:\\*\\*)?${label}(?:\\*\\*)?\\s*:(?:\\*\\*)?\\s*(.*)$`, 'i');
+  const answer = new RegExp(`^(?:${none}\\.?|(?:${local}|${framework})\\s*:\\s*\\S.*)$`, 'i');
+  return body.prose.flatMap((prose, i) => {
+    if (!line.test(prose)) return [];
+    const text = body.lines[i].trim();
+    return [{at: i, text, valid: answer.test(line.exec(text)?.[1].trim() ?? '')}];
+  });
+}
+
+/** What empties, in the lines of a body, the ones of its lesson, which are the content of no section. */
+export function withoutLessons(body, locale) {
+  const lessons = new Set(lessonsOf(body, locale).map(lesson => lesson.at));
+  return lines => lines.map((line, i) => (lessons.has(i) ? '' : line));
 }
 
 /** The numbers of the issues a body closes: the ones written `#n`, and, with `repo`, the ones that name it. */
@@ -99,7 +145,7 @@ export function closedIssues(body, repo = '') {
 /** The content of the section of what is left after the merge, '' when nothing is. */
 export function pendingActions(body, locale) {
   const {afterMerging, none} = PR_SECTIONS[locale];
-  const lines = sectionLines(body.prose, afterMerging, body.lines);
+  const lines = sectionLines(body.prose, afterMerging, withoutLessons(body, locale)(body.lines));
   const kind = kindOf(lines?.map(l => l.trim()).filter(Boolean), none);
   return kind === 'missing' || kind === 'none' ? '' : lines.join('\n').replace(/^\s*\n/, '').trimEnd();
 }

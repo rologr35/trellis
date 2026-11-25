@@ -76,7 +76,7 @@ A conflict in a `CLAUDE.md`, a rule or a skill is resolved from the branch's own
 - An issue without a plan (a symptom, a lesson) is legitimate. It is created with `gh issue create` or `gh issue new`, which a guard wants after a search of the backlog, unclassed, and gets its plan later, as an amendment with the five sections and the complexity line. <!-- p:planless-issue -->
 - What a piece of work leaves for another issue goes through `trellis issue follow-up`. <!-- p:follow-up -->
 - A pull request opens as a draft. `trellis-plan-check` runs, then `gh pr ready`; an S that only touches Markdown skips it. <!-- p:plan-check -->
-- Its body carries `Closes #<n>`, **Before merging** and **After merging**, each `none` or a list. <!-- p:pr-before-after -->
+- Its body carries `Closes #<n>`, one line `Lesson:` (`none`, `local: <what>` or `framework: <what>`), **Before merging** and **After merging**, each `none` or a list. <!-- p:pr-before-after -->
 - A merge goes through `/trellis-merge <pr>`. <!-- p:merge-skill -->
 - What merged work left undone: `gh issue list --state closed --label pending-actions`. <!-- p:pending-actions -->
 

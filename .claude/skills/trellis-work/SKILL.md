@@ -22,7 +22,7 @@ trellis worktree add <n> <slug>         # its last line is the path: enter it
 
 A refusal ends the run, and is said. An unattended claim already wrote the stop it needed; a worktree that fails after it is a stop.
 
-To go on with an issue this account left, or a stopped one, both take `--resume`. The work starts from the branch and from the last comment of the issue whose first line is `<!-- trellis:stopped -->`, when an owner, a member or a collaborator wrote it. A stopped issue without a branch on origin takes the worktree without `--resume`, and a worktree of its branch that is already on this machine (`git worktree list`) is entered as it is, in place of the add. What its **Needs** asked is checked first, and without it the run stops again.
+To go on with an issue this account left, or a stopped one, both take `--resume`. The work starts from the branch and from the last comment of the issue whose first line is `<!-- trellis:stopped -->`, when an owner, a member or a collaborator wrote it. A stopped issue without a branch on origin takes the worktree without `--resume`, and a worktree of its branch that is already on this machine (`git worktree list`) is entered as it is. What its **Needs** asked is checked first, and without it the run stops again.
 
 ## 2. Read the plan
 
@@ -38,7 +38,7 @@ The steps, in order, each commit one that works on its own. A file the plan does
 trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>
 ```
 
-with the sha of the integration branch just fetched, where the problem was seen, and `--reopen <date>` or `--when <fact>` when it waits. At the level `careful` it prints a proposal. A person approves it and the command runs again with `--approved`; unattended, `--approved` is never passed and the proposal goes into the body of the pull request, or into the stop.
+with the sha of the integration branch just fetched, where the problem was seen, and `--reopen <date>` or `--when <fact>` when it waits. At the level `careful` it prints a proposal. A person approves it and the command runs again with `--approved`; unattended it is never passed, and the proposal goes into the body of the pull request or the stop.
 
 ## 4. Prove
 
@@ -52,7 +52,7 @@ A file it prints touches a gate the plan does not name: a person decides, and th
 
 ## 5. The draft
 
-Fetch the integration branch: what the body claims about it is checked there. Write the title and the body to files, the body with `Closes #<n>` and the sections `trellis pr-check --body <file>` requires, which it names until it passes. Push in a command of its own: a rule of the project's settings may read the whole line, and the next one names the integration branch. Then:
+Fetch the integration branch: what the body claims about it is checked there. Write the title and the body to files, the body with `Closes #<n>`, the `Lesson:` line (what it taught of the project or trellis) and the sections `trellis pr-check --body <file>` names until it passes. Push in a command of its own: a rule of the project's settings may read the whole line, and the next one names the integration branch. Then:
 
 ```bash
 gh pr create --draft --base <integration> --title "$(cat <title file>)" --body-file <body file>
@@ -67,10 +67,10 @@ gh api -X PATCH 'repos/{owner}/{repo}/pulls/<pr>' -F body=@<body file> --jq .htm
 
 ## 6. Review
 
-1. `/code-review high` on the pull request when the class is M or L, or when the plan names a gate.
+1. `/code-review high` on the pull request when the class is M or L or the plan names a gate.
 2. `trellis-plan-check`, with the number of the issue, the branch, and the text of the body and of the plan in its prompt. An S that only touches Markdown skips it.
 
-Each finding is verified against the code. It is fixed, or rejected with the reason in the body. After a fix, the rungs run again.
+Each finding is verified against the code, and fixed or rejected with the reason in the body. After a fix, the rungs run again.
 
 ## 7. Ready
 

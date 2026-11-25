@@ -33,4 +33,4 @@ One change per metric at a time, so its effect can be attributed.
 
 In the chat: the lesson in one sentence, the incident that shows it (what happened, where it is recorded), its classification and the proposed text or change with its exact destination. Claude does not apply it: a person decides.
 
-For a framework lesson, with the person's approval: search first in the repository of trellis (`trellis config get trellis.upstream`) with `gh issue list -R <upstream> --state all --search '<concept>'`, and if it does not exist, open an issue there with the lesson, the incident and the proposed text (`gh issue create -R <upstream> --body-file`). The project receives it when it runs `trellis update` with a version that has it.
+A framework lesson goes through `trellis lesson --title <t> --body-file <file> --search '<concept>'`, whose body has `Kind: defect` or `Kind: rule`, **Incident** and **What must stop happening**. It prints what the search finds, the text and its digest, and publishes nothing. `--approved <digest>` is added when a person has read that text; `--issue <n>` when the search found it. The project receives it with `trellis update`.

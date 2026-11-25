@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
 import {MANIFEST_FILE, copiedFiles} from '../lib/copy.mjs';
-import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {PR_SECTIONS, localeOf, requiredSections} from '../lib/locale.mjs';
 import {packagePath} from '../lib/packages.mjs';
 
 const [, , baseRef, branchArg, escaped] = process.argv;
@@ -258,6 +258,32 @@ if (configWas !== null) {
   if (rank(newConfig) > rank(oldConfig)) {
     add(`trellis.config: raises autonomy.level from ${LEVELS[rank(oldConfig)]} to ${LEVELS[rank(newConfig)]}`, 'what a run wrote only when a person approved it is written without asking', 'keep the level and approve each proposal');
   }
+  // The language is the new one on both sides: a change of language alone drops nothing.
+  const sections = new Set(requiredSections(newConfig));
+  const dropped = requiredSections(oldConfig, localeOf(newConfig)).filter(name => !sections.has(name));
+  if (dropped.length > 0) {
+    add(`trellis.config: pr.section drops ${dropped.join(', ')}`, 'a pull request no longer has to say it', 'keep the section');
+  }
+  const actions = cfg => cfg.all('pr.action').filter(Boolean).length;
+  if (actions(oldConfig) > 0 && actions(newConfig) === 0) {
+    add('trellis.config: pr.action goes', 'an item of the sections of actions starts with anything', 'keep the actions, or add the one that is missing');
+  }
+  for (const [key, loose, cost, alternative] of [
+    ['style.bareReference', 'allow', 'a #N that names nothing to who reads it is published', 'write the sentence that says the thing, with the reference in its list'],
+    ['issue.class', 'label', 'the class of an issue is a label that anyone moves, and no longer part of the plan that was approved', 'keep the complexity line'],
+  ]) {
+    if (oldConfig.get(key) !== loose && newConfig.get(key) === loose) {
+      add(`trellis.config: ${key} goes to ${loose}`, cost, alternative);
+    }
+  }
+  for (const key of ['command.pullRequestCheck', 'command.issueCheck', 'command.commitCheck']) {
+    if (oldConfig.get(key) && !newConfig.get(key)) {
+      add(`trellis.config: ${key} goes`, 'what the project checks of its own is no longer checked', 'keep the check, or name another');
+    }
+  }
+  if (oldConfig.get('project.public') === 'true' && newConfig.get('project.public') !== 'true') {
+    add('trellis.config: project.public goes to false', 'nothing judges a private name in what the project publishes', 'keep it, and take the term out of the list when it is not private');
+  }
   for (const [key, cost] of [
     ['ratchets.suppression', 'what it matched stops being watched by the ratchet'],
     ['ratchets.testFile', 'what it matched stops being watched by the ratchet'],
@@ -272,7 +298,10 @@ if (configWas !== null) {
   }
 }
 
-if (findings.length === 0) process.exit(0);
+if (findings.length === 0) {
+  console.log('ratchet: ok');
+  process.exit(0);
+}
 const setback = PR_SECTIONS[localeOf(newConfig)].setback;
 const list = findings.map(f => `  - ${f.what}\n      cost: ${f.cost}\n      alternative: ${f.alternative}`).join('\n');
 if (escaped === 'true') {

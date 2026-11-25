@@ -48,7 +48,7 @@ for (let i = 1; i < args.length; i++) {
 method ||= Object.keys(fields).length ? 'POST' : 'GET';
 const refused = (code, text) => { console.log(JSON.stringify({message: text, status: String(code)})); stop(`gh: ${text} (HTTP ${code})`); };
 const answer = value => {
-  const filter = {'': v => [v], '.state': v => [v.state], '.html_url': v => [v.html_url], '.[]': v => v, '.[].name': v => v.map(x => x.name), '.login': v => [v.login]}[jq];
+  const filter = {'': v => [v], '.state': v => [v.state], '.html_url': v => [v.html_url], '.[]': v => v, '.[].name': v => v.map(x => x.name), '.[].ref': v => v.map(x => x.ref), '.login': v => [v.login]}[jq];
   if (!filter) stop(`unexpected filter: ${jq}`);
   for (const v of filter(value)) console.log(typeof v === 'string' ? v : JSON.stringify(v));
   process.exit(0);
@@ -76,6 +76,9 @@ if (method === 'GET') {
   if (path === 'user') answer({login: 'rologr35'});
   if ((m = is(/^issues\/(\d+)$/))) answer(load(at(`issue-${m[1]}.json`)));
   if ((m = is(/^issues\/(\d+)\/comments$/))) answer(load(at(`comments-${m[1]}.json`)));
+  if ((m = is(/^git\/matching-refs\/tags\/(.+)$/))) {
+    answer(load(at('tags.json')).filter(t => t.startsWith(m[1])).map(t => ({ref: `refs/tags/${t}`})));
+  }
   if ((m = is(/^pulls\/(\d+)$/))) answer(load(at(`pr-${m[1]}.json`)));
   if (is(/^labels$/)) {
     const labels = read('labels');
@@ -290,12 +293,56 @@ fails 'written on the label line, without Source' 's/^Out of scope:$/Out of scop
 fails 'as a heading, without Source' 's/^Out of scope:$/### Out of scope/; s/ Source: rologr35.*//' 'Out of scope: "The other flag."'
 fails 'bold, without Source' 's/^Out of scope:$/**Out of scope**:/; s/ Source: rologr35.*//' 'Out of scope: "The other flag."'
 
+tl_eq 'a list whose only item is none needs none' '0' "$(case_of 's/^- The other flag.*/- None./; /^- A third one/d; /^  on two lines/d')"
+tl_eq 'none on the label line too' '0' "$(case_of 's/^Out of scope:$/**Out of scope**: none/; /^- The other flag/d; /^- A third one/d; /^  on two lines/d')"
+fails 'none beside another item' 's/^- The other flag.*/- none/' 'Out of scope: "none" has no Source'
+fails 'an item that only starts as none' 's/^- The other flag.*/- none of it/; /^- A third one/d; /^  on two lines/d' 'Out of scope: "none of it" has no Source'
+git config -f trellis.config project.locale es
+sed 's/^- La otra opción.*/- ninguna/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
+tl_eq 'es: its word' '0' "$(status_of check --body "$TL_TMP/case.md")"
+sed 's/^- La otra opción.*/- none/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
+tl_eq 'es: none is not' '1' "$(status_of check --body "$TL_TMP/case.md")"
+git config -f trellis.config --unset project.locale
+
 printf '\ncomplexity\n'
 fails 'no complexity line' '/^Complexity/d' 'last line is not `Complexity: S`, M or L'
 fails 'a wrong class' 's/^Complexity: M/Complexity: XL/' 'last line is not `Complexity: S`, M or L'
 fails 'a lower-case class' 's/^Complexity: M/Complexity: m/' 'last line is not `Complexity: S`, M or L'
 fails 'a line after it' 's/^Complexity: M/Complexity: M\
 One more thing./' 'last line is not `Complexity: S`, M or L'
+
+printf '\nthe class by label\n'
+git config -f trellis.config issue.class label
+tl_eq 'no complexity line is asked for' '0' "$(case_of '/^Complexity/d')"
+tl_eq '  and the check says that a body has no label' 'issue check: ok (the class is the label of the issue, which a body does not have)' "$(out)"
+tl_eq 'a body that has the line passes' '0' "$(case_of 's/x/x/')"
+tl_eq '  and it is not its class' 'issue check: ok (the class is the label of the issue, which a body does not have)' "$(out)"
+sed '/^Complexity/d; s/^Depends on: .*//' "$TL_TMP/good.md" > "$TL_TMP/classless.md"
+# labelled <label>...: the check of issue 40, with those labels.
+labelled() {
+  issue_json 40 "$TL_TMP/classless.md" ${AMENDED:+OWNER} ${AMENDED:+"$AMENDED"}
+  node -e 'const fs = require("fs"); const [f, ...names] = process.argv.slice(1); const i = JSON.parse(fs.readFileSync(f)); i.labels = names.map(name => ({name})); fs.writeFileSync(f, JSON.stringify(i));' "$here/issue-40.json" "$@"
+  status_of check 40
+}
+tl_eq 'an issue with none fails' '1' "$(labelled bug)"
+tl_has '  which it says' 'the issue has no label S, M or L' "$(out)"
+tl_eq 'with one passes' '0' "$(labelled bug M)"
+tl_has '  and it is the class' 'issue check: ok (M)' "$(out)"
+tl_eq 'in another case too' '0' "$(labelled l)"
+tl_has '  as GitHub reads it' 'issue check: ok (L)' "$(out)"
+tl_eq 'with two fails' '1' "$(labelled S L)"
+tl_has '  naming them' 'the issue has the labels S and L, and its class is one' "$(out)"
+status_of check 40 --print > /dev/null
+tl_lacks '  and --print gives no class' 'Complexity:' "$(out)"
+printf '## Amendment (2026-11-25)\n\n### Verification\n\nRun it.\n\nComplexity: L\n' > "$TL_TMP/class-amended.md"
+tl_eq 'an amendment with a class' '0' "$(AMENDED="$TL_TMP/class-amended.md" labelled S)"
+tl_has '  does not change it' 'issue check: ok (S)' "$(out)"
+status_of check 40 --print > /dev/null
+tl_eq '--print gives the class of the label' 'Complexity: S' "$(tail -n 1 "$TL_TMP/out.txt")"
+git config -f trellis.config issue.class line
+tl_eq 'issue.class = line reads the line' '1' "$(labelled M)"
+tl_has '  as without the key' 'last line is not `Complexity: S`, M or L' "$(out)"
+git config -f trellis.config --remove-section issue
 
 printf '\npaths\n'
 fails 'a path that does not exist' 's|docs/`|docs/`, `lib/nope.sh`|' 'Layers and files: `lib/nope.sh` is not in origin/develop'
@@ -364,10 +411,25 @@ tl_eq 'the gate named passes' '0' "$(case_of 's/^Gates: none\.$/Gates: money/')"
 tl_eq 'two gates named, with text after' '0' "$(case_of 's/^Gates: none\.$/Gates: `money`, release-notes. It may break./')"
 fails 'one that exists and one that does not' 's/^Gates: none\.$/Gates: money, nothing/' 'there is no [gate "nothing"]'
 fails 'none and a name' 's/^Gates: none\.$/Gates: none, money/' 'there is no [gate "none"]'
+for reason in 'money (it pays)' 'money (it pays, and twice; see a. And b)' '`money` (it pays (twice), yes), release-notes (the notes)' 'money (it pays) and release-notes'; do
+  tl_eq "a reason is taken off: $reason" '0' "$(case_of "s/^Gates: none\\.\$/Gates: $reason/")"
+done
+tl_eq 'a name with parentheses of its own is still that name' '0' "$(git config -f trellis.config 'gate.vault (old).paths' 'x/**'; case_of 's/^Gates: none\.$/Gates: vault (old), money/')"
+git config -f trellis.config --remove-section 'gate.vault (old)'
+fails 'a name in parentheses alone' 's/^Gates: none\.$/Gates: (money)/' 'there is no [gate "(money)"]'
+fails 'and one after a comma' 's/^Gates: none\.$/Gates: release-notes, (money)/' 'there is no [gate "(money)"]'
+fails 'parentheses that do not close' 's/^Gates: none\.$/Gates: money (it pays/' 'there is no [gate "money (it pays"]'
+fails 'parentheses with nothing in them' 's/^Gates: none\.$/Gates: money ()/' 'there is no [gate "money ()"]'
+fails 'a text after the reason' 's/^Gates: none\.$/Gates: money (it pays) twice/' 'there is no [gate "money '
+fails 'a gate that does not exist, with its reason' 's/^Gates: none\.$/Gates: money, nothing (it pays)/' 'there is no [gate "nothing"]'
+fails 'a reason names no gate' 's/^Gates: none\.$/Gates: none (money)/' 'is of the gate money, which Risks does not name'
 git config -f trellis.config gate.money.paths 'lib/{a,b}.sh' 'lib/'
 fails 'a gate whose glob is not read' 's/x/x/' 'gate.money.paths: glob lib/{a,b}.sh uses syntax trellis does not read'
 git config -f trellis.config --remove-section gate.money
 git config -f trellis.config --remove-section gate.release-notes
+tl_eq 'none with its reason' '0' "$(case_of 's/^Gates: none\.$/Gates: none (nothing is paid, nor sent)/')"
+tl_eq 'and text after it' '0' "$(case_of 's/^Gates: none\.$/Gates: none (nothing is paid). It may break (a bit)./')"
+fails 'none and a name, with reasons' 's/^Gates: none\.$/Gates: none (x), money (y)/' 'there is no [gate "none"]'
 git config -f trellis.config project.locale es
 sed 's/^Gates: ninguno/Gates: none/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
 tl_eq 'es: none is not its word' '1' "$(status_of check --body "$TL_TMP/case.md")"
@@ -380,6 +442,10 @@ fails 'an attribution' 's/^Gates: none/Generated with a tool/' 'attribution'
 fails 'a bare #N' 's/^Gates: none/As #3 says/' 'bare #3'
 fails 'a bare #N on the Depends on line of another section is judged as text' 's/^Gates: none/It depends on the thing in #3/' 'bare #3'
 tl_eq 'a #N on the Depends on line is a reference' '0' "$(case_of 's/^Depends on: .*/Depends on: #7, #8 and rologr35\/x#9/')"
+git config -f trellis.config style.bareReference allow
+tl_eq 'style.bareReference = allow accepts a bare #N' '0' "$(case_of 's/^Gates: none.*/Gates: none, as #3 says/;s/, as #3 says/. As #3 says./')"
+fails '  and no attribution' 's/^Gates: none.*/Gates: none. Generated with a tool/' 'attribution'
+git config -f trellis.config --remove-section style
 
 printf '\nan issue\n'
 state_of rologr35_x 7 closed
@@ -414,12 +480,70 @@ tl_has '  and is named' 'depends on rologr35/x#9, which is open' "$(out)"
 sed 's/^Depends on: .*/Depends on: the tag v2 and a decision/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 2 "$TL_TMP/case.md"
 tl_eq 'only a free-text dependency passes' '0' "$(status_of check 2)"
+printf '["v2.0.0", "v2.1.0-rc1", "app/v3"]' > "$GH_FIXTURES/rologr35_x/tags.json"
+tag_of() {
+  sed "s|^Depends on: .*|Depends on: $1|" "$TL_TMP/good.md" > "$TL_TMP/case.md"
+  issue_json 2 "$TL_TMP/case.md"
+  status_of check 2
+}
+tl_eq 'a tag that exists is met' '0' "$(tag_of 'rologr35/x@v2.0.0')"
+tl_lacks '  and no person confirms it' 'a person confirms' "$(out)"
+tl_eq '  in backticks, beside another, at the end of a sentence' '0' "$(tag_of '`rologr35/x@v2.0.0` and rologr35/x@app/v3.')"
+tl_lacks '  too' 'a person confirms' "$(out)"
+tl_eq 'a tag that does not exist fails' '1' "$(tag_of 'rologr35/x@v3.0.0')"
+tl_has '  and is named' 'depends on rologr35/x@v3.0.0, a tag that does not exist' "$(out)"
+tl_eq 'one that only starts another fails' '1' "$(tag_of 'rologr35/x@v2.1.0')"
+tl_eq 'a tag that could not be read fails' '1' "$(tag_of 'rologr35/nowhere@v2.0.0')"
+tl_has '  with the error of gh' "depends on rologr35/nowhere@v2.0.0, which could not be read as the owner's account (rologr35): gh: Not Found (HTTP 404)" "$(out)"
+tl_eq 'a tag and an open issue fail' '1' "$(tag_of 'rologr35/x@v2.0.0, rologr35/x#9')"
+tl_eq 'a tag that is none of a repository is text' '0' "$(tag_of 'the tag @v2.0.0 of rologr35')"
+tl_has '  which a person confirms' 'a person confirms: the tag @v2.0.0' "$(out)"
 sed 's/^Depends on: .*//' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 2 "$TL_TMP/case.md"
 tl_eq 'without Depends on' '0' "$(status_of check 2)"
 tl_eq 'an issue gh cannot read fails' '1' "$(status_of check 404)"
 tl_has '  with the error of gh' 'Not Found (HTTP 404)' "$(out)"
 tl_eq '#n is the number too' '0' "$(status_of check '#2')"
+
+printf '\nthe check of the project\n'
+unset CI
+cat > own-check.sh <<'SH'
+printf 'own: %s of %s on %s\n' "$(sed -n 1p "$TRELLIS_FILE")" "$(tail -n 1 "$TRELLIS_FILE")" "$TRELLIS_BRANCH"
+[ "$(grep -c nope "$TRELLIS_FILE")" -eq 0 ] || exit 7
+SH
+git config -f trellis.config command.issueCheck mine
+git config -f trellis.config command.mine.run 'bash own-check.sh'
+tl_eq 'a body both checks pass' '0' "$(status_of check --body "$TL_TMP/good.md")"
+tl_has '  the one of the project reads the text and the branch' 'own: ## Context of Complexity: M on main' "$(out)"
+tl_has '  and the class is said after it' 'issue check: ok (M)' "$(out)"
+tl_eq 'a body only the one of the project refuses fails' '1' "$(case_of 's/^A thing is broken/nope, a thing/')"
+tl_has '  which it says' 'issue check: the check of the project (mine) failed' "$(out)"
+tl_lacks '  and it is not said to pass' 'issue check: ok' "$(out)"
+tl_eq 'a body only the one of trellis refuses fails' '1' "$(case_of '/^Complexity/d')"
+tl_has '  and the one of the project runs too' 'own: ## Context of ' "$(out)"
+{ printf '## Amendment (2026-11-24)\n\n### Risks\n\nGates: none. nope\n'; } > "$TL_TMP/nope.md"
+issue_json 41 "$TL_TMP/classless.md" OWNER "$TL_TMP/nope.md"
+facts_of_label() { node -e 'const fs = require("fs"); const [f, name] = process.argv.slice(1); const i = JSON.parse(fs.readFileSync(f)); i.labels = [{name}]; fs.writeFileSync(f, JSON.stringify(i));' "$here/issue-$1.json" "$2"; }
+git config -f trellis.config issue.class label
+facts_of_label 41 M
+tl_eq 'at pick-up the plan in force is what it reads' '1' "$(status_of check 41)"
+tl_has '  as --print gives it' 'own: ## Context of Complexity: M on main' "$(out)"
+tl_has '  and its failure is said' 'issue check: the check of the project (mine) failed' "$(out)"
+tl_eq '--print does not run it' '0' "$(status_of check 41 --print)"
+tl_lacks '  at all' 'own:' "$(out)"
+issue_json 41 "$TL_TMP/classless.md"
+facts_of_label 41 M
+tl_eq 'an issue both pass' '0' "$(status_of check 41)"
+git config -f trellis.config --remove-section issue
+git config -f trellis.config command.mine.ci 'echo the ci form; exit 3'
+tl_eq 'in CI the ci form is run' '1' "$(CI=true "$TRELLIS" issue check --body "$TL_TMP/good.md" >"$TL_TMP/out.txt" 2>&1; echo $?)"
+tl_has '  in place of the run' 'the ci form' "$(out)"
+git config -f trellis.config --unset command.mine.ci
+git config -f trellis.config --unset command.mine.run
+tl_eq 'a name without a command fails' '1' "$(status_of check --body "$TL_TMP/good.md")"
+tl_has '  which it says' 'issue check: [command "mine"] has no run' "$(out)"
+git config -f trellis.config --unset command.issueCheck
+rm -f own-check.sh
 
 printf '\nthe amendments of an issue\n'
 printf 'It is slow since #3.\n\n## Verification\n\nNo idea.\n\n## Context\n\nWho knows.\n' > "$TL_TMP/symptom.md"
@@ -750,6 +874,10 @@ issue_json 34 "$TL_TMP/case.md"
 tl_eq '--unattended, with a dependency that cannot be read' '1' "$(claim_of 34 --unattended)"
 tl_has '  is refused' 'its plan could not be checked' "$(out)"
 tl_eq '  and writes nothing' '' "$(writes)"
+sed 's/^Depends on:.*$/Depends on: rologr35\/nowhere@v1/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 34 "$TL_TMP/case.md"
+tl_eq '  a tag that cannot be read too' '1' "$(claim_of 34 --unattended)"
+tl_eq '  and writes nothing' '' "$(writes)"
 sed 's/^Depends on:.*$/Depends on: #404, #8/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 34 "$TL_TMP/case.md"
 state_of rologr35_fixture 8 open
@@ -895,6 +1023,30 @@ printf 'm\n' > "$GH_FIXTURES/labels"
 tl_eq 'a label in lower case is the same label' '0' "$(create_of --title x --body-file "$TL_TMP/good.md")"
 tl_lacks '  and is not created again' 'POST labels' "$(writes)"
 printf 'bug\n' > "$GH_FIXTURES/labels"
+tl_eq 'without issue.class = label, --class is a wrong use' '2' "$(create_of --title x --body-file "$TL_TMP/good.md" --class S)"
+git config -f trellis.config issue.class label
+tl_eq 'with it, its class is asked for' '2' "$(create_of --title x --body-file "$TL_TMP/classless.md")"
+tl_has '  by its name' '--class S, M or L' "$(out)"
+tl_eq '  and nothing is written' '' "$(writes)"
+for class in XL m ''; do
+  tl_eq "and it is one of the three ('$class' is not)" '2' "$(create_of --title x --body-file "$TL_TMP/classless.md" --class "$class")"
+done
+tl_eq 'with its class it is created' '0' "$(create_of --title x --body-file "$TL_TMP/classless.md" --class L)"
+tl_has '  its label is created first' 'POST labels name=L color=' "$(head -n 1 "$GH_FIXTURES/writes.log")"
+tl_has '  and used' 'labels=L' "$(tail -n 1 "$GH_FIXTURES/writes.log")"
+tl_eq 'the line of a body is not its class' '0' "$(create_of --title x --body-file "$TL_TMP/good.md" --class=S)"
+tl_has '  which is the one of the flag' 'labels=S' "$(tail -n 1 "$GH_FIXTURES/writes.log")"
+git config -f trellis.config --remove-section issue
+printf 'bug\n' > "$GH_FIXTURES/labels"
+git config -f trellis.config command.issueCheck mine
+git config -f trellis.config command.mine.run 'echo seen; grep -q broken "$TRELLIS_FILE"'
+tl_eq 'a body the check of the project passes is created' '0' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_eq '  with only its URL on stdout' 'https://github.com/rologr35/fixture/issues/12' "$("$TRELLIS" issue create --title x --body-file "$TL_TMP/good.md" 2>/dev/null)"
+sed 's/broken/whole/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+tl_eq 'one it refuses is not' '1' "$(create_of --title x --body-file "$TL_TMP/case.md")"
+tl_eq '  and makes no gh call' '' "$(calls)"
+git config -f trellis.config --unset command.issueCheck
+git config -f trellis.config --remove-section command.mine
 (cd "$TL_TMP" && cp good.md "$repo/relative.md")
 tl_eq 'a relative body file, the flags with = and in another order' '0' "$(create_of --body-file=relative.md --title='With = sign')"
 tl_has '  keep the title' 'title=With = sign ' "$(writes)"
@@ -1061,6 +1213,15 @@ tl_eq '  is not the mark' '3' "$(count_of 12)"
 issue_of 12 open '' '[{"user":{"login":"github-actions[bot]"},"author_association":"NONE","body":"<!-- trellis:pending-actions pr=40 -->"}]'
 tl_eq 'the mark of the workflow' '0' "$(close_of 40)"
 tl_eq '  is the mark' "$CLOSE" "$(writes)"
+pr_json 40 merged develop 'Closes #12' '' '**After merging**' 'none' '' 'Lesson: none'
+issue_of 12 open
+tl_eq 'the lesson line is not pending' '0' "$(close_of 40)"
+tl_eq '  and writes nothing' '' "$(comments_of 12)"
+pr_json 40 merged develop 'Closes #12' '' '**After merging**' '- Tag it.' '' 'Lesson: none'
+issue_of 12 open
+tl_eq '  nor beside what is' '0' "$(close_of 40)"
+tl_lacks '  which is written without it' 'Lesson' "$(comments_of 12)"
+tl_has '  and alone' 'Tag it.' "$(comments_of 12)"
 pr_json 40 merged develop 'Closes #12' '' '**After merging**: tag it'
 issue_of 12 open
 tl_eq 'actions written as prose' '0' "$(close_of 40)"
@@ -1118,6 +1279,38 @@ git config -f trellis.config tracker.kind none
 tl_eq 'tracker.kind = none exits 2' '2' "$(close_of 40)"
 tl_eq '  with no gh call' '' "$(calls)"
 git config -f trellis.config --unset tracker.kind
+
+printf '\nthe private names of a public project\n'
+mkdir -p "$HOME/.config/trellis" && printf 'zephyr\n' > "$HOME/.config/trellis/private-names"
+git switch -q -f develop && git config -f trellis.config project.public true
+named="$TL_TMP/named.md"
+sed 's/^## Context$/## Context\
+\
+Of Zephyr./' "$TL_TMP/good.md" > "$named"
+tl_eq 'create refuses a body that has one' '1' "$(create_of --title 'A flag' --body-file "$named")"
+tl_has '  naming it' '"zephyr" is in the list of private names' "$(out)"
+tl_eq '  and a title' '1' "$(create_of --title 'A flag of zephyr' --body-file "$TL_TMP/good.md")"
+tl_has '  naming it' 'the text, line 1: "zephyr"' "$(out)"
+tl_eq '  with no write' '' "$(writes)"
+tl_eq '  and creates one with none' '0' "$(create_of --title 'A flag' --body-file "$TL_TMP/good.md")"
+head_sha="$(git ls-remote origin refs/heads/develop | cut -f1)"
+cp "$TL_TMP/seen.md" "$TL_TMP/seen-was.md"
+tl_eq 'follow-up passes a text with none to its proposal' '4' "$(follow --checked "$head_sha")"
+tl_eq '  and refuses a title that has one' '1' "$(follow --checked "$head_sha" --title 'fix: zephyr')"
+tl_has '  naming it' 'the text, line 1: "zephyr"' "$(out)"
+tl_lacks '  before the search' 'The backlog' "$(out)"
+tl_eq '  and what it waits for' '1' "$(follow --checked "$head_sha" --when 'zephyr moves')"
+printf '\nOf zephyr.\n' >> "$TL_TMP/seen.md"
+tl_eq '  and a body' '1' "$(follow --checked "$head_sha" --approved)"
+tl_eq '  with no write' '' "$(writes)"
+cp "$TL_TMP/seen-was.md" "$TL_TMP/seen.md"
+tl_eq 'stop refuses a text that has one' '1' "$(stop_of 35 "$done_text**Needs**:\n\n- a key of zephyr\n")"
+tl_has '  naming it' '"zephyr" is in the list of private names' "$(out)"
+tl_eq '  with no write' '' "$(writes)"
+tl_eq '  and takes one with none' '0' "$(stop_of 35 "$done_text**Needs**:\n\n- a key\n")"
+git config -f trellis.config --unset project.public
+tl_eq 'a project that is not public publishes it' '0' "$(create_of --title 'A flag of zephyr' --body-file "$named")"
+rm "$HOME/.config/trellis/private-names"
 
 printf '\na directory with no trellis.config (#41)\n'
 bare="$TL_TMP/bare"

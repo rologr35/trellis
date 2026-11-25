@@ -8,7 +8,7 @@
 #   trellis update <tag|sha>                writes the project's copy of trellis
 #   trellis verify [--staged | --upstream] [--ref <sha>]
 #   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
-#   trellis setup [--quiet]                 core.hooksPath and the PATH of a session
+#   trellis setup [--quiet | --newer]       core.hooksPath and the PATH of a session, a newer version
 #   trellis worktree add <n> <slug> [--resume] | prune
 #   trellis ratchet [--base <ref>] [--allow-loosen]
 #   trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>
@@ -16,10 +16,13 @@
 #   trellis issue gates <n>                 the gates the branch touches and the plan does not name
 #   trellis issue claim <n> [--unattended] [--resume]
 #   trellis issue stop <n> --body-file <file>
-#   trellis issue create --title <t> --body-file <file>
+#   trellis issue create --title <t> --body-file <file> [--class S|M|L]
 #   trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>
 #                           [--reopen <date> | --when <fact>] [--approved]
 #   trellis issue close <pr> [--done]
+#   trellis lesson --title <t> --body-file <file> --search <words> [--issue <n> [--reopen]]
+#                  [--approved <digest>]
+#   trellis private-names (--staged | --file <file> | --text <text>)...
 #   trellis check                           runs [command] check in order, fail-fast
 #
 # The plugin's bin/ is on the PATH of Claude's Bash tool only; a person, a git hook or a hook of the
@@ -37,7 +40,7 @@ TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,23p' "$self" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,26p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -87,6 +90,8 @@ case "$sub" in
     ;;
   ratchet) exec bash "$TRELLIS_ROOT/scripts/ratchet.sh" "$@" ;;
   pr-check) exec bash "$TRELLIS_ROOT/scripts/pr-check.sh" "$@" ;;
+  lesson) exec bash "$TRELLIS_ROOT/scripts/lesson.sh" "$@" ;;
+  private-names) exec bash "$TRELLIS_ROOT/scripts/private-names.sh" "$@" ;;
   issue) exec bash "$TRELLIS_ROOT/scripts/issue.sh" "$@" ;;
   check) exec bash "$TRELLIS_ROOT/scripts/check.sh" "$@" ;;
   -h | --help | help) usage ;;

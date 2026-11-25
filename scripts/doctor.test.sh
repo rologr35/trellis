@@ -43,6 +43,12 @@ git config -f trellis.config --remove-section bogus
 git config -f trellis.config --add command.check missing
 tl_eq 'a command name without run fails' '1' "$(doctor)"
 git config -f trellis.config --unset-all command.check
+for key in pullRequestCheck issueCheck commitCheck; do
+  git config -f trellis.config "command.$key" missing
+  tl_eq "command.$key without run fails" '1' "$(doctor)"
+  tl_has 'naming it' 'named but without [command "<name>"] run: missing' "$(out)"
+  git config -f trellis.config --unset "command.$key"
+done
 
 git config -f trellis.config project.locale es
 tl_eq 'a locale in the schema passes' '0' "$(doctor)"
@@ -205,6 +211,48 @@ tl_has 'and that the hooks need it' 'node not found while hooks are active' "$(o
 ln -s "$NODE" "$tools/node"
 git reset -q --hard && git clean -qfd
 mv "$TL_TMP/plugins.json" "$plugins"
+
+printf '\na newer version\n'
+mkdir .trellis && printf '0.8.0 0123456789012345678901234567890123456789\n' > .trellis/VERSION
+doctor > /dev/null
+tl_lacks 'nothing asked yet says nothing' 'is out' "$(out)"
+printf 'v0.9.0\n' > .git/trellis-version
+doctor > /dev/null
+tl_has 'a newer one is a warning' 'warn  trellis 0.9.0 is out and this project has 0.8.0' "$(out)"
+tl_eq 'and the doctor writes nothing' 'trellis-version' "$(ls .git | grep trellis)"
+printf 'v0.8.0\n' > .git/trellis-version
+doctor > /dev/null
+tl_lacks 'an equal one is not' 'is out' "$(out)"
+rm -r .trellis .git/trellis-version
+
+printf '\nthe private names of a public project\n'
+names="$HOME/.config/trellis/private-names"
+tl_lacks 'a project that is not public has no section' 'private names' "$(doctor; out)"
+git config -f trellis.config project.public true
+tl_eq 'without a list it is a warning' '0' "$(doctor)"
+tl_has '  that names it' "warn  no list of private names ($names)" "$(out)"
+tl_has 'hooks that do not call it are another' 'warn  .githooks/pre-commit, commit-msg, pre-push do not call trellis private-names: take them again from templates/githooks/' "$(out)"
+mkdir -p "$(dirname "$names")" && printf 'acme\n' > "$names"
+mkdir -p .githooks && cp "$TRELLIS_ROOT"/templates/githooks/* .githooks/
+doctor > /dev/null
+tl_has 'with a list it is ok' 'ok    the list of private names is there' "$(out)"
+tl_has '  and the hooks too' 'ok    the git hooks call trellis private-names' "$(out)"
+for hook in pre-commit commit-msg pre-push; do
+  sed 's/^\(.*"$trellis" private-names\)/# \1/' "$TRELLIS_ROOT/templates/githooks/$hook" > ".githooks/$hook"
+  doctor > /dev/null
+  tl_has "$hook with its call commented out is named" "warn  .githooks/$hook do not call trellis private-names" "$(out)"
+  cp "$TRELLIS_ROOT/templates/githooks/$hook" .githooks/
+done
+rm "$names" && mkdir "$names"
+tl_eq 'a list that cannot be read is a warning' '0' "$(doctor)"
+tl_has '  that says so' 'cannot be read' "$(out)"
+rmdir "$names"
+rm "$tools/node"
+doctor > /dev/null
+tl_has 'without node the list is not read' 'info  the list of private names is not read (node not found)' "$(out)"
+ln -s "$NODE" "$tools/node"
+rm .githooks/*
+git config -f trellis.config --unset project.public
 
 printf '\ngit.hooksPath\n'
 git config -f trellis.config git.hooksPath tool/hooks

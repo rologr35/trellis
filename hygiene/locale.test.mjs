@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS, STOP} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LESSON, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS, STOP} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -151,7 +151,8 @@ test('the Cycle section of every method is marked once, takes at most 1.5 KB and
     assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
     assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'work-skill', 'planless-issue', 'follow-up', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
     const {beforeMerging, afterMerging, noneWord} = PR_SECTIONS[locale];
-    for (const text of [`## ${ISSUE[locale].amendment} (`, '/trellis-work <n>', 'trellis issue check <n>', 'trellis issue follow-up', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
+    const lesson = LESSON[locale];
+    for (const text of [`\`${lesson.label}:\``, `\`${lesson.none}\``, `\`${lesson.local}: <`, `\`${lesson.framework}: <`, `## ${ISSUE[locale].amendment} (`, '/trellis-work <n>', 'trellis issue check <n>', 'trellis issue follow-up', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
       assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
     }
   }
@@ -172,11 +173,20 @@ test('what a project reads names the skills and agents of the copy', () => {
 test('the skill work holds one procedure, with and without a person', () => {
   const skill = readFileSync(path.join(TRELLIS_ROOT, 'skills', 'work', 'SKILL.md'), 'utf8');
   assert.match(skill, /^---\nname: work\n/);
-  for (const text of ['trellis issue claim <n>', '--unattended', '--resume', 'trellis worktree add <n> <slug>', 'trellis issue check <n> --print', 'trellis issue gates <n>', 'trellis issue stop <n> --body-file', 'trellis issue follow-up', 'CLAUDE_CODE_REMOTE', 'gh pr create --draft', "gh api 'repos/{owner}/{repo}/pulls'", '/code-review high', '`trellis-plan-check`', 'gh pr ready', '<!-- trellis:stopped -->', 'git merge origin/<integration>']) {
+  for (const text of ['trellis issue claim <n>', '--unattended', '--resume', 'trellis worktree add <n> <slug>', 'trellis issue check <n> --print', 'trellis issue gates <n>', 'trellis issue stop <n> --body-file', 'trellis issue follow-up', 'CLAUDE_CODE_REMOTE', 'gh pr create --draft', "gh api 'repos/{owner}/{repo}/pulls'", '/code-review high', '`trellis-plan-check`', 'gh pr ready', '`Lesson:`', '<!-- trellis:stopped -->', 'git merge origin/<integration>']) {
     assert.ok(skill.includes(text), `the skill names ${text}`);
   }
   for (const locale of LOCALES) for (const name of STOP[locale].sections) assert.ok(skill.includes(`**${name}**`), `${locale}: ${name}`);
   assert.doesNotMatch(skill, /gh pr merge/, 'it never merges');
+});
+
+test('a lesson for the framework goes through trellis lesson, and the skills say so', () => {
+  const skill = name => readFileSync(path.join(TRELLIS_ROOT, 'skills', name, 'SKILL.md'), 'utf8');
+  for (const text of ['trellis lesson --title <t> --body-file <file> --search', '`Kind: defect`', '`Kind: rule`', '**Incident**', '**What must stop happening**', '`--approved <digest>`', '`--issue <n>`']) {
+    assert.ok(skill('retro').includes(text), `retro names ${text}`);
+  }
+  assert.doesNotMatch(skill('retro'), /gh issue (?:create|list)/);
+  assert.ok(skill('merge').includes('offer `trellis lesson`'));
 });
 
 test('every locale defines the same words of a stop', () => {
@@ -253,6 +263,14 @@ test('every locale defines the same pull request sections', () => {
   for (const locale of rest) {
     assert.deepEqual(Object.keys(PR_SECTIONS[locale]), Object.keys(PR_SECTIONS[first]));
     assert.equal(PR_SECTIONS[locale].required.length, PR_SECTIONS[first].required.length);
+  }
+});
+
+test('every locale defines the same words of a lesson', () => {
+  for (const locale of LOCALES) {
+    assert.deepEqual(Object.keys(LESSON[locale]), ['label', 'none', 'local', 'framework']);
+    assert.equal(new Set(Object.values(LESSON[locale])).size, 4);
+    assert.ok(template(locale, 'CLAUDE.root.md').includes(`\`${LESSON[locale].label}:\``), `${locale}: the root template names it`);
   }
 });
 

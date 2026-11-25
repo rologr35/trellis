@@ -12,7 +12,7 @@
 #                                        takes the issue for this session
 #   trellis issue stop <n> --body-file <file>
 #                                        leaves the issue stopped, with what it needs in a comment
-#   trellis issue create --title <t> --body-file <file>
+#   trellis issue create --title <t> --body-file <file> [--class S|M|L]
 #                                        checks the body, creates the issue, prints its URL
 #   trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>
 #                           [--reopen <date> | --when <fact>] [--approved]
@@ -21,18 +21,21 @@
 #                                        pending actions are done
 #
 # The check: the five sections of project.locale present, once, in order and not empty; each item of
-# Out of scope with its Source; the last line with text `Complexity: S`, M or L; every path in
+# Out of scope with its Source, unless the list is only `none`; the last line with text `Complexity: S`, M or L; every path in
 # backticks of Layers and files, outside its New list, in origin/<git.integrationBranch>, which is
 # fetched first; Risks opening with `Gates: none` or the names of the [gate] the plan touches, that exist
-# and are every gate whose paths match one of Layers and files; and the style of pr-check (no long dash,
+# and are every gate whose paths match one of Layers and files, each with its reason in parentheses after
+# it, or none; and the style of pr-check (no long dash,
 # no attribution, no bare #N, with the references of a Depends on line allowed). `Needs:` in Risks is
 # optional: what a run cannot take. The names per locale live in lib/locale.mjs.
+# With issue.class = label the complexity line is not asked for nor read, in an amendment either: the
+# class is the one label S, M or L of the issue, and none or two is a miss. A body has no label.
 #
 # The plan of an issue is its body, with each section, and the complexity line, of the last comment
 # headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only what an owner, a member
 # or a collaborator wrote counts, the body too: with the body of someone else, which the check says, the
 # plan is what the amendments carry. At pick-up, also: every #n and owner/repo#n of the Depends on line
-# of Context is closed. Other text there is printed for a person.
+# of Context is closed, and every owner/repo@<tag> exists. Other text there is printed for a person.
 # Each path of Layers and files that changed on the integration branch since the plan, or its last
 # amendment, was written is printed, and fails nothing.
 #
@@ -53,7 +56,8 @@
 # the file, none of them empty (`none` counts), and the label stopped, created when the repository lacks
 # it. The assignee, when there is one, stays.
 #
-# The label of the issue created is the class of its complexity line. S, M and L are created when the
+# The label of the issue created is the class of its complexity line, or of --class, which
+# issue.class = label asks for and any other value refuses. S, M and L are created when the
 # repository lacks them.
 #
 # The follow-up is refused unless --checked is the head of origin/<git.integrationBranch> after a fetch,
@@ -72,6 +76,12 @@
 #
 # GitHub is asked through REST, as the account of the repository's owner (lib/gh.sh).
 #
+# After the check of a body, and of the plan in force at pick-up as --print gives it, also when it
+# fails, runs the check of the project, command.issueCheck (lib/project-check.sh).
+#
+# In a public project create, follow-up and stop refuse a private name of the machine in what they
+# publish, the title too (scripts/private-names.sh).
+#
 # With tracker.kind = none the module is off and every form exits 2. Otherwise 0 when the check
 # passes, 1 when it does not, with every miss printed, and 2 on a wrong use.
 
@@ -80,6 +90,8 @@ set -uo pipefail
 TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/project-check.sh
+. "$TRELLIS_ROOT/lib/project-check.sh"
 # shellcheck source=../lib/gh.sh
 . "$TRELLIS_ROOT/lib/gh.sh"
 
@@ -89,7 +101,7 @@ usage() {
     printf '       trellis issue gates <n>\n'
     printf '       trellis issue claim <n> [--unattended] [--resume]\n'
     printf '       trellis issue stop <n> --body-file <file>\n'
-    printf '       trellis issue create --title <t> --body-file <file>\n'
+    printf '       trellis issue create --title <t> --body-file <file> [--class S|M|L]\n'
     printf '       trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>\n'
     printf '                               [--reopen <date> | --when <fact>] [--approved]\n'
     printf '       trellis issue close <pr> [--done]\n'
@@ -103,6 +115,7 @@ if [ "$(tc_get tracker.kind)" = 'none' ]; then
 fi
 
 judge() { node "$TRELLIS_ROOT/scripts/issue-check.mjs" "$@"; }
+private_names() { bash "$TRELLIS_ROOT/scripts/private-names.sh" "$@"; }
 
 fetch_now() {
   GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
@@ -115,6 +128,14 @@ fetch_integration() {
   fetch_now || printf 'issue: origin/%s could not be fetched, so the paths are judged by the last fetch\n' "$(tc_get git.integrationBranch)" >&2
 }
 
+# A body, by trellis and by the check of the project.
+judge_body() {
+  local status=0
+  judge body "$1" || status=1
+  project_check issueCheck 'issue check' "$1" || status=1
+  return "$status"
+}
+
 check_body() {
   [ $# -eq 1 ] && [ -f "$1" ] || usage
   # A body is judged against the paths and branches of its project: outside of it every miss would be false.
@@ -123,8 +144,12 @@ check_body() {
     exit 2
   fi
   fetch_integration
-  judge body "$1" || return 1
-  printf 'issue check: ok (%s)\n' "$(judge class "$1")"
+  judge_body "$1" || return 1
+  if [ "$(tc_get issue.class)" = 'label' ]; then
+    printf 'issue check: ok (the class is the label of the issue, which a body does not have)\n'
+  else
+    printf 'issue check: ok (%s)\n' "$(judge class "$1")"
+  fi
 }
 
 # One dependency: prints the miss when the issue is open or cannot be read, and then returns 2.
@@ -140,6 +165,18 @@ check_dependency() {
     open) printf 'issue check: depends on %s, which is open\n' "$name" >&2 ;;
     *) printf 'issue check: depends on %s, whose state gh answered as "%s"\n' "$name" "$GH_AS_OUT" >&2 ;;
   esac
+  return 1
+}
+
+# The same for a tag, which is met when it exists. The answer has the ones it starts too.
+check_tag() {
+  local repo="$1" tag="$2"
+  if ! gh_api . "$repo" "git/matching-refs/tags/$tag" --paginate --jq '.[].ref'; then
+    printf 'issue check: depends on %s@%s, which could not be read as %s: %s\n' "$repo" "$tag" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 2
+  fi
+  printf '%s\n' "$GH_AS_OUT" | grep -Fxq -- "refs/tags/$tag" && return 0
+  printf 'issue check: depends on %s@%s, a tag that does not exist\n' "$repo" "$tag" >&2
   return 1
 }
 
@@ -182,11 +219,13 @@ check_plan() {
   local kind a b status=0 unread=false
   fetch_integration
   judge issue "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || status=1
+  judge print "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/plan.md" 2>/dev/null || return 1
+  project_check issueCheck 'issue check' "$ISSUE_TMP/plan.md" || status=1
   judge deps "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/deps" || return 1
   while IFS=$'\t' read -r kind a b <&4; do
     case "$kind" in
-      ref)
-        check_dependency "$a" "$b"
+      ref | tag)
+        if [ "$kind" = ref ]; then check_dependency "$a" "$b"; else check_tag "$a" "$b"; fi
         case $? in 0) ;; 2) unread=true ;; *) status=1 ;; esac
         ;;
       text) printf 'issue: the plan depends on this, which a person confirms: %s\n' "$a" ;;
@@ -277,7 +316,7 @@ stop_issue() {
   case "$n" in '' | *[!0-9]*) usage ;; esac
   [ -f "$file" ] || usage
   make_tmp || return 1
-  judge stop "$file" "$ISSUE_TMP/stop" && write_stop "$n"
+  judge stop "$file" "$ISSUE_TMP/stop" && private_names --file "$ISSUE_TMP/stop" && write_stop "$n"
 }
 
 claim_issue() {
@@ -359,38 +398,41 @@ claim_issue() {
   [ -z "$branches" ] || printf 'issue claim: its branch on origin: %s (trellis worktree add %s <slug> --resume)\n' "$branches" "$n"
 }
 
-# ensure_label <name> <colour> <description>: makes sure the repository has the label. GitHub
-# compares the names of labels without case.
+# ensure_label <name> <colour> <description>: gh_label, saying a failure.
 ensure_label() {
-  local name="$1" colour="$2" description="$3"
-  if ! gh_api . '' 'labels?per_page=100' --paginate --jq '.[].name'; then
-    printf 'issue: the labels could not be read as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-    return 1
-  fi
-  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$name" && return 0
-  if ! gh_api . '' labels -f "name=$name" -f "color=$colour" -f "description=$description"; then
-    printf 'issue: the label %s could not be created as %s: %s\n' "$name" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-    return 1
-  fi
+  gh_label . '' "$@" && return 0
+  printf 'issue: the label %s could not be read or created as %s: %s\n' "$1" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+  return 1
 }
 
 create_issue() {
-  local title='' file='' class colour
+  local title='' file='' class='' colour asked=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --title) [ $# -gt 1 ] || usage; title="$2"; shift ;;
       --title=*) title="${1#*=}" ;;
       --body-file) [ $# -gt 1 ] || usage; file="$2"; shift ;;
       --body-file=*) file="${1#*=}" ;;
+      --class) [ $# -gt 1 ] || usage; class="$2"; asked=true; shift ;;
+      --class=*) class="${1#*=}"; asked=true ;;
       *) usage ;;
     esac
     shift
   done
   [ -n "$title" ] && [ -f "$file" ] || usage
+  if [ "$(tc_get issue.class)" = 'label' ]; then
+    case "$class" in
+      S | M | L) ;;
+      *) printf 'issue create: with issue.class = label it takes --class S, M or L\n' >&2; usage ;;
+    esac
+  elif [ "$asked" = true ]; then
+    usage
+  fi
   case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
   fetch_integration
-  judge body "$file" || return 1
-  class="$(judge class "$file")"
+  judge_body "$file" >&2 || return 1
+  private_names --text "$title" --file "$file" || return 1
+  [ -n "$class" ] || class="$(judge class "$file")"
   case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
   ensure_label "$class" "$colour" "Complexity $class" && post_issue "$title" "$file" "$class"
 }
@@ -445,6 +487,7 @@ follow_up() {
   [ -n "$title" ] && [ -f "$file" ] && [ -n "$words" ] && [ -n "$checked" ] || usage
   make_tmp || return 1
   judge follow-up "$file" "$ISSUE_TMP/follow-up" "$reopen" || return 1
+  private_names --text "$title" --file "$ISSUE_TMP/follow-up" || return 1
 
   branch="$(tc_get git.integrationBranch)"
   fetch_now || { refuse_follow_up "origin/$branch could not be fetched"; return 1; }
@@ -454,10 +497,7 @@ follow_up() {
     return 1
   fi
 
-  gh_repo . '' || true
-  if ! gh_as_owner . "$(gh_owner . '')" api search/issues -X GET ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} \
-      -F "q=repo:$GH_REPO_PATH is:issue $words" -F per_page=100 \
-      --jq '"\(.total_count) match(es)", (.items[] | "#\(.number) \(.state) \(.title)")'; then
+  if ! gh_search . '' "$words"; then
     refuse_follow_up "the backlog could not be searched as $GH_AS_ACCOUNT: ${GH_AS_ERR:-gh failed}"
     return 1
   fi

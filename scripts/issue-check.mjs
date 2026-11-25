@@ -31,6 +31,8 @@ const [, , mode, file, commentsFile, reopen = ''] = process.argv;
 const config = loadConfig();
 const L = ISSUE[localeOf(config)];
 const CLASSES = ['S', 'M', 'L'];
+// With issue.class = label the class is a label of the issue, and the line is not one of the plan.
+const byLabel = config.get('issue.class') === 'label';
 
 const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const indentOf = line => /^\s*/.exec(line)[0].length;
@@ -129,6 +131,10 @@ function resolve(issue, comments) {
     plan.complexity = amendment.complexity ?? plan.complexity;
     plan.since = comment.created_at;
   }
+  if (byLabel) {
+    plan.labels = CLASSES.filter(c => (issue.labels ?? []).some(l => l.name.toUpperCase() === c));
+    plan.complexity = plan.labels.length === 1 ? plan.labels[0] : '';
+  }
   return plan;
 }
 
@@ -142,18 +148,20 @@ function render(plan) {
 /** The issues the plan depends on, and the lines a person reads. */
 function dependencies(plan) {
   const refs = new Map();
+  const tags = new Map();
   const texts = [];
   for (const section of plan.sections.filter(s => s.name === L.sections[0])) {
     for (const group of labelled(section.lines, L.dependsOn)) {
       const lines = group.inline === '' ? group.lines.map(l => l.text) : [group.inline];
       for (const line of lines) {
         for (const [whole, repo, n] of line.matchAll(REFERENCE)) refs.set(whole, {repo: repo ?? '-', n});
-        const rest = line.replace(REFERENCE, '').replace(/(?<!\p{L})(?:and|y|e)(?!\p{L})/gu, '');
+        for (const [whole, repo, tag] of line.matchAll(TAG)) tags.set(whole, {repo, tag});
+        const rest = line.replace(TAG, '').replace(REFERENCE, '').replace(/(?<!\p{L})(?:and|y|e)(?!\p{L})/gu, '');
         if (/[\p{L}\p{N}]/u.test(rest)) texts.push(line.trim().replace(/\t/g, ' '));
       }
     }
   }
-  return {refs: [...refs.values()], texts};
+  return {refs: [...refs.values()], tags: [...tags.values()], texts};
 }
 
 /** The text without what the mould leaves for the person to fill, and without comments. */
@@ -249,12 +257,35 @@ function pathsOf(lines, tree) {
 
 const sectionOf = (plan, name) => plan.sections.find(s => s.name === name)?.lines ?? [];
 
+/**
+ * A list of names without the reason each one carries in parentheses after it. Parentheses that close
+ * nothing, that say nothing or that follow no name stay.
+ */
+function withoutReasons(value) {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    let end = -1;
+    if (value[i] === '(' && /[^\s,]\s+$/.test(out)) {
+      for (let depth = 0, j = i; j < value.length && end < 0; j++) {
+        if (value[j] === '(') depth++;
+        if (value[j] === ')' && --depth === 0) end = j;
+      }
+    }
+    if (end > i && /[\p{L}\p{N}]/u.test(value.slice(i, end))) i = end;
+    else out += value[i];
+  }
+  return out;
+}
+
 /** The gates the Risks of a plan open with: their names, [] for none, null without the line. */
 function gatesOf(plan) {
   const first = written(textOf(sectionOf(plan, L.sections[3]))).split('\n').find(line => line.trim() !== '') ?? '';
   const value = new RegExp(`^\\s*(?:[-*+]\\s+)?(?:\\*\\*|__)?${escape(L.gates)}(?:(?:\\*\\*|__)\\s*:|\\s*:(?:\\*\\*|__)?)(.*)$`).exec(first)?.[1];
   if (value === undefined) return null;
-  const names = value.split(/\.(?:\s|$)/)[0].split(/,|\s(?:and|y|e)\s/).map(s => s.trim().replace(/^`(.*)`$/, '$1')).filter(Boolean);
+  const read = text => text.split(/\.(?:\s|$)/)[0].split(/,|\s(?:and|y|e)\s/).map(s => s.trim().replace(/^`(.*)`$/, '$1')).filter(Boolean);
+  // A name of a gate may have parentheses of its own.
+  const known = config.subsections('gate');
+  const names = read(value).every(name => known.includes(name)) ? read(value) : read(withoutReasons(value));
   if (names.length === 0) return null;
   return names.length === 1 && names[0].toLowerCase() === L.noGates ? [] : names;
 }
@@ -385,6 +416,9 @@ function integrationTree(ref) {
 /** The issues a `Depends on` line names, which are references and not bare numbers. */
 const REFERENCE = /(?<![\w./&-])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g;
 
+/** The tags of a repository it names. */
+const TAG = /(?<![\w./@&-])([\w.-]+\/[\w.-]+)@([\w+](?:[\w./+-]*[\w+])?)/g;
+
 /** The text whose style is judged: the `Depends on` lines without their references. */
 function withoutReferences(lines) {
   const out = lines.map(l => l.text);
@@ -409,12 +443,17 @@ function judge(plan, lines) {
 
   const source = new RegExp(`(?:^|[^\\p{L}])${escape(L.source)}(?:\\*\\*|__)?\\s*:(?:\\*\\*|__)?\\s*[^\\s.]`, 'u');
   for (const group of labelled(lines, L.outOfScope)) {
-    for (const item of itemsOf(group)) {
+    const items = itemsOf(group);
+    if (items.length === 1 && L.none.test(items[0])) continue;
+    for (const item of items) {
       if (!source.test(written(item))) misses.push(`${L.outOfScope}: "${item.split('\n')[0]}" has no ${L.source}`);
     }
   }
 
-  if (plan.complexity === null || plan.complexity === '') {
+  if (byLabel) {
+    if (plan.labels?.length === 0) misses.push('the issue has no label S, M or L');
+    if (plan.labels?.length > 1) misses.push(`the issue has the labels ${plan.labels.join(' and ')}, and its class is one`);
+  } else if (plan.complexity === null || plan.complexity === '') {
     misses.push(`the last line is not \`${L.complexity}: S\`, M or L`);
   }
 
@@ -442,7 +481,7 @@ function judge(plan, lines) {
   }
   if (risks.length === 1 && !isEmpty(risks[0].lines)) misses.push(...judgeGates(plan, pathsOf(layers, tree), tree));
 
-  misses.push(...styleMisses(withoutReferences(lines), 'style'));
+  misses.push(...styleMisses(withoutReferences(lines), 'style', config.get('style.bareReference')));
   return misses;
 }
 
@@ -498,8 +537,9 @@ if (!['body', 'class', 'stop', 'refusal', 'follow-up'].includes(mode)) {
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));
   if (mode === 'deps') {
-    const {refs, texts} = dependencies(plan);
+    const {refs, tags, texts} = dependencies(plan);
     for (const {repo, n} of refs) console.log(`ref\t${repo}\t${n}`);
+    for (const {repo, tag} of tags) console.log(`tag\t${repo}\t${tag}`);
     for (const line of texts) console.log(`text\t${line}`);
   }
 }

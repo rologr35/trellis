@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # pre-push of a trellis project: every branch pushed is the integration branch, the release branch
-# or matches git.issueBranch. Deleting a remote branch is not judged. Without trellis at hand it
-# warns and lets the push through.
+# or matches git.issueBranch, and in a public project no branch takes a private name (`trellis
+# private-names`). Deleting a remote branch is not judged. Without trellis at hand it warns and lets the
+# push through.
 
 set -uo pipefail
 
@@ -22,8 +23,11 @@ integration="$("$trellis" config get git.integrationBranch)"
 release="$("$trellis" config get git.releaseBranch)"
 zero='0000000000000000000000000000000000000000'
 status=0
-while read -r local_ref local_sha _remote_ref _remote_sha; do
+while read -r local_ref local_sha remote_ref _remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
+  case "$remote_ref" in
+    refs/heads/*) "$trellis" private-names --text "${remote_ref#refs/heads/}" </dev/null || status=1 ;;
+  esac
   case "$local_ref" in refs/heads/*) ;; *) continue ;; esac
   branch="${local_ref#refs/heads/}"
   [ "$branch" = "$integration" ] || [ "$branch" = "$release" ] && continue

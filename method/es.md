@@ -76,7 +76,7 @@ Un conflicto en un `CLAUDE.md`, una rule o un skill se resuelve desde la versió
 - Una issue sin plan (un síntoma, una lección) es legítima. Se crea con `gh issue create` o `gh issue new`, que una guarda quiere tras buscar en el backlog, sin clase, y recibe su plan después, como una enmienda con las cinco secciones y la línea de complejidad. <!-- p:planless-issue -->
 - Lo que un trabajo deja para otra issue pasa por `trellis issue follow-up`. <!-- p:follow-up -->
 - El pull request se abre como borrador. Se corre `trellis-plan-check` y después `gh pr ready`; una S que solo toca Markdown se lo salta. <!-- p:plan-check -->
-- Su cuerpo lleva `Closes #<n>`, **Antes de mezclar** y **Después de mezclar**, cada una `nada` o una lista. <!-- p:pr-before-after -->
+- Su cuerpo lleva `Closes #<n>`, una línea `Lección:` (`ninguna`, `local: <qué>` o `marco: <qué>`), **Antes de mezclar** y **Después de mezclar**, cada una `nada` o una lista. <!-- p:pr-before-after -->
 - Se mezcla con `/trellis-merge <pr>`. <!-- p:merge-skill -->
 - Lo que el trabajo mezclado dejó pendiente: `gh issue list --state closed --label pending-actions`. <!-- p:pending-actions -->
 

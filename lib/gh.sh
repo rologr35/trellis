@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Asking GitHub as the account that owns the repository, for the hook, worktree prune and trellis issue.
+# Asking GitHub as the account that owns the repository, for the hook, worktree prune,
+# trellis issue and trellis lesson.
 #
 #   . "$TRELLIS_ROOT/lib/gh.sh"
 #   gh_api <dir> '' pulls/8 --jq .base.ref
@@ -14,7 +15,7 @@
 # The account gh has active is not always the one that sees the repository: a person signed in on
 # two accounts keeps one active, and a private repository of the other answers "not found". The
 # calls here are reads, and the writes a person asks for with `trellis issue` (an issue, a comment, a
-# label, an assignee, a state). Each borrows the token of the owner's account for that one gh
+# label, an assignee, a state) and with `trellis lesson` (an issue, a comment, a label, a state). Each borrows the token of the owner's account for that one gh
 # call. The token is never printed, written or exported.
 #
 # Neither is run in a command substitution: they set, in the caller's shell,
@@ -55,6 +56,9 @@ gh_split() {
   GH_SPLIT_NAME="${GH_SPLIT_NAME%.git}"
 }
 
+# Whether a remote is a URL: without a scheme nor a user it is a path of this machine.
+gh_is_url() { case "$1" in *://* | *@*:*) ;; *) return 1 ;; esac; }
+
 # The owner of a repository of github.com. Prints nothing for another host or for a text that does not
 # parse.
 gh_owner_of() {
@@ -86,8 +90,7 @@ gh_repo() {
   if [ -z "$text" ]; then
     [ -z "${GH_REPO:-}" ] || return 0
     text="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
-    # A remote without a scheme nor a user is a path of this machine.
-    case "$text" in *://* | *@*:*) ;; *) return 0 ;; esac
+    gh_is_url "$text" || return 0
   fi
   gh_split "$text"
   if [[ ! "$GH_SPLIT_OWNER/$GH_SPLIT_NAME" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$ ]] || [[ "$GH_SPLIT_NAME" =~ ^\.\.?$ ]] \
@@ -114,6 +117,23 @@ gh_api() {
   fi
   gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" api "repos/$GH_REPO_PATH/$endpoint" \
     ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} "$@"
+}
+
+# gh_search <dir> <hint or ''> <words>: what a search finds in the issues of a repository, open and closed,
+# in GH_AS_OUT: how many, and one line for each.
+gh_search() {
+  gh_repo "$1" "$2" || true
+  gh_as_owner "$1" "$(gh_owner "$1" "$2")" api search/issues -X GET ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} \
+    -F "q=repo:$GH_REPO_PATH is:issue $3" -F per_page=100 \
+    --jq '"\(.total_count) match(es)", (.items[] | "#\(.number) \(.state) \(.title)")'
+}
+
+# gh_label <dir> <hint or ''> <name> <colour> <description>: makes sure the repository has the label.
+# GitHub compares the names of labels without case.
+gh_label() {
+  gh_api "$1" "$2" 'labels?per_page=100' --paginate --jq '.[].name' || return 1
+  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$3" && return 0
+  gh_api "$1" "$2" labels -f "name=$3" -f "color=$4" -f "description=$5"
 }
 
 # Sets GH_TOK to the token of <owner>'s account when gh holds one (empty otherwise), from the cache

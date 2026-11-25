@@ -72,4 +72,112 @@ printf '{"name": "another"}\n' > .claude-plugin/plugin.json && : > "$env_file"
 CLAUDE_ENV_FILE="$env_file" bash bin/trellis setup --quiet
 tl_eq 'a project with another name adds nothing' '' "$(cat "$env_file")"
 
+printf '\nthe notice of a newer version\n'
+up="$(tl_upstream)"
+git -C "$up" tag v0.9.0
+git -C "$up" tag v0.10.1
+git -C "$up" tag v0.10.0
+git -C "$up" tag v9.0.0-rc1
+git -C "$up" tag next
+project="$(tl_repo)"
+cd "$project" || exit 1
+printf '[trellis]\n\tupstream = %s\n' "$up" > trellis.config
+mkdir .trellis
+version() { printf '%s 0123456789012345678901234567890123456789\n' "$1" > .trellis/VERSION; }
+version 0.9.0
+common="$(git rev-parse --absolute-git-dir)"
+# A session of another day, and one of another day that does not ask, which leaves no process behind.
+tomorrow() { rm -f "$common/trellis-version-asked" "$common/trellis-version-said"; }
+heard() { rm -f "$common/trellis-version-said"; date +%Y-%m-%d > "$common/trellis-version-asked"; }
+asked() { local i=0; while [ $i -lt 100 ] && [ "$(cat "$common/trellis-version" 2>/dev/null)" != "$1" ]; do sleep 0.1; i=$((i + 1)); done; cat "$common/trellis-version" 2>/dev/null; }
+session() { "$TRELLIS" setup --quiet 2>&1; }
+tl_eq 'the first session says nothing' '' "$(session)"
+tl_eq '  and leaves the newest tag that is a version' 'v0.10.1' "$(asked v0.10.1)"
+tl_eq '  with no file half written' '' "$(ls "$common" | grep 'trellis-version\.')"
+notice='trellis 0.10.1 is out and this project has 0.9.0: trellis update v0.10.1, in a pull request of its own'
+tl_eq 'the next one says it, quiet and with no hooks folder' "$notice" "$(session)"
+tl_eq '  once a day' '' "$(session)"
+heard
+tl_has 'and says it when it is not quiet' "$notice" "$("$TRELLIS" setup)"
+heard
+version 0.10.1
+tl_eq 'an equal one is not said' '' "$(session)"
+heard
+version 0.11.0
+tl_eq 'nor an older one' '' "$(session)"
+tl_eq '  which is not counted as said' 'no' "$([ -e "$common/trellis-version-said" ] && echo yes || echo no)"
+heard
+version 1.0.0
+tl_eq 'nor one older in its first number' '' "$(session)"
+heard
+version 0.8.9
+printf 'v0.08.10\n' > "$common/trellis-version"
+tl_has 'a number with a zero before it is read' 'trellis 0.08.10 is out' "$(session)"
+for text in 'v9.9.9; rm' '' 'v9.9'; do
+  heard
+  printf '%s\n' "$text" > "$common/trellis-version"
+  tl_eq "what is no version is not said: $text" '' "$(session)"
+done
+heard
+printf 'v9.9.9' > "$common/trellis-version"
+printf 'edited\n' > .trellis/VERSION
+tl_eq 'nor is anything without a version of the project' '' "$(session)"
+version 0.9.0
+
+printf '\nwhat asks\n'
+rm -f "$common"/trellis-version*
+session > /dev/null && asked v0.10.1 > /dev/null
+git -C "$up" tag v0.12.10
+git -C "$up" tag v0.12.2
+session > /dev/null
+sleep 1
+tl_eq 'the same day nothing is asked again' 'v0.10.1' "$(asked v0.10.1)"
+printf '2001-01-01\n' > "$common/trellis-version-asked"
+session > /dev/null
+tl_eq 'another day it is' 'v0.12.10' "$(asked v0.12.10)"
+git worktree add -q "$TL_TMP/wt3" -b 3-wt
+mkdir "$TL_TMP/wt3/.trellis" && cp .trellis/VERSION "$TL_TMP/wt3/.trellis/" && cp trellis.config "$TL_TMP/wt3/"
+heard
+tl_has 'a worktree reads the file of the clone' 'trellis 0.12.10 is out' "$(cd "$TL_TMP/wt3" && session)"
+tl_eq '  and what it said is said' '' "$(session)"
+tomorrow
+git config -f trellis.config trellis.upstream "$TL_TMP/nowhere"
+session > /dev/null
+sleep 1
+tl_eq 'without a network the file stays' 'v0.12.10' "$(cat "$common/trellis-version")"
+git config -f trellis.config trellis.upstream "$project"
+tomorrow
+session > /dev/null
+sleep 1
+tl_eq 'an upstream without a version leaves it too' 'v0.12.10' "$(cat "$common/trellis-version")"
+tomorrow
+tl_has 'setup --newer says it' 'trellis 0.12.10 is out' "$("$TRELLIS" setup --newer)"
+tl_eq '  and writes nothing' 'trellis-version' "$(ls "$common" | grep trellis)"
+tl_eq '  nor says anything else' "$(session)" "$("$TRELLIS" setup --newer)"
+tl_eq '  and no session fails' '0' "$(tomorrow; session > /dev/null; echo $?)"
+mkdir "$TL_TMP/slow"
+cat > "$TL_TMP/slow/git" <<SLOW
+#!/bin/sh
+case " \$* " in *' ls-remote '*) touch "$TL_TMP/hanging"; sleep 6 ;; esac
+exec "$(command -v git)" "\$@"
+SLOW
+chmod +x "$TL_TMP/slow/git"
+git config -f trellis.config trellis.upstream "$up"
+tomorrow
+from=$SECONDS
+said="$(PATH="$TL_TMP/slow:$PATH" "$TRELLIS" setup --quiet 2>&1)"
+took=$((SECONDS - from))
+tl_has 'with an upstream that hangs it says what the file had' 'trellis 0.12.10 is out' "$said"
+tl_eq '  and returns in under two seconds' 'yes' "$([ "$took" -lt 2 ] && echo yes || echo "$took")"
+i=0; while [ $i -lt 50 ] && [ ! -e "$TL_TMP/hanging" ]; do sleep 0.1; i=$((i + 1)); done
+tl_eq '  while it is asked' 'yes' "$([ -e "$TL_TMP/hanging" ] && echo yes)"
+rm -rf .trellis "$common"/trellis-version*
+session > /dev/null
+tl_eq 'a project without a copy asks nothing' '' "$(ls "$common" | grep trellis)"
+cd "$own" || exit 1
+git checkout -q .claude-plugin
+printf 'v99.0.0\n' > .git/trellis-version
+tl_eq 'the repository of trellis hears nothing' '' "$(bash bin/trellis setup --quiet)"
+tl_eq '  and asks nothing' 'trellis-version' "$(ls .git | grep trellis)"
+
 tl_done

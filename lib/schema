@@ -13,6 +13,7 @@
 
 project.name|single|
 project.locale|enum:en,es|en
+project.public|enum:true,false|false
 
 trellis.upstream|single|rologr35/trellis
 
@@ -25,6 +26,13 @@ git.assistantMayMergeInto|multi|develop
 git.hooksPath|single|.githooks
 
 tracker.kind|enum:github,none|github
+
+pr.section|multi|
+pr.action|multi|
+
+style.bareReference|enum:refuse,allow|refuse
+
+issue.class|enum:line,label|line
 
 autonomy.level|enum:careful,balanced,autonomous|careful
 
@@ -40,6 +48,9 @@ toolchain.envFile|multi|
 command.check|multi|
 command.secretScan|single|
 command.install|single|
+command.pullRequestCheck|single|
+command.issueCheck|single|
+command.commitCheck|single|
 command.*.run|single|
 command.*.description|single|
 command.*.ci|single|
