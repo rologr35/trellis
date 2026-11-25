@@ -348,6 +348,57 @@ wt="$TL_TMP/wt"
 git worktree add -q "$wt" -b 5-other
 tl_eq 'a worktree is the session'"'"'s own' 'allow' "$(verdict 'git switch -c 6-more' "$wt")"
 
+printf '\na branch switch outside the project of the session (#47)\n'
+clone="$TL_TMP/a clone"
+git clone -q "$repo" "$clone"
+git -C "$clone" switch -q develop
+git -C "$clone" branch 8-done
+mkdir -p "$clone/sub"
+# A project with a repository of its own, whose main checkout is nothing of the session.
+zephyr="$(tl_repo)"
+cp trellis.config "$zephyr/"
+ln -s "$repo" "$TL_TMP/link"
+# at <command> [<directory of the session>]: the session as the project (the payload is then the
+# clone) or as the directory of the payload.
+at() {
+  if [ "$as" = project ]; then
+    CLAUDE_PROJECT_DIR="${2:-$repo}" verdict "$1" "$clone"
+  else
+    verdict "$1" "${2:-$repo}"
+  fi
+}
+for as in project payload; do
+  tl_eq "$as: a clone creates an issue branch" 'allow' "$(at "cd '$clone' && git switch -c 7-thing")"
+  tl_eq "$as: and switches to one" 'allow' "$(at "cd '$clone' && git checkout 8-done")"
+  tl_eq "$as: by git -C too" 'allow' "$(at "git -C '$clone' switch -c 7-thing")"
+  tl_eq "$as: another project too" 'allow' "$(at "cd '$zephyr' && git switch -c 7-thing")"
+  git -C "$clone" switch -q 8-done
+  printf 'open\n' > "$GH_FIXTURES/issue-8"
+  tl_eq "$as: a clone leaves a branch whose issue is open" 'allow' "$(at "cd '$clone' && git switch develop")"
+  rm "$GH_FIXTURES/issue-8"
+  git -C "$clone" switch -q develop
+  tl_eq "$as: the main checkout of the session refuses to create one" 'deny' "$(at "cd '$repo' && git switch -c 7-thing")"
+  tl_eq "$as: and to switch to one" 'deny' "$(at "cd '$repo' && git checkout 4-thing")"
+  tl_eq "$as: from one of its worktrees" 'deny' "$(at "git -C '$repo' switch -c 7-thing" "$wt")"
+  tl_eq "$as: by a path with a symbolic link" 'deny' "$(at "git -C '$TL_TMP/link' switch -c 7-thing")"
+  tl_eq "$as: with the session on that path" 'deny' "$(at "git -C '$repo' switch -c 7-thing" "$TL_TMP/link")"
+  tl_eq "$as: after a cd out and back" 'deny' "$(at "cd '$clone' && cd '$repo' && git switch -c 7-thing")"
+  tl_eq "$as: a push to a protected branch of the clone is refused" 'deny' "$(at "cd '$clone' && git push origin main")"
+  tl_eq "$as: and a merge" 'deny' "$(at "cd '$clone' && gh pr merge")"
+  git switch -q 4-thing
+  printf 'open\n' > "$GH_FIXTURES/issue-4"
+  tl_eq "$as: the main checkout does not leave a branch whose issue is open" 'deny' "$(at "git -C '$repo' switch develop")"
+  rm "$GH_FIXTURES/issue-4"
+  git switch -q develop
+done
+tl_eq 'a session inside the clone, of another project' 'allow' "$(CLAUDE_PROJECT_DIR="$repo" verdict 'git switch -c 7-thing' "$clone/sub")"
+tl_eq 'a session inside the clone, with no project, is judged as today' 'deny' "$(verdict 'git switch -c 7-thing' "$clone/sub")"
+tl_eq 'a project in no repository is the directory of the payload' 'deny' "$(CLAUDE_PROJECT_DIR="$plain" verdict 'git switch -c 7-thing' "$clone")"
+tl_eq '  which leaves the clone to itself' 'allow' "$(CLAUDE_PROJECT_DIR="$plain" verdict "cd '$clone' && git switch -c 7-thing" "$repo")"
+tl_eq 'a project that is empty too' 'deny' "$(CLAUDE_PROJECT_DIR='' verdict 'git switch -c 7-thing' "$clone")"
+tl_eq 'a session in no repository is judged as today' 'deny' "$(verdict "cd '$clone' && git switch -c 7-thing" "$plain")"
+tl_eq '  with a project in none' 'deny' "$(CLAUDE_PROJECT_DIR="$plain" verdict "cd '$repo' && git switch -c 7-thing" "$plain")"
+
 printf '\nissue creation\n'
 transcript="$TL_TMP/transcript.jsonl"
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "ls"}}]}}\n' > "$transcript"

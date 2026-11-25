@@ -5,10 +5,10 @@
 #   1. a push to a branch of git.protected: by refspec (quotes, a leading +, refs/heads/, and HEAD
 #      or @ as the checked-out branch are normalized), or, without a refspec, by the checked-out
 #      branch and its upstream;
-#   2. on the main checkout, a checkout or switch to an issue branch (git.issueBranch), created with
-#      -b/-c/-C or by -t/--track from a remote branch: every issue is worked in its own worktree,
-#      and the main checkout stays on the integration branch;
-#   3. on the main checkout, a checkout or switch while the current branch is <n>-... and issue n is
+#   2. on the main checkout of the project of the session, a checkout or switch to an issue branch
+#      (git.issueBranch), created with -b/-c/-C or by -t/--track from a remote branch: every issue is
+#      worked in its own worktree, and the main checkout stays on the integration branch;
+#   3. on that main checkout, a checkout or switch while the current branch is <n>-... and issue n is
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
 #   4. a `gh issue create`, its alias `gh issue new` or a `trellis issue create` when the session's
@@ -22,6 +22,14 @@
 #      `merges`, `git/refs` and a `PUT` or `DELETE` of `contents` with a protected branch, with none, or
 #      with one that cannot be read; `pulls/<n>/merge`; a write in an endpoint that cannot be read. A
 #      read (GET, HEAD) and any other write have no opinion.
+#
+# The project of the session is the repository of CLAUDE_PROJECT_DIR, or of the directory of the payload
+# when that is unset or in no repository; a main checkout is the one of it when both have the same common
+# git directory. With neither in a repository, guards 2 and 3 judge every main checkout.
+#
+# The project of the session is the repository of CLAUDE_PROJECT_DIR, or of the directory of the payload
+# when that is unset or in no repository; a main checkout is the one of it when both have the same common
+# git directory. With neither in a repository, guards 2 and 3 judge every main checkout.
 #
 # Guards 3 and 4 have no opinion with tracker.kind = none or without a working gh. A person pushes or
 # switches from their own terminal, or with `!` in the session, which does not go through this hook.
@@ -151,6 +159,32 @@ is_main_checkout() {
   [ "$git_dir" = "$common_dir" ]
 }
 
+# Whether the repository of $1 is the one of the project of the session, or there is none of the session.
+of_the_session() {
+  local from session common_dir
+  for from in "${CLAUDE_PROJECT_DIR:-}" "$CWD"; do
+    [ -n "$from" ] || continue
+    session="$(git -C "$from" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || continue
+    common_dir="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+    [ "$common_dir" -ef "$session" ]
+    return
+  done
+  return 0
+}
+
+# Whether the repository of $1 is the one of the project of the session, or there is none of the session.
+of_the_session() {
+  local from session common_dir
+  for from in "${CLAUDE_PROJECT_DIR:-}" "$CWD"; do
+    [ -n "$from" ] || continue
+    session="$(git -C "$from" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || continue
+    common_dir="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+    [ "$common_dir" -ef "$session" ]
+    return
+  done
+  return 0
+}
+
 branch_issue() {
   if [[ "$1" =~ ^([0-9]+)- ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
 }
@@ -158,6 +192,8 @@ branch_issue() {
 guard_branch_switch() {
   local dir="$1" target="$2" branch issue state
   is_main_checkout "$dir" || return 0
+  of_the_session "$dir" || return 0
+  of_the_session "$dir" || return 0
   if [ -n "$target" ] && [[ "$target" =~ $ISSUE_REGEX ]]; then
     deny "The main checkout stays on $INTEGRATION: every issue is worked in its own worktree. Run trellis worktree add <n> <slug> (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path), then EnterWorktree with that path."
   fi
