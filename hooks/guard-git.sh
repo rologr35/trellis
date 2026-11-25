@@ -28,10 +28,6 @@
 # when that is unset or in no repository; a main checkout is the one of it when both have the same common
 # git directory. With neither in a repository, guards 2 and 3 judge every main checkout.
 #
-# The project of the session is the repository of CLAUDE_PROJECT_DIR, or of the directory of the payload
-# when that is unset or in no repository; a main checkout is the one of it when both have the same common
-# git directory. With neither in a repository, guards 2 and 3 judge every main checkout.
-#
 # Guards 3 and 4 have no opinion with tracker.kind = none or without a working gh. A person pushes or
 # switches from their own terminal, or with `!` in the session, which does not go through this hook.
 #
@@ -175,19 +171,6 @@ of_the_session() {
   return 0
 }
 
-# Whether the repository of $1 is the one of the project of the session, or there is none of the session.
-of_the_session() {
-  local from session common_dir
-  for from in "${CLAUDE_PROJECT_DIR:-}" "$CWD"; do
-    [ -n "$from" ] || continue
-    session="$(git -C "$from" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || continue
-    common_dir="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-    [ "$common_dir" -ef "$session" ]
-    return
-  done
-  return 0
-}
-
 branch_issue() {
   if [[ "$1" =~ ^([0-9]+)- ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
 }
@@ -195,7 +178,6 @@ branch_issue() {
 guard_branch_switch() {
   local dir="$1" target="$2" branch issue state does=''
   is_main_checkout "$dir" || return 0
-  of_the_session "$dir" || return 0
   of_the_session "$dir" || return 0
   if [ -n "$target" ] && [[ "$target" =~ $ISSUE_REGEX ]]; then
     [ "$WORKTREE_ADD" != 'trellis worktree add' ] || does=' (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path)'
