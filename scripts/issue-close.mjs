@@ -65,7 +65,7 @@ export function readBody(body) {
  * in `lines` and its content is the one of `source`.
  */
 export function sectionLines(lines, name, source = lines) {
-  const heading = new RegExp(`^\\s*(?:#+\\s*|\\*\\*)${name}(?:\\*\\*)?\\s*:?(?:\\*\\*)?(.*)$`, 'i');
+  const heading = new RegExp(`^\\s*(?:#+\\s*|\\*\\*)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\*\\*)?\\s*:?(?:\\*\\*)?(.*)$`, 'i');
   const start = lines.findIndex(l => heading.test(l));
   if (start === -1) return null;
   const inline = heading.exec(source[start])?.[1].trim() ?? '';
@@ -76,6 +76,34 @@ export function sectionLines(lines, name, source = lines) {
 
 /** The content of a section, without blank lines, or null when there is none. */
 export const sectionOf = (lines, name, source) => sectionLines(lines, name, source)?.map(l => l.trim()).filter(Boolean) ?? null;
+
+/** The text of each item of a section of a body that is not inside another, without its bullet nor its check box. */
+export function itemsOf(body, name) {
+  const places = sectionLines(body.prose, name) ?? [];
+  const texts = sectionLines(body.prose, name, body.lines) ?? [];
+  const widthOf = text => text.replace(/\t/g, '    ').length;
+  const items = [];
+  // Where the text of the last item starts: an item from there on is inside it.
+  let column = 0;
+  let blankBefore = false;
+  places.forEach((line, i) => {
+    const bullet = /^(\s*)((?:[-*+]|\d+[.)])(?:\s{1,4}(?=\S)|\s|$))/.exec(texts[i]);
+    const indent = widthOf(/^\s*/.exec(line)[0]);
+    if (line.trim() === '') {
+      blankBefore = true;
+    } else if (bullet) {
+      blankBefore = false;
+      if (column > 0 && indent >= column) return;
+      column = widthOf(bullet[1] + bullet[2]);
+      const text = texts[i].slice(bullet[0].length).trim();
+      if (text) items.push(text.replace(/^\[[ xX]\](?:\s+|$)/, ''));
+    } else {
+      if (blankBefore && indent < column) column = 0;
+      blankBefore = false;
+    }
+  });
+  return items;
+}
 
 /** A section of what is done before or after the merge: 'missing', 'none', 'list', or 'prose'. */
 export function kindOf(content, none) {

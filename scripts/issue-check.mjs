@@ -442,7 +442,7 @@ function judge(plan, lines) {
   }
   if (risks.length === 1 && !isEmpty(risks[0].lines)) misses.push(...judgeGates(plan, pathsOf(layers, tree), tree));
 
-  misses.push(...styleMisses(withoutReferences(lines), 'style'));
+  misses.push(...styleMisses(withoutReferences(lines), 'style', config.get('style.bareReference')));
   return misses;
 }
 

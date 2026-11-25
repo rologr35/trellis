@@ -380,6 +380,10 @@ fails 'an attribution' 's/^Gates: none/Generated with a tool/' 'attribution'
 fails 'a bare #N' 's/^Gates: none/As #3 says/' 'bare #3'
 fails 'a bare #N on the Depends on line of another section is judged as text' 's/^Gates: none/It depends on the thing in #3/' 'bare #3'
 tl_eq 'a #N on the Depends on line is a reference' '0' "$(case_of 's/^Depends on: .*/Depends on: #7, #8 and rologr35\/x#9/')"
+git config -f trellis.config style.bareReference allow
+tl_eq 'style.bareReference = allow accepts a bare #N' '0' "$(case_of 's/^Gates: none.*/Gates: none, as #3 says/;s/, as #3 says/. As #3 says./')"
+fails '  and no attribution' 's/^Gates: none.*/Gates: none. Generated with a tool/' 'attribution'
+git config -f trellis.config --remove-section style
 
 printf '\nan issue\n'
 state_of rologr35_x 7 closed

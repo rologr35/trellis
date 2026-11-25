@@ -26,6 +26,11 @@ git.hooksPath|single|.githooks
 
 tracker.kind|enum:github,none|github
 
+pr.section|multi|
+pr.action|multi|
+
+style.bareReference|enum:refuse,allow|refuse
+
 autonomy.level|enum:careful,balanced,autonomous|careful
 
 workspace.kind|enum:flutter,dart,node,other|flutter

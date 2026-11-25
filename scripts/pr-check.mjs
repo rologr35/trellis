@@ -5,16 +5,19 @@ import {readFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
-import {closedIssues, kindOf, readBody, sectionOf} from './issue-close.mjs';
+import {closedIssues, itemsOf, kindOf, readBody, sectionOf} from './issue-close.mjs';
 
 const [, , mode, file, hasSetback, branchArg, loosened, cycleArg = '-'] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
 const config = loadConfig();
 const tracker = config.get('tracker.kind');
 const SECTIONS = PR_SECTIONS[localeOf(config)];
+const sections = config.all('pr.section').filter(Boolean);
+const required = sections.length > 0 ? sections : SECTIONS.required;
+const actions = config.all('pr.action').filter(Boolean);
 
 const misses = [];
-const style = (text, what) => misses.push(...styleMisses(text, what));
+const style = (text, what) => misses.push(...styleMisses(text, what, config.get('style.bareReference')));
 
 const text = readFileSync(file, 'utf8');
 
@@ -41,7 +44,7 @@ if (mode === 'commit') {
   const lines = text.split('\n');
   const setback = (sectionOf(lines, SECTIONS.setback) ?? []).filter(l => !SECTIONS.none.test(l.replace(/^[-*]\s*/, '')));
   if (hasSetback === 'true') process.exit(setback.length > 0 ? 0 : 1);
-  for (const name of SECTIONS.required) {
+  for (const name of required) {
     const content = sectionOf(lines, name);
     if (!content || content.length === 0) misses.push(`body: missing the section **${name}**`);
   }
@@ -51,8 +54,14 @@ if (mode === 'commit') {
   if (loosened === 'true' && setback.length === 0) {
     misses.push(`body: the branch loosens a ratchet (ratchet-loosened): **${SECTIONS.setback}** says what regresses, its cost and why it was accepted`);
   }
+  const body = readBody(text);
+  for (const name of actions.length > 0 ? [SECTIONS.beforeMerging, SECTIONS.afterMerging] : []) {
+    for (const item of itemsOf(body, name).filter(text => !SECTIONS.none.test(text))) {
+      if (actions.some(action => item.replace(/^`/, '').startsWith(action))) continue;
+      misses.push(`body: **${name}**: "${item}" does not start with one of the actions: ${actions.join(', ')}`);
+    }
+  }
   if (cycleArg !== '-') {
-    const body = readBody(text);
     const closed = closedIssues(body);
     // A branch whose shape does not start with a number does not say which issue is its own.
     const own = /^(\d+)-/.exec(cycleArg)?.[1];

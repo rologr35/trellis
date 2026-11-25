@@ -9,14 +9,16 @@
 # Both: no long dash, no AI attribution (Co-Authored-By, "Generated with", a session link), no bare
 # #N that GitHub would link by mistake (a reference goes after a keyword such as Closes, Refs or
 # See, or inside parentheses, or in backticks when it is not a reference).
+# A bare #N is accepted with style.bareReference = allow.
 # A body: the sections of project.locale (en: **Summary**, **Verification**; es: **Resumen**,
-# **Verificación**); a **Setback** (es: **Retroceso**) that says what regresses, its cost and why it
+# **Verificación**), or the ones of pr.section in their place; a **Setback** (es: **Retroceso**) that says what regresses, its cost and why it
 # was accepted, required when the branch has the ratchet's escape (ratchet-loosened). The names
 # live in lib/locale.mjs.
 # The body of a cycle pull request, the one of an issue branch (git.issueBranch) into the integration
 # branch with tracker.kind = github, also closes the branch's issue (`Closes #n`) and carries
 # **Before merging** and **After merging** (es: **Antes de mezclar**, **Después de mezclar**), each
-# `none` (es: `nada`) or a list. In CI the two branches are GITHUB_HEAD_REF and GITHUB_BASE_REF;
+# `none` (es: `nada`) or a list. With pr.action, each item of those two that is not inside another and is
+# not `none` starts with one of its values, after the bullet, the check box and a backtick. In CI the two branches are GITHUB_HEAD_REF and GITHUB_BASE_REF;
 # locally the head is the checked-out branch and the base is assumed to be the integration branch.
 # A commit: `type(scope): message (#n)` on the first line when tracker.kind = github, the same
 # without (#n) otherwise; on an issue branch <n>-..., the #n is that issue. Merge, revert, fixup!
