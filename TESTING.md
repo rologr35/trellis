@@ -31,3 +31,5 @@ The project's test rungs, from the cheapest to the most expensive. `bin/trellis 
 - A function of `lib/`: the suite of the script that calls it; the reading of the config has its own.
 - A check of the hygiene: `hygiene/hygiene.test.mjs`. What depends on the language: `hygiene/locale.test.mjs`.
 - The guard of Claude Code: `hooks/guard-git.test.sh`. A git hook, and which trellis it finds: `hooks/githooks.test.sh`.
+- A job of `.github/workflows/`: its text, in the suite of the script it runs.
+- A refusal of a private name: `scripts/private-names.test.sh`, with a list of the case. No suite reads the one of the machine.
