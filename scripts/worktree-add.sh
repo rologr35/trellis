@@ -3,7 +3,8 @@
 # worktree-add: the worktree an issue is worked in, born from the integration branch as origin has
 # it right now.
 #
-#   trellis worktree add <n> <slug>    creates .claude/worktrees/<n>-<slug> on branch <n>-<slug>
+#   trellis worktree add <n> <slug>             creates .claude/worktrees/<n>-<slug> on branch <n>-<slug>
+#   trellis worktree add <n> <slug> --resume    the same, with the branch as origin has it
 #
 # Fetch, collision checks, creation, install and the printed path in one command, because the fetch
 # is the step that gets skipped when they are separate, and a chained `git fetch && git worktree
@@ -17,9 +18,10 @@
 # goes to stderr and its failure does not stop the creation.
 #
 # Refuses, before creating anything: <n> that is not a number, <n>-<slug> that does not match
-# git.issueBranch, a branch that exists locally or on origin, a directory that exists. A failed
-# install ([command] install) leaves the worktree in place and says so. Works from any worktree:
-# the new one always goes under the main checkout. The last line of a successful run is the
+# git.issueBranch, a branch that exists locally or on origin, a directory that exists. With --resume the
+# branch has to be on origin, and one that exists locally is taken to it when it has no commit of its
+# own. A failed install ([command] install) leaves the worktree in place and says so. Works from any
+# worktree: the new one always goes under the main checkout. The last line of a successful run is the
 # absolute path of the worktree, what EnterWorktree takes.
 
 set -uo pipefail
@@ -36,9 +38,17 @@ refuse() {
 }
 
 [ "${1:-}" = '--' ] && shift
-[ $# -eq 2 ] || refuse 'usage: trellis worktree add <issue-number> <slug>'
-issue="$1"
-slug="$2"
+resume=false
+issue=''
+slug=''
+for arg in "$@"; do
+  case "$arg" in
+    --resume) resume=true ;;
+    *)
+      if [ -z "$issue" ]; then issue="$arg"; elif [ -z "$slug" ]; then slug="$arg"; else slug=''; break; fi ;;
+  esac
+done
+[ -n "$slug" ] || refuse 'usage: trellis worktree add <issue-number> <slug> [--resume]'
 [[ "$issue" =~ ^[0-9]+$ ]] || refuse "<n> must be the issue number, got '$issue'"
 branch="$issue-$slug"
 
@@ -71,19 +81,33 @@ if ! (cd "$caller_dir" && bash "$TRELLIS_ROOT/scripts/worktree-prune.sh") >&2; t
   printf 'worktree-add: the cleanup of merged worktrees failed (see above); creating the worktree anyway\n' >&2
 fi
 
-if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+if [ "$resume" = true ]; then
+  git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null \
+    || refuse "branch $branch is not on origin, so there is nothing to resume; nothing was created"
+  if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    git merge-base --is-ancestor "refs/heads/$branch" "refs/remotes/origin/$branch" \
+      || refuse "branch $branch has commits here that origin does not have; nothing was created"
+  fi
+elif git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
   refuse "branch $branch already exists locally; nothing was created"
-fi
-if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+elif git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
   refuse "branch $branch already exists on origin; nothing was created"
 fi
 [ -e "$path" ] && refuse "$path already exists; nothing was created"
 
-git worktree add -q "$path" -b "$branch" "origin/$integration" || refuse 'git worktree add failed (see above)'
+start="origin/$integration"
+create=-b
+if [ "$resume" = true ]; then
+  # -B loses nothing: a branch with commits of its own was refused above, and git refuses one that is
+  # checked out in another worktree.
+  start="origin/$branch"
+  create=-B
+fi
+git worktree add -q "$path" "$create" "$branch" "$start" || refuse 'git worktree add failed (see above)'
 # The branch starts without an upstream: a push names its refspec.
 git branch -q --unset-upstream "$branch" 2>/dev/null || true
 printf 'worktree-add: %s on %s, from origin/%s at %s\n' \
-  "$path" "$branch" "$integration" "$(git -C "$path" log -1 --format='%h %s')" >&2
+  "$path" "$branch" "${start#origin/}" "$(git -C "$path" log -1 --format='%h %s')" >&2
 
 if [ -n "$install_name" ]; then
   install_run="$(tc_get "command.$install_name.run")"

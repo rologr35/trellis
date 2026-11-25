@@ -3,21 +3,26 @@
 # Asking GitHub as the account that owns the repository, for the hook, worktree prune and trellis issue.
 #
 #   . "$TRELLIS_ROOT/lib/gh.sh"
-#   owner="$(gh_owner <dir> [<-R value or pull request URL>])"
-#   gh_as_owner <dir> "$owner" pr view 8 --json baseRefName --jq .baseRefName
+#   gh_api <dir> '' pulls/8 --jq .base.ref
+#   gh_api <dir> <-R value or pull request URL> issues/4 --jq .state
+#
+# gh_api asks the REST interface of one repository: the one the second argument names, or the one of
+# the origin remote of <dir>. GraphQL is refused in a cloud session, and a gh subcommand (`gh issue
+# view`) is GraphQL. What an origin does not say (a local path, an ssh alias, no origin, GH_REPO set)
+# is left to gh, which fills in {owner}/{repo}. gh_as_owner is the call under it, for the rest of gh.
 #
 # The account gh has active is not always the one that sees the repository: a person signed in on
 # two accounts keeps one active, and a private repository of the other answers "not found". The
-# calls here are reads (`view`, `list`), and the writes a person asks for with `trellis issue create`
-# (`issue create`, `label create`) and `trellis issue close` (`issue edit`, `issue comment`, `issue
-# close`, `label create`). Each borrows the token of the owner's account for that one gh
+# calls here are reads, and the writes a person asks for with `trellis issue` (an issue, a comment, a
+# label, an assignee, a state). Each borrows the token of the owner's account for that one gh
 # call. The token is never printed, written or exported.
 #
-# gh_as_owner is not run in a command substitution: it sets, in the caller's shell,
+# Neither is run in a command substitution: they set, in the caller's shell,
 #   GH_AS_OUT      what gh printed on stdout
 #   GH_AS_ERR      the first line gh printed on stderr, with any token blanked
 #   GH_AS_ACCOUNT  who was asked: "the owner's account (<owner>)" or "the active account"
-# and returns gh's exit status. The result of each lookup is kept for the run, per owner.
+# and return gh's exit status. gh api prints the body of an error on stdout, so GH_AS_OUT is an answer
+# only when the status is 0. The result of each lookup is kept for the run, per owner.
 #
 # Works with bash 3.2.
 
@@ -27,23 +32,35 @@ GH_AS_ACCOUNT=''
 # One record per owner looked up: "<owner>\001<token or empty>\n".
 GH_TOKEN_CACHE=$'\n'
 
-# The owner of a repository named as owner/repo, host/owner/repo, an https URL, an ssh URL or a
-# scp-like remote. Prints nothing for another host or for a text that does not parse.
-gh_owner_of() {
-  local s="${1%%[?#]*}" host path owner
+# gh_split <text>: the host, owner and name of a repository named as owner/repo, host/owner/repo, an
+# https URL (the one of a pull request too), an ssh URL or a scp-like remote, in GH_SPLIT_HOST,
+# GH_SPLIT_OWNER, GH_SPLIT_NAME and GH_SPLIT_SSH. Empty for what does not parse.
+gh_split() {
+  local s="${1%%[?#]*}" path
+  GH_SPLIT_HOST='' GH_SPLIT_OWNER='' GH_SPLIT_NAME='' GH_SPLIT_SSH=false
   case "$s" in
-    http://* | https://*) s="${s#*://}"; host="${s%%/*}"; host="${host#*@}"; host="${host%%:*}"; path="${s#*/}" ;;
-    ssh://*) s="${s#ssh://}"; host="${s%%/*}"; host="${host#*@}"; host="${host%%:*}"; path="${s#*/}" ;;
-    *@*:*) s="${s#*@}"; host="${s%%:*}"; path="${s#*:}" ;;
-    */*/*) host="${s%%/*}"; path="${s#*/}" ;;
-    */*) host='github.com'; path="$s" ;;
+    http://* | https://*) s="${s#*://}"; GH_SPLIT_HOST="${s%%/*}"; path="${s#*/}" ;;
+    ssh://*) s="${s#ssh://}"; GH_SPLIT_HOST="${s%%/*}"; path="${s#*/}"; GH_SPLIT_SSH=true ;;
+    *@*:*) s="${s#*@}"; GH_SPLIT_HOST="${s%%:*}"; path="${s#*:}"; GH_SPLIT_SSH=true ;;
+    */*/*) GH_SPLIT_HOST="${s%%/*}"; path="${s#*/}" ;;
+    */*) GH_SPLIT_HOST='github.com'; path="$s" ;;
     *) return 0 ;;
   esac
-  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
-  [ "$host" = 'github.com' ] || return 0
-  owner="${path%%/*}"
-  [ -n "$owner" ] && [ "$owner" != "$path" ] || return 0
-  printf '%s' "$owner"
+  GH_SPLIT_HOST="${GH_SPLIT_HOST#*@}"
+  GH_SPLIT_HOST="$(printf '%s' "${GH_SPLIT_HOST%%:*}" | tr '[:upper:]' '[:lower:]')"
+  GH_SPLIT_OWNER="${path%%/*}"
+  [ "$GH_SPLIT_OWNER" != "$path" ] || GH_SPLIT_OWNER=''
+  path="${path#*/}"
+  GH_SPLIT_NAME="${path%%/*}"
+  GH_SPLIT_NAME="${GH_SPLIT_NAME%.git}"
+}
+
+# The owner of a repository of github.com. Prints nothing for another host or for a text that does not
+# parse.
+gh_owner_of() {
+  gh_split "$1"
+  [ "$GH_SPLIT_HOST" = 'github.com' ] || return 0
+  printf '%s' "$GH_SPLIT_OWNER"
 }
 
 # The owner a gh call in <dir> reads: the one of <hint> when it names a repository (-R or a pull
@@ -57,6 +74,46 @@ gh_owner() {
   url="$(git -C "$dir" remote get-url origin 2>/dev/null)" || return 0
   owner="$(gh_owner_of "$url")"
   printf '%s' "$owner"
+}
+
+# gh_repo <dir> [<hint>]: the repository a call in <dir> is about, as the path of its REST endpoints, in
+# GH_REPO_PATH, and the host gh is told in GH_REPO_HOST (empty for the one gh takes by itself). Returns
+# 1 for a hint that names no repository: the origin does not stand in for it.
+gh_repo() {
+  local text="${2:-}"
+  GH_REPO_PATH='{owner}/{repo}'
+  GH_REPO_HOST=''
+  if [ -z "$text" ]; then
+    [ -z "${GH_REPO:-}" ] || return 0
+    text="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
+    # A remote without a scheme nor a user is a path of this machine.
+    case "$text" in *://* | *@*:*) ;; *) return 0 ;; esac
+  fi
+  gh_split "$text"
+  if [[ ! "$GH_SPLIT_OWNER/$GH_SPLIT_NAME" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$ ]] || [[ "$GH_SPLIT_NAME" =~ ^\.\.?$ ]] \
+     || { [ "$GH_SPLIT_SSH" = true ] && [ "$GH_SPLIT_HOST" != 'github.com' ]; }; then
+    [ -z "${2:-}" ]
+    return
+  fi
+  GH_REPO_PATH="$GH_SPLIT_OWNER/$GH_SPLIT_NAME"
+  # A text that is only owner/repo names no host: gh takes its own.
+  case "$text" in */*/* | *@*:*) ;; *) return 0 ;; esac
+  if [ "$GH_SPLIT_HOST" != 'github.com' ] || [ -n "${GH_HOST:-}" ]; then GH_REPO_HOST="$GH_SPLIT_HOST"; fi
+}
+
+# gh_api <dir> <hint or ''> <endpoint> [<arguments of gh api>]: the endpoint of a repository (gh_repo),
+# asked as its owner. Sets what gh_as_owner sets.
+gh_api() {
+  local dir="$1" hint="$2" endpoint="$3"
+  shift 3
+  if ! gh_repo "$dir" "$hint"; then
+    GH_AS_OUT=''
+    GH_AS_ERR="$hint names no repository"
+    GH_AS_ACCOUNT='the active account'
+    return 1
+  fi
+  gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" api "repos/$GH_REPO_PATH/$endpoint" \
+    ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} "$@"
 }
 
 # Sets GH_TOK to the token of <owner>'s account when gh holds one (empty otherwise), from the cache

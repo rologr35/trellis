@@ -244,6 +244,12 @@ if (configWas !== null) {
       add(`trellis.config: ${key} grows from ${was} to ${now} entries`, 'the hygiene check stops seeing that case', 'fix the file so the check passes as it is');
     }
   }
+  // A value that is none of the levels is the lowest, as `trellis issue follow-up` reads it.
+  const LEVELS = ['careful', 'balanced', 'autonomous'];
+  const rank = cfg => Math.max(0, LEVELS.indexOf(cfg.get('autonomy.level')));
+  if (rank(newConfig) > rank(oldConfig)) {
+    add(`trellis.config: raises autonomy.level from ${LEVELS[rank(oldConfig)]} to ${LEVELS[rank(newConfig)]}`, 'what a run wrote only when a person approved it is written without asking', 'keep the level and approve each proposal');
+  }
   for (const key of ['ratchets.suppression', 'ratchets.testFile', 'ratchets.lintConfig']) {
     const now = new Set(newConfig.all(key));
     const gone = oldConfig.all(key).filter(v => !now.has(v));

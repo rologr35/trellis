@@ -99,6 +99,24 @@ reset
 git config -f trellis.config --add hygiene.frozen 'docs/b.md 900' && git add -A
 tl_eq 'a size frozen for the first time passes' '0' "$(judge)"
 reset
+git config -f trellis.config autonomy.level balanced && git add -A
+tl_eq 'a raise of autonomy.level from the default is refused' '1' "$(judge)"
+tl_has 'naming both levels' 'raises autonomy.level from careful to balanced' "$(cat "$OUT")"
+reset
+git config -f trellis.config autonomy.level careful && git add -A
+tl_eq 'the default written down passes' '0' "$(judge)"
+git config -f trellis.config autonomy.level reckless && git add -A
+tl_eq 'a value that is none of the levels is the lowest' '0' "$(judge)"
+git config -f trellis.config autonomy.level autonomous && git add -A
+git commit -q -m 'chore: level (#7)'
+git config -f trellis.config autonomy.level balanced && git add -A
+tl_eq 'lowering it passes' '0' "$(judge)"
+git reset -q --hard HEAD~1
+git config -f trellis.config autonomy.level balanced && git add -A && git commit -q -m 'chore: level (#7)'
+git config -f trellis.config autonomy.level autonomous && git add -A
+tl_eq 'a raise from a written level is refused' '1' "$(judge)"
+tl_has 'naming them' 'raises autonomy.level from balanced to autonomous' "$(cat "$OUT")"
+git reset -q --hard HEAD~1
 git config -f trellis.config --add hygiene.keepRef 'CLAUDE.md: #4 | reason' && git add -A
 tl_eq 'a grown allowlist is refused' '1' "$(judge)"
 reset

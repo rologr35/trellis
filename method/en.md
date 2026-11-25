@@ -63,7 +63,7 @@ A conflict in a `CLAUDE.md`, a rule or a skill is resolved from the branch's own
 
 ### Plans
 
-- Before proposing a plan, the `trellis-plan-reviewer` agent checks it in a clean context, and its verdict goes with the proposal. <!-- p:plan-reviewer -->
+- Before proposing a plan, the `trellis-plan-reviewer` agent checks it in a clean context, with the request it answers: its verdict goes with the proposal, and each of its points as corrected or rejected, with the reason. <!-- p:plan-reviewer -->
 - No plan lives in a folder git ignores. Business context goes to `docs/`. <!-- p:plan-tracked -->
 - What is learned from the code goes to the `CLAUDE.md` or the rule closest to that code, at the height of the concept. <!-- p:learned-near-code -->
 
@@ -72,9 +72,9 @@ A conflict in a `CLAUDE.md`, a rule or a skill is resolved from the branch's own
 
 - The approved plan lives in the issue, written from the mould (`.trellis/templates/en/issue.md`) and created with `trellis issue create --title <t> --body-file <file>`, which checks it and labels it with its complexity. <!-- p:plan-in-issue -->
 - The body of an issue is never edited. A change of the plan is a comment headed `## Amendment (<date>)`, with the sections it replaces, whole, as `###` headings. <!-- p:issue-amendment -->
-- Before starting an issue, `trellis issue check <n>` passes: the plan is complete, its paths exist and what it depends on is closed. `trellis issue check <n> --print` is the plan in force. <!-- p:issue-check -->
+- An issue is worked with `/trellis-work <n>`: at pick-up `trellis issue check <n>` passes (with `--print`, the plan in force), and the integration branch is fetched before the body is written: a claim about it is checked there. <!-- p:work-skill -->
 - An issue without a plan (a symptom, a lesson) is legitimate. It is created with `gh issue create` or `gh issue new`, which a guard wants after a search of the backlog, unclassed, and gets its plan later, as an amendment with the five sections and the complexity line. <!-- p:planless-issue -->
-- The integration branch is fetched before the body of the pull request is written: a claim about it is checked there. <!-- p:pr-facts -->
+- What a piece of work leaves for another issue goes through `trellis issue follow-up`. <!-- p:follow-up -->
 - A pull request opens as a draft. `trellis-plan-check` runs, then `gh pr ready`; an S that only touches Markdown skips it. <!-- p:plan-check -->
 - Its body carries `Closes #<n>`, **Before merging** and **After merging**, each `none` or a list. <!-- p:pr-before-after -->
 - A merge goes through `/trellis-merge <pr>`. <!-- p:merge-skill -->

@@ -18,7 +18,11 @@ Out of scope:
 
 ## Risks
 
-{{The gates it touches, the ratchet it loosens, what could break and why it is accepted.}}
+Gates: {{none, or the names of the [gate] its files match, separated by commas}}
+
+Needs: {{what a run cannot take: a credential, a step of a person; delete the line when there is nothing}}
+
+{{The ratchet it loosens, what could break and why it is accepted.}}
 
 ## Verification
 

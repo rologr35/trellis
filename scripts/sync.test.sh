@@ -70,6 +70,10 @@ tl_has 'the deny of a push to a protected branch' 'Bash(git push *:staging)' "$d
 tl_has 'the deny of a forced push' 'Bash(git push * +main)' "$deny"
 tl_has 'the deny of a full ref' 'Bash(git push * refs/heads/main)' "$deny"
 tl_has 'the deny of a push with -C' 'Bash(git -C * push * main)' "$deny"
+for tool in merge_pull_request enable_pr_auto_merge push_files create_or_update_file delete_file; do
+  tl_has "the deny of the GitHub tool $tool" "mcp__github__$tool" "$deny"
+done
+tl_eq 'and of no other one' '5' "$(printf '%s\n' "$deny" | grep -c '^mcp__')"
 tl_lacks 'a branch no longer protected loses its push deny' 'develop' "$deny"
 tl_eq 'the copy of find-trellis.sh' "$(cat "$TRELLIS_ROOT/lib/find-trellis.sh")" "$(cat .githooks/find-trellis.sh)"
 

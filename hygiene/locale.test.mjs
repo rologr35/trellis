@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS, STOP} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -149,9 +149,9 @@ test('the Cycle section of every method is marked once, takes at most 1.5 KB and
     const [, section] = found[0];
     assert.ok(section.startsWith(`${CYCLE_HEADING[locale]}\n`));
     assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
-    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue', 'pr-facts', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
+    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'work-skill', 'planless-issue', 'follow-up', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
     const {beforeMerging, afterMerging, noneWord} = PR_SECTIONS[locale];
-    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
+    for (const text of [`## ${ISSUE[locale].amendment} (`, '/trellis-work <n>', 'trellis issue check <n>', 'trellis issue follow-up', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
       assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
     }
   }
@@ -167,6 +167,24 @@ test('what a project reads names the skills and agents of the copy', () => {
     assert.doesNotMatch(text, /`plan-(?:check|reviewer)`/, `${name} names an agent of the plugin`);
   }
   for (const locale of LOCALES) assert.ok(methodOf(locale).includes('`trellis-plan-reviewer`'), locale);
+});
+
+test('the skill work holds one procedure, with and without a person', () => {
+  const skill = readFileSync(path.join(TRELLIS_ROOT, 'skills', 'work', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^---\nname: work\n/);
+  for (const text of ['trellis issue claim <n>', '--unattended', '--resume', 'trellis worktree add <n> <slug>', 'trellis issue check <n> --print', 'trellis issue gates <n>', 'trellis issue stop <n> --body-file', 'trellis issue follow-up', 'CLAUDE_CODE_REMOTE', 'gh pr create --draft', "gh api 'repos/{owner}/{repo}/pulls'", '/code-review high', '`trellis-plan-check`', 'gh pr ready', '<!-- trellis:stopped -->', 'git merge origin/<integration>']) {
+    assert.ok(skill.includes(text), `the skill names ${text}`);
+  }
+  for (const locale of LOCALES) for (const name of STOP[locale].sections) assert.ok(skill.includes(`**${name}**`), `${locale}: ${name}`);
+  assert.doesNotMatch(skill, /gh pr merge/, 'it never merges');
+});
+
+test('every locale defines the same words of a stop', () => {
+  const [first, ...rest] = LOCALES;
+  for (const locale of rest) {
+    assert.deepEqual(Object.keys(STOP[locale]), Object.keys(STOP[first]));
+    assert.equal(STOP[locale].sections.length, STOP[first].sections.length);
+  }
 });
 
 test('the settings of a project install no plugin, and its workflow pins one sha', () => {
@@ -210,6 +228,9 @@ test('the issue mould of every locale has the sections of its locale, in order, 
     has(new RegExp(`^${L.outOfScope}:$`));
     has(new RegExp(`^- .*\\b${L.source}: `));
     has(new RegExp(`^- \\*\\*${L.newFiles}\\*\\*: `));
+    const risks = lines.slice(lines.indexOf(`## ${L.sections[3]}`) + 1).filter(Boolean);
+    assert.match(risks[0], new RegExp(`^${L.gates}: \\{\\{${L.noGates}, `), `${locale}/issue.md opens the risks with the gates`);
+    has(new RegExp(`^${L.needs}: `));
     assert.equal(text.trimEnd().split('\n').at(-1), `${L.complexity}: S`, `${locale}/issue.md ends with the complexity line`);
   }
 });
@@ -240,14 +261,19 @@ test('the plan-reviewer takes its report labels from one table, with a row per l
   const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
   assert.deepEqual(rows.map(row => row[0]), LOCALES, 'one row per locale, in the order of LOCALES');
   const expected = {
-    en: ['Verdict', 'Errors', 'Omissions', 'Not established', 'correct', 'with errors'],
-    es: ['Veredicto', 'Errores', 'Omisiones', 'No establecido', 'correcto', 'con errores'],
+    en: ['Verdict', 'Errors', 'Omissions', 'Exclusions', 'Steps', 'Not established', 'correct', 'with errors', 'inside', 'consider', 'supported', 'not asked'],
+    es: ['Veredicto', 'Errores', 'Omisiones', 'Exclusiones', 'Pasos', 'No establecido', 'correcto', 'con errores', 'dentro', 'considerar', 'sustentada', 'no pedido'],
   };
   for (const row of rows) assert.deepEqual(row.slice(1), expected[row[0]], `labels of ${row[0]}`);
   const outside = agent.split('\n').filter(line => !line.startsWith('|')).join('\n');
   for (const word of ['Verdict', 'Errors', 'Omissions', 'Not established']) {
     assert.ok(!outside.includes(`**${word}**`), `the label ${word} is written only in the table`);
   }
+  const front = /^---\n([\s\S]*?)\n---/.exec(agent)[1];
+  assert.match(front, /^model: opus$/m);
+  for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent']) assert.match(front, new RegExp(`^disallowedTools: .*\\b${tool}\\b`, 'm'));
+  assert.ok(Buffer.byteLength(agent) < 4096, `${Buffer.byteLength(agent)} bytes`);
+  for (const locale of LOCALES) assert.match(methodOf(locale), {en: /trellis-plan-reviewer`.*with the request.*corrected or rejected/, es: /trellis-plan-reviewer`.*con el pedido.*corregido o rechazado/}[locale]);
 });
 
 test('plan-check takes the words of its report from one table, the one of lib/locale.mjs', () => {
@@ -274,6 +300,9 @@ test('plan-check takes the words of its report from one table, the one of lib/lo
   for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent']) assert.match(front, new RegExp(`^disallowedTools: .*\\b${tool}\\b`, 'm'));
   assert.match(agent, /At most 300 words/);
   assert.match(agent, /trellis issue check <n> --print/);
+  assert.match(front, /`trellis-work`/, 'the skill that runs it');
+  assert.doesNotMatch(agent, /gh (?:issue|pr|api) /, 'the body and an issue without a plan are the text it receives');
+  assert.match(agent, /Without it, the claims are not established/);
   assert.ok(Buffer.byteLength(agent) <= 4096, `${Buffer.byteLength(agent)} bytes`);
 });
 

@@ -1,10 +1,10 @@
 // What the body of a pull request says about its issues and about what is left to do, read by
 // scripts/pr-check.mjs before the merge and by `trellis issue close` (scripts/issue.sh) after it:
-//   node issue-close.mjs pr <json> <comment file>   judges a pull request as `gh pr view --json
-//       number,url,state,baseRefName,body` gives it, prints its repository and the issues its body
-//       closes, one per line, and writes the comment with its pending actions, empty without any
-//   node issue-close.mjs issue <json> <owner/repo> <pr>   prints what `gh issue view --json
-//       url,state,labels,comments` says: skip, or <state> <labelled> <commented>
+//   node issue-close.mjs pr <json> <comment file>   judges a pull request as REST gives it, prints its
+//       repository and the issues its body closes, one per line, and writes the comment with its
+//       pending actions, empty without any
+//   node issue-close.mjs issue <json> <comments> <owner/repo> <pr>   prints what the issue and its
+//       comments, one per line, say: skip, or <state> <labelled> <commented>
 // The text is data: nothing in it is run.
 
 import {readFileSync, realpathSync, writeFileSync} from 'node:fs';
@@ -107,19 +107,24 @@ export function pendingActions(body, locale) {
 /** The first line of the comment with what a pull request left pending: one per pull request and issue. */
 const markOf = pr => `<!-- trellis:pending-actions pr=${pr} -->`;
 
+/** Whether whoever wrote an issue or a comment may write in the repository. Anyone may comment on a public one. */
+export const mayWrite = ({author_association: association}) => ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(association);
+
+/** The comments of an issue, in a file with one per line. */
+export const commentsOf = file => readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+
 /** A mark counts when someone with write access, or the workflow, wrote it. */
-const trusted = ({authorAssociation, author}) =>
-  ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(authorAssociation) || author?.login === 'github-actions';
+const trusted = comment => mayWrite(comment) || comment.user?.login === 'github-actions[bot]';
 
 function pullRequest(file, commentFile) {
-  const {number, url, state, baseRefName, body} = JSON.parse(readFileSync(file, 'utf8'));
+  const {number, html_url: url, state, merged, base, body} = JSON.parse(readFileSync(file, 'utf8'));
   const config = loadConfig();
   const locale = localeOf(config);
   const integration = config.get('git.integrationBranch');
   const repo = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+$/.exec(url)?.[1];
   if (!repo) throw new Error(`the pull request's URL is ${url}`);
-  if (state !== 'MERGED' || baseRefName !== integration) {
-    throw new Error(`#${number} is ${state} with base ${baseRefName}; only one merged into ${integration} closes its issues`);
+  if (!merged || base.ref !== integration) {
+    throw new Error(`#${number} is ${merged ? 'merged' : state} with base ${base.ref}; only one merged into ${integration} closes its issues`);
   }
   const read = readBody(body);
   const actions = pendingActions(read, locale);
@@ -127,12 +132,12 @@ function pullRequest(file, commentFile) {
   console.log([repo, ...closedIssues(read, repo)].join('\n'));
 }
 
-function issue(file, repo, pr) {
-  const {url, state, labels, comments} = JSON.parse(readFileSync(file, 'utf8'));
+function issue(file, commentsFile, repo, pr) {
+  const {html_url: url, state, labels} = JSON.parse(readFileSync(file, 'utf8'));
   // The number may be of a pull request, or of an issue that moved to another repository.
   if (!url.toLowerCase().startsWith(`https://github.com/${repo}/issues/`.toLowerCase())) return console.log('skip');
   const labelled = labels.some(l => l.name.toLowerCase() === LABEL);
-  const commented = comments.some(c => trusted(c) && c.body.startsWith(markOf(pr)));
+  const commented = commentsOf(commentsFile).some(c => trusted(c) && c.body.startsWith(markOf(pr)));
   console.log(`${state} ${labelled} ${commented}`);
 }
 

@@ -43,7 +43,7 @@ tl_eq 'bin/trellis can be executed' 'yes' "$([ -x .trellis/bin/trellis ] && echo
 tl_eq 'no test is copied' '' "$(find .trellis -name '*.test.*' -o -name 'testlib.sh')"
 tl_eq 'nor hooks.json' '' "$(find .trellis -name hooks.json)"
 tl_eq 'nor what is not runtime' 'LICENSE MANIFEST VERSION bin hooks hygiene lib method scripts templates' "$(ls .trellis | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
-tl_eq 'the skills, all but init' 'trellis-debugging trellis-merge trellis-own trellis-retro trellis-scaffold' "$(ls .claude/skills | tr '\n' ' ' | sed 's/ $//')"
+tl_eq 'the skills, all but init' 'trellis-debugging trellis-merge trellis-own trellis-retro trellis-scaffold trellis-work' "$(ls .claude/skills | tr '\n' ' ' | sed 's/ $//')"
 tl_eq 'the agents' 'trellis-plan-check.md trellis-plan-reviewer.md' "$(ls .claude/agents | tr '\n' ' ' | sed 's/ $//')"
 tl_eq 'a skill carries the name of its folder' 'name: trellis-retro' "$(sed -n 2p .claude/skills/trellis-retro/SKILL.md)"
 tl_eq 'and the rest of the source' "$(sed -n '3,$p' "$upstream/skills/retro/SKILL.md")" "$(sed -n '3,$p' .claude/skills/trellis-retro/SKILL.md)"
@@ -61,6 +61,10 @@ tl_eq 'a short sha is resolved' '0' "$(update "$(printf '%.10s' "$sha1")")"
 tl_has 'to the full one' "$sha1" "$(cat .trellis/VERSION)"
 
 printf '\nupgrade\n'
+mkdir -p .github/workflows
+{ sed "s|{{sha}}|$sha1|; s|{{trellis.upstream}}|x/y|" "$TRELLIS_ROOT/templates/workflows/trellis.yml"; printf '# another: 0123456789012345678901234567890123456789\r\n'; } > .github/workflows/trellis.yml
+workflow="$(cat .github/workflows/trellis.yml)"
+git add -A && git commit -q -m 'chore: the workflow (#1)'
 up rm -q lib/style.mjs skills/debugging/SKILL.md
 printf 'new\n' > "$upstream/lib/new.txt"
 printf '\n' >> "$upstream/lib/schema"
@@ -69,6 +73,10 @@ up tag -a v2 -m v2
 sha2="$(up rev-parse HEAD)"
 tl_eq 'an annotated tag, run by the copy itself' '0' "$(bash .trellis/bin/trellis update v2 > "$OUT" 2>&1; echo $?)"
 tl_has 'is its commit' "$sha2" "$(cat .trellis/VERSION)"
+tl_eq 'the workflow calls the new sha, in its four places' '4' "$(grep -c "$sha2" .github/workflows/trellis.yml)"
+tl_eq 'and the rest of it stays' "$workflow" "$(sed "s/$sha2/$sha1/" .github/workflows/trellis.yml)"
+tl_has 'which the update says' '.github/workflows/trellis.yml calls the new sha' "$(out)"
+tl_lacks 'the sha of another action stays' "$sha2" "$(grep another .github/workflows/trellis.yml)"
 tl_eq 'a file gone upstream is removed' 'no' "$([ -e .trellis/lib/style.mjs ] && echo yes || echo no)"
 tl_eq 'a skill gone upstream too, with its folder' 'no' "$([ -e .claude/skills/trellis-debugging ] && echo yes || echo no)"
 tl_eq 'a new file is written' 'new' "$(cat .trellis/lib/new.txt)"
@@ -87,6 +95,7 @@ tl_eq 'stops the update' '1' "$(update v1)"
 tl_has 'naming the file' '.trellis/hooks/guard-git.sh' "$(out)"
 tl_has 'and the copied agent' '.claude/agents/trellis-plan-check.md' "$(out)"
 tl_has 'saying how to go on' 'Restore those files from git' "$(out)"
+tl_has 'and, for a copy that was never committed, what is deleted' 'If .trellis/ was never committed, delete the whole .trellis/ and run the update again' "$(out)"
 tl_eq 'and naming no folder of the project' '' "$(folders)"
 tl_eq 'and nothing else changes' "$before" "$(tracked)"
 restore
@@ -111,7 +120,7 @@ tl_eq 'and that file is not removed' 'yes' "$([ -f CLAUDE.md ] && echo yes)"
 restore
 
 printf '\nwhat is in the way\n'
-git rm -rq .trellis .claude/skills/trellis-merge .claude/skills/trellis-retro .claude/skills/trellis-scaffold .claude/agents && git commit -q -m 'chore: no copy (#1)'
+git rm -rq .trellis .claude/skills/trellis-merge .claude/skills/trellis-retro .claude/skills/trellis-scaffold .claude/skills/trellis-work .claude/agents && git commit -q -m 'chore: no copy (#1)'
 mkdir -p .claude/skills/trellis-merge && printf '# Mine\n' > .claude/skills/trellis-merge/SKILL.md
 tl_eq 'a file of the project with the name of a copied one stops it' '1' "$(update v2)"
 tl_has 'naming it' '.claude/skills/trellis-merge/SKILL.md' "$(out)"

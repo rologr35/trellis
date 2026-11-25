@@ -7,9 +7,11 @@
 #   - the blocks `<!-- trellis:<id> -->` of the root CLAUDE.md (method, orientation, commands,
 #     gates) and of TESTING.md (rungs), from method/<project.locale>.md, the config and the tree;
 #   - in .claude/settings.json, the deny of each rung with agent = false and of each push to a
-#     branch of git.protected: defense in depth. A push entry of a branch no longer protected is removed. A merge has
-#     no deny: a permission rule cannot see a pull request's base and a deny beats every allow, so
-#     the merge line lives only in hooks/guard-git.sh;
+#     branch of git.protected: defense in depth. A push entry of a branch no longer protected is
+#     removed. `gh pr merge` has no deny: a permission rule cannot see a pull request's base and a
+#     deny beats every allow, so that line lives only in hooks/guard-git.sh. The GitHub MCP tools of a
+#     cloud session that merge, switch on auto-merge or write files in a branch, which that hook does
+#     not see, are denied. Opening a pull request, commenting and marking it ready are not;
 #   - in the same file, when the project has a copy of trellis (.trellis/VERSION): the hook of
 #     guard-git, the one of `trellis setup` at the start of a session, and the deny of an edit of the
 #     copy. The other hooks of the project stay as they are;

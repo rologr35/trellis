@@ -47,6 +47,7 @@ import {
 } from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
 import {COPY_DIR, hasCopy, ownTree, verifyCopy} from '../lib/copy.mjs';
+import {globToRegExp} from '../lib/glob.mjs';
 import {localeOf} from '../lib/locale.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
@@ -105,26 +106,6 @@ export function packagePath(value) {
 
 /** A file of a package: the package at the root has its files at the root. */
 export const inPackage = (pkg, file) => (pkg === '' ? file : `${pkg}/${file}`);
-
-/** The regular expression of a glob: `**` crosses folders, `*` stays inside one. */
-export function globToRegExp(glob) {
-  if (/[{}[\]?!]/u.test(glob)) throw new Error(`glob ${glob} uses syntax the hygiene does not read; split it into plain globs`);
-  let source = '';
-  for (let i = 0; i < glob.length; i++) {
-    if (glob.startsWith('**/', i)) {
-      source += '(?:.*/)?';
-      i += 2;
-    } else if (glob.startsWith('**', i)) {
-      source += '.*';
-      i += 1;
-    } else if (glob[i] === '*') {
-      source += '[^/]*';
-    } else {
-      source += glob[i].replace(/[.+^$()|\\]/gu, String.raw`\$&`);
-    }
-  }
-  return new RegExp(`^${source}$`, 'u');
-}
 
 /** `<left>: <right> | <reason>` entries of an allowlist, as a set of `<left>: <right>`. */
 const allowlist = values => new Set(values.map(v => v.split('|')[0].trim()));

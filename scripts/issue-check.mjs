@@ -1,20 +1,33 @@
 // The judgment of `trellis issue` (scripts/issue.sh holds the contract).
 //   node issue-check.mjs body <file>    judges a body before it is published
 //   node issue-check.mjs class <file>   prints S, M or L, the class of a body that passes
-//   node issue-check.mjs issue <json>   judges an issue as `gh issue view --json body,comments` gives it
-//   node issue-check.mjs deps <json>    prints what the plan of an issue depends on, one per line:
-//                                       ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
-//   node issue-check.mjs print <json>   prints the plan of an issue, its amendments resolved
-//   node issue-check.mjs issue-class <json>
+//   node issue-check.mjs issue <json> <comments>   judges an issue as REST gives it, with its comments,
+//                                       one per line
+//   node issue-check.mjs deps <json> <comments>    prints what the plan of an issue depends on, one per
+//                                       line: ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
+//   node issue-check.mjs print <json> <comments>   prints the plan of an issue, its amendments resolved
+//   node issue-check.mjs issue-class <json> <comments>
+//   node issue-check.mjs attended <json> <comments>   prints what a run without a person cannot take, one
+//                                       per line
+//   node issue-check.mjs stop <file> <comment>      judges the text of a stop and writes its comment
+//   node issue-check.mjs refusal <file> <comment> [<branches>]   writes the comment of a plan a run could not
+//                                       take, for the reasons of the file, one per line
+//   node issue-check.mjs follow-up <file> <body> <reopen>  judges the body of a follow-up and writes it,
+//                                       with the line of what reopens it when there is one
+//   node issue-check.mjs gates <json> <comments>   judges the files of the branch against the gates of the plan
 // The text is data: nothing in it is run.
 
 import {execFileSync} from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
-import {ISSUE, localeOf} from '../lib/locale.mjs';
+import {globToRegExp} from '../lib/glob.mjs';
+import {ISSUE, PR_SECTIONS, STOP, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
+import {commentsOf, mayWrite, readBody, sectionOf as sectionNamed} from './issue-close.mjs';
 
-const [, , mode, file] = process.argv;
+const [, , mode, file, commentsFile, reopen = ''] = process.argv;
 const config = loadConfig();
 const L = ISSUE[localeOf(config)];
 const CLASSES = ['S', 'M', 'L'];
@@ -78,12 +91,9 @@ function parse(text) {
   return {sections: sectionsOf(rest), complexity: value};
 }
 
-// Whoever may write in the repository. Anyone may comment on an issue of a public one.
-const TRUSTED = ['OWNER', 'MEMBER', 'COLLABORATOR'];
-
 /** What a comment amends, when it is an amendment: its `###` sections of the mould, and its class. */
 function amendmentOf(comment) {
-  if (!TRUSTED.includes(comment.authorAssociation)) return null;
+  if (!mayWrite(comment)) return null;
   const {value, rest} = complexityOf(linesOf(comment.body));
   const first = rest.find(l => l.text.trim() !== '');
   if (!first || first.code || !new RegExp(`^##\\s+${escape(L.amendment)}\\s+\\([^)]+\\)`).test(first.text)) return null;
@@ -103,15 +113,21 @@ function amendmentOf(comment) {
   return {sections, complexity: value};
 }
 
-/** The plan of an issue: the body, with each section and the class of the last amendment that has it. */
-function resolve(issue) {
-  const plan = parse(issue.body);
-  const comments = [...(issue.comments ?? [])].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  for (const comment of comments) {
+/**
+ * The plan of an issue, with when it was last written (`since`): the body, with each section and the class of the last amendment that has it. The
+ * body of someone who may not write in the repository is none: `note` says so.
+ */
+function resolve(issue, comments) {
+  const plan = {...parse(mayWrite(issue) ? issue.body : ''), since: issue.created_at};
+  if (!mayWrite(issue)) {
+    plan.note = `the body is not a plan: its author (${issue.user?.login ?? 'unknown'}) is not an owner, a member or a collaborator of the repository, so the plan is what the amendments carry`;
+  }
+  for (const comment of [...comments].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))) {
     const amendment = amendmentOf(comment);
     if (!amendment) continue;
     plan.sections = [...plan.sections.filter(s => !amendment.sections.has(s.name)), ...amendment.sections.values()];
     plan.complexity = amendment.complexity ?? plan.complexity;
+    plan.since = comment.created_at;
   }
   return plan;
 }
@@ -222,13 +238,130 @@ function pathsOf(lines, tree) {
       // A command, a glob, a placeholder, a URL and a path outside the repository are not judged.
       if (!/^[\p{L}\p{N}_.@+()[\]/-]+$/u.test(name) || /^[-/]|\/\//.test(name)) continue;
       // A name without a folder is a file when some file has its extension: README.md is one, and a
-      // key such as tracker.kind is not.
+      // key such as tracker.kind is not. One that ends in / is a folder, when it is there.
       const extension = /[^.]\.([^.]+)$/.exec(name)?.[1];
-      if (!name.includes('/') && !/^\.[\p{L}]/u.test(name) && !(extension && tree?.extensions.has(extension))) continue;
+      if (!name.includes('/') && !/^\.[\p{L}]/u.test(name) && !(extension && tree?.extensions.has(extension)) && !(/\/\s*$/.test(token) && tree?.entries.has(name))) continue;
       paths.push(name);
     }
   }
   return [...new Set(paths)];
+}
+
+const sectionOf = (plan, name) => plan.sections.find(s => s.name === name)?.lines ?? [];
+
+/** The gates the Risks of a plan open with: their names, [] for none, null without the line. */
+function gatesOf(plan) {
+  const first = written(textOf(sectionOf(plan, L.sections[3]))).split('\n').find(line => line.trim() !== '') ?? '';
+  const value = new RegExp(`^\\s*(?:[-*+]\\s+)?(?:\\*\\*|__)?${escape(L.gates)}(?:(?:\\*\\*|__)\\s*:|\\s*:(?:\\*\\*|__)?)(.*)$`).exec(first)?.[1];
+  if (value === undefined) return null;
+  const names = value.split(/\.(?:\s|$)/)[0].split(/,|\s(?:and|y|e)\s/).map(s => s.trim().replace(/^`(.*)`$/, '$1')).filter(Boolean);
+  if (names.length === 0) return null;
+  return names.length === 1 && names[0].toLowerCase() === L.noGates ? [] : names;
+}
+
+/** The patterns of a gate, or the misses of the ones that are not plain globs. */
+function patternsOf(gate, from = config) {
+  const patterns = [];
+  const misses = [];
+  for (const glob of from.all(`gate.${gate}.paths`)) {
+    try {
+      patterns.push(globToRegExp(glob));
+    } catch (error) {
+      misses.push(`gate.${gate}.paths: ${error.message}`);
+    }
+  }
+  return {patterns, misses};
+}
+
+/** What the Gates line of a plan lacks, given the paths of its Layers and files. */
+function judgeGates(plan, paths, tree) {
+  const named = gatesOf(plan);
+  if (named === null) return [`${L.sections[3]} does not open with \`${L.gates}: ${L.noGates}\`, or the names of the gates the plan touches`];
+  const known = config.subsections('gate');
+  const misses = named.filter(name => !known.includes(name)).map(name => `${L.gates}: there is no [gate "${name}"] in trellis.config`);
+  for (const gate of known.filter(name => !named.includes(name))) {
+    const {patterns, misses: bad} = patternsOf(gate);
+    misses.push(...bad);
+    for (const name of paths) {
+      // A folder stands for its files.
+      const files = [name, `${name}/`, ...[...(tree?.entries ?? [])].filter(entry => entry.startsWith(`${name}/`))];
+      if (patterns.some(re => files.some(file => re.test(file)))) misses.push(`${L.gates}: \`${name}\` is of the gate ${gate}, which ${L.sections[3]} does not name`);
+    }
+  }
+  return misses;
+}
+
+const git = (...args) => execFileSync('git', args, {encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore']}).trim();
+
+/**
+ * The files of the branch that match a gate the plan does not name. The gates are the ones of the
+ * integration branch too: a branch that takes a gate out of trellis.config still answers to it.
+ */
+function judgeBranch(plan) {
+  const branch = `origin/${config.get('git.integrationBranch')}`;
+  let files;
+  const configs = [config];
+  try {
+    const base = git('merge-base', `refs/remotes/${branch}`, 'HEAD');
+    files = git('diff', '--name-only', '--no-renames', '-z', base, 'HEAD').normalize('NFC').split('\0').filter(Boolean);
+  } catch {
+    return [`the files of the branch are not known against ${branch} (git fetch origin)`];
+  }
+  const scratch = mkdtempSync(path.join(tmpdir(), 'trellis-gates-'));
+  try {
+    const file = path.join(scratch, 'trellis.config');
+    writeFileSync(file, git('show', `refs/remotes/${branch}:trellis.config`));
+    configs.push(loadConfig({file, label: `trellis.config of ${branch}`}));
+  } catch {
+    // The integration branch has no trellis.config.
+  } finally {
+    rmSync(scratch, {recursive: true, force: true});
+  }
+  const named = gatesOf(plan) ?? [];
+  const misses = [];
+  for (const from of configs) {
+    for (const gate of from.subsections('gate').filter(name => !named.includes(name))) {
+      const {patterns, misses: bad} = patternsOf(gate, from);
+      misses.push(...bad);
+      for (const name of files.filter(f => patterns.some(re => re.test(f)))) misses.push(`\`${name}\` is of the gate ${gate}, which the plan does not name`);
+    }
+  }
+  return [...new Set(misses)];
+}
+
+/** What a run without a person cannot take of a plan: its gates and what it needs. */
+function attended(plan) {
+  const gates = gatesOf(plan) ?? [];
+  const needs = labelled(plan.sections.flatMap(s => s.lines), L.needs)
+    .map(group => [group.inline, ...group.lines.map(l => l.text.trim())].filter(Boolean).join(' '))
+    .filter(text => !L.none.test(text));
+  return [...(gates.length ? [`${L.gates}: ${gates.join(', ')}`] : []), ...needs.map(text => `${L.needs}: ${text}`)];
+}
+
+/** Prints each path of a plan that changed on the integration branch since the plan was written. */
+function printChanged(plan) {
+  const branch = `origin/${config.get('git.integrationBranch')}`;
+  const ref = `refs/remotes/${branch}`;
+  const layers = sectionOf(plan, L.sections[2]);
+  const paths = pathsOf(layers, integrationTree(ref));
+  if (paths.length === 0) return;
+  try {
+    const root = git('rev-parse', '--show-toplevel');
+    let base = git('rev-list', '-1', '--first-parent', `--before=${plan.since}`, ref);
+    if (base === '') {
+      if (git('rev-parse', '--is-shallow-repository') === 'true') {
+        console.log(`issue: what changed on ${branch} since ${plan.since} is not known: the clone is shallow and does not reach that date`);
+        return;
+      }
+      base = git('hash-object', '-t', 'tree', '/dev/null');
+    }
+    for (const name of paths) {
+      if (git('--literal-pathspecs', '-C', root, 'diff', '--name-only', base, ref, '--', name) === '') continue;
+      console.log(`issue: \`${name}\` changed on ${branch} since the plan was written (${plan.since}): git diff ${base.slice(0, 12)} ${branch} -- ${name}`);
+    }
+  } catch {
+    // Without the branch the check has said so.
+  }
 }
 
 /** The files, folders and extensions of origin/<integration>, or null when that branch is not known. */
@@ -285,8 +418,8 @@ function judge(plan, lines) {
     misses.push(`the last line is not \`${L.complexity}: S\`, M or L`);
   }
 
-  const [, , layersName] = L.sections;
-  const layers = plan.sections.find(s => s.name === layersName)?.lines ?? [];
+  const [, , layersName, risksName] = L.sections;
+  const layers = sectionOf(plan, layersName);
   const added = new Set();
   for (const group of labelled(layers, L.newFiles)) {
     for (let i = group.start; i < group.end; i++) added.add(i);
@@ -302,22 +435,66 @@ function judge(plan, lines) {
     }
   }
 
+  const risks = plan.sections.filter(s => s.name === risksName);
+  if (risks.length === 1) {
+    const left = /\{\{[^}]*\}\}/.exec(risks[0].lines.filter(l => !l.code).map(l => l.text.replace(/`[^`]*`/g, '')).join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, ''));
+    if (left && gatesOf(plan)) misses.push(`${risksName} has a placeholder of the mould: ${left[0]}`);
+  }
+  if (risks.length === 1 && !isEmpty(risks[0].lines)) misses.push(...judgeGates(plan, pathsOf(layers, tree), tree));
+
   misses.push(...styleMisses(withoutReferences(lines), 'style'));
   return misses;
 }
 
-function report(misses) {
+function report(misses, what = 'issue check') {
   if (misses.length === 0) return 0;
-  console.error(`issue check:\n${misses.map(m => `  - ${m}`).join('\n')}`);
+  console.error(`${what}:\n${misses.map(m => `  - ${m}`).join('\n')}`);
   return 1;
+}
+
+/** The first line of the comment of a stop. */
+const STOP_MARK = '<!-- trellis:stopped -->';
+
+/** What the text of a stop lacks: one message per miss. */
+function judgeStop(text) {
+  const {lines, prose} = readBody(text);
+  return STOP[localeOf(config)].sections.flatMap(name => {
+    const content = sectionNamed(prose, name, lines);
+    if (!content) return [`missing the section **${name}**`];
+    return content.some(l => /[\p{L}\p{N}]/u.test(l)) ? [] : [`**${name}** is empty; write \`${PR_SECTIONS[localeOf(config)].noneWord}\` when there is nothing`];
+  });
+}
+
+/** The text of the stop of a plan that was refused. */
+function refusal(reasons, branches) {
+  const {sections: [done, missing, needs], notStarted, started, rest} = STOP[localeOf(config)];
+  const items = reasons.split('\n').map(l => l.trim()).filter(Boolean).map(l => `- ${l.replace(/^- /, '')}`);
+  const [has, lacks] = branches ? [started(branches), rest] : [PR_SECTIONS[localeOf(config)].noneWord, notStarted];
+  return `**${done}**: ${has}\n\n**${missing}**: ${lacks}\n\n**${needs}**:\n\n${items.join('\n')}\n`;
 }
 
 const text = readFileSync(file, 'utf8');
 if (mode === 'body') process.exitCode = report(judge(parse(text), linesOf(text)));
 if (mode === 'class') console.log(parse(text).complexity);
-if (!['body', 'class'].includes(mode)) {
-  const plan = resolve(JSON.parse(text));
-  if (mode === 'issue') process.exitCode = report(judge(plan, linesOf(render(plan))));
+if (mode === 'stop') {
+  process.exitCode = report(judgeStop(text), 'issue stop');
+  if (process.exitCode === 0) writeFileSync(commentsFile, `${STOP_MARK}\n${text}`);
+}
+if (mode === 'follow-up') {
+  process.exitCode = report(text.replace(/<!--[\s\S]*?(?:-->|$)/g, '').trim() ? [] : ['the body is empty'], 'issue follow-up');
+  const fact = reopen.trim().replace(/\s+/g, ' ');
+  if (process.exitCode === 0) writeFileSync(commentsFile, `${fact ? `${L.reopen}: ${fact}\n\n` : ''}${text}`);
+}
+if (mode === 'refusal') writeFileSync(commentsFile, `${STOP_MARK}\n${refusal(text, process.argv[5])}`);
+if (!['body', 'class', 'stop', 'refusal', 'follow-up'].includes(mode)) {
+  const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
+  if (plan.note && ['issue', 'print'].includes(mode)) console.error(`issue: ${plan.note}`);
+  if (mode === 'issue') {
+    process.exitCode = report(judge(plan, linesOf(render(plan))));
+    printChanged(plan);
+  }
+  if (mode === 'attended') for (const line of attended(plan)) console.log(line);
+  if (mode === 'gates') process.exitCode = report(judgeBranch(plan), 'issue gates');
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));
   if (mode === 'deps') {
