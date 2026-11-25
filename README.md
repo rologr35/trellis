@@ -38,7 +38,7 @@ What the previous copy had and the new one does not is removed. Nothing is writt
 
 `trellis verify` fails when a file of the manifest is missing or changed, or `.trellis/` has another one. `--upstream` clones the sha of `VERSION` and compares with it, so a file and its manifest line changed together fail too; `--staged` judges the index, and `--ref <sha>` requires that sha in `VERSION`. The pre-commit hook and `trellis hygiene` run the local form; the consumer CI runs `verify --upstream --ref` with the sha it is called with. The hygiene and the ratchet do not judge the files of the copy: they are not the project's.
 
-To move to another version, in a pull request of its own: `trellis update <tag|sha>`, the sha of `.trellis/VERSION` in the four places of `.github/workflows/trellis.yml`, and the commit of everything. There is nothing to install on a machine.
+To move to another version, in a pull request of its own: `trellis update <tag|sha>`, which also writes the new sha over the one of the previous copy in `.github/workflows/trellis.yml`, and the commit of everything. The update that runs is the one of the copy in the project: 0.6.0 does not write that file. There is nothing to install on a machine.
 
 A project of 0.5.0 or earlier consumes the plugin. Its pull request with the first copy is written from a clone of this repository (`<clone>/bin/trellis update <tag|sha>`) and also:
 

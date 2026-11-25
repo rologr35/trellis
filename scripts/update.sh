@@ -7,7 +7,8 @@
 #   - .trellis/: the runtime (bin, hooks, lib, scripts, hygiene, method, templates, LICENSE) without
 #     its tests; .trellis/VERSION, the version and the full sha; .trellis/MANIFEST, the sha256 of every
 #     file written;
-#   - .claude/skills/trellis-<name>/SKILL.md and .claude/agents/trellis-<name>.md, every skill but init.
+#   - .claude/skills/trellis-<name>/SKILL.md and .claude/agents/trellis-<name>.md, every skill but init;
+#   - the new sha over the one of the previous copy in .github/workflows/trellis.yml.
 #
 # What the previous copy had and this one does not is removed. Nothing is written, and the files are
 # named, when the previous copy was edited by hand, when a file of the project has the name of a copied
@@ -33,6 +34,7 @@ main() {
     const [{update}, {loadConfig}] = [await load("copy.mjs"), await load("config.mjs")];
     try {
       const done = await update(root, loadConfig({cwd: root}).get("trellis.upstream"), ref);
+      if (done.workflow) console.log(`update: ${done.workflow} calls the new sha`);
       console.log(`update: trellis ${done.version} (${done.sha}), ${done.files} files written, ${done.removed} removed`);
     } catch (error) {
       console.error(`update: ${error.message}`);
