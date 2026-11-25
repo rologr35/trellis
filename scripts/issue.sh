@@ -6,6 +6,7 @@
 #   trellis issue check --body <file>    a body, before it is published
 #   trellis issue check <n>              the plan of an issue of this repository, at pick-up
 #   trellis issue check <n> --print      prints that plan and judges nothing
+#   trellis issue gates <n>              the files of this branch that match a gate the plan does not name
 #   trellis issue create --title <t> --body-file <file>
 #                                        checks the body, creates the issue, prints its URL
 #   trellis issue close <pr> [--done]    closes the issues of a merged pull request; --done when its
@@ -26,6 +27,10 @@
 # of Context is closed. Other text there is printed for a person.
 # Each path of Layers and files that changed on the integration branch since the plan, or its last
 # amendment, was written is printed, and fails nothing.
+#
+# The gates: every file the commits of the branch change, from where it left origin/<git.integrationBranch>,
+# which is fetched first, against the paths of each [gate] that Risks does not name. A gate that only
+# the integration branch declares counts too.
 #
 # The label of the issue created is the class of its complexity line. S, M and L are created when the
 # repository lacks them.
@@ -54,6 +59,7 @@ TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 usage() {
   {
     printf 'usage: trellis issue check --body <file> | check <n> [--print]\n'
+    printf '       trellis issue gates <n>\n'
     printf '       trellis issue create --title <t> --body-file <file>\n'
     printf '       trellis issue close <pr> [--done]\n'
   } >&2
@@ -111,14 +117,18 @@ read_issue() {
   printf '%s' "$GH_AS_OUT" > "$ISSUE_TMP/comments.json"
 }
 
+# The same, and the error of gh when it fails.
+want_issue() {
+  make_tmp || return 1
+  read_issue "$1" && return 0
+  printf 'issue: #%s could not be read as %s: %s\n' "$1" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+  return 1
+}
+
 check_issue() {
   local n="${1#\#}" print="$2" kind a b status=0 deps_ok=true
   case "$n" in '' | *[!0-9]*) usage ;; esac
-  make_tmp || return 1
-  if ! read_issue "$n"; then
-    printf 'issue: #%s could not be read as %s: %s\n' "$n" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-    return 1
-  fi
+  want_issue "$n" || return 1
   if [ "$print" = true ]; then
     judge print "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json"
     return $?
@@ -135,6 +145,16 @@ check_issue() {
   [ "$deps_ok" = true ] || status=1
   [ "$status" -eq 0 ] && printf 'issue check: ok (%s)\n' "$(judge issue-class "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json")"
   return "$status"
+}
+
+check_gates() {
+  local n="${1#\#}"
+  case "$n" in '' | *[!0-9]*) usage ;; esac
+  [ $# -eq 1 ] || usage
+  want_issue "$n" || return 1
+  fetch_integration
+  judge gates "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || return 1
+  printf 'issue gates: ok\n'
 }
 
 # ensure_label <name> <colour> <description>: makes sure the repository has the label. GitHub
@@ -265,6 +285,7 @@ case "$action" in
         ;;
     esac
     ;;
+  gates) check_gates "$@" ;;
   create) create_issue "$@" ;;
   close)
     number=''

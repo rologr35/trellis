@@ -536,6 +536,54 @@ issue_json 7 "$TL_TMP/symptom.md" OWNER "$TL_TMP/plan-es.md"
 tl_eq 'es: a plan in an Enmienda passes' '0' "$(status_of check 7)"
 git config -f trellis.config --unset project.locale
 
+printf '\nthe gates of a branch\n'
+git fetch -q origin
+git switch -q -c 21-thing origin/develop
+git config -f trellis.config gate.money.paths 'lib/**'
+git config -f trellis.config gate.notes.paths 'notes/*.md'
+git add -A && git commit -q -m 'chore: gates'
+git push -q origin HEAD:develop
+git fetch -q origin
+issue_json 21 "$TL_TMP/good.md"
+tl_eq 'a branch with no commits touches no gate' '0' "$(status_of gates 21)"
+tl_eq '  and says so' 'issue gates: ok' "$(out)"
+echo z >> README.md
+git commit -q -am 'docs: readme'
+tl_eq 'a file of no gate' '0' "$(status_of gates 21)"
+echo y >> lib/a.sh
+tl_eq 'a change that is not committed is not of the branch' '0' "$(status_of gates 21)"
+git commit -q -am 'feat: a'
+tl_eq 'a file of a gate the plan does not name exits 1' '1' "$(status_of gates 21)"
+tl_has '  and is named' '`lib/a.sh` is of the gate money, which the plan does not name' "$(out)"
+tl_lacks '  without the files of no gate' 'README.md' "$(out)"
+sed 's/^Gates: none\.$/Gates: money/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 22 "$TL_TMP/case.md"
+tl_eq 'the gate named passes' '0' "$(status_of gates 22)"
+{ amendment 'gates'; printf '### Risks\n\nGates: notes\n'; } > "$TL_TMP/a7.md"
+issue_json 22 "$TL_TMP/case.md" OWNER "$TL_TMP/a7.md"
+tl_eq 'the gates are the ones of the last amendment' '1' "$(status_of gates 22)"
+issue_json 22 "$TL_TMP/symptom.md"
+tl_eq 'an issue without a plan names none' '1' "$(status_of gates 22)"
+git mv lib/a.sh moved.sh
+git config -f trellis.config --remove-section gate.money
+git commit -q -am 'feat: move'
+tl_eq 'a file moved out of a gate, in a branch that takes the gate out' '1' "$(status_of gates 21)"
+tl_has '  still answers to the gate of the integration branch' '`lib/a.sh` is of the gate money' "$(out)"
+tl_eq 'no number' '2' "$(status_of gates)"
+tl_eq 'two numbers' '2' "$(status_of gates 21 22)"
+tl_eq 'an issue gh cannot read' '1' "$(status_of gates 404)"
+git config -f trellis.config git.integrationBranch nowhere
+tl_eq 'an integration branch that is not known' '1' "$(status_of gates 21)"
+tl_has '  which it says' 'are not known against origin/nowhere' "$(out)"
+tl_has 'the usage of trellis lists gates' 'issue gates <n>' "$("$TRELLIS" help 2>&1)"
+git checkout -q -- trellis.config
+git switch -q main
+git branch -q -D 21-thing
+git -C "$other" pull -q origin develop
+git -C "$other" revert --no-edit HEAD >/dev/null
+git -C "$other" push -q origin HEAD:develop
+git fetch -q origin
+
 printf '\ncreate\n'
 calls() { cat "$GH_FIXTURES/calls.log" 2>/dev/null; }
 # Runs a create with a clean log.

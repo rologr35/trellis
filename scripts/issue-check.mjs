@@ -7,10 +7,13 @@
 //                                       line: ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
 //   node issue-check.mjs print <json> <comments>   prints the plan of an issue, its amendments resolved
 //   node issue-check.mjs issue-class <json> <comments>
+//   node issue-check.mjs gates <json> <comments>   judges the files of the branch against the gates of the plan
 // The text is data: nothing in it is run.
 
 import {execFileSync} from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
 import {globToRegExp} from '../lib/glob.mjs';
 import {ISSUE, localeOf} from '../lib/locale.mjs';
@@ -250,10 +253,10 @@ function gatesOf(plan) {
 }
 
 /** The patterns of a gate, or the misses of the ones that are not plain globs. */
-function patternsOf(gate) {
+function patternsOf(gate, from = config) {
   const patterns = [];
   const misses = [];
-  for (const glob of config.all(`gate.${gate}.paths`)) {
+  for (const glob of from.all(`gate.${gate}.paths`)) {
     try {
       patterns.push(globToRegExp(glob));
     } catch (error) {
@@ -282,6 +285,42 @@ function judgeGates(plan, paths, tree) {
 }
 
 const git = (...args) => execFileSync('git', args, {encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore']}).trim();
+
+/**
+ * The files of the branch that match a gate the plan does not name. The gates are the ones of the
+ * integration branch too: a branch that takes a gate out of trellis.config still answers to it.
+ */
+function judgeBranch(plan) {
+  const branch = `origin/${config.get('git.integrationBranch')}`;
+  let files;
+  const configs = [config];
+  try {
+    const base = git('merge-base', `refs/remotes/${branch}`, 'HEAD');
+    files = git('diff', '--name-only', '--no-renames', '-z', base, 'HEAD').normalize('NFC').split('\0').filter(Boolean);
+  } catch {
+    return [`the files of the branch are not known against ${branch} (git fetch origin)`];
+  }
+  const scratch = mkdtempSync(path.join(tmpdir(), 'trellis-gates-'));
+  try {
+    const file = path.join(scratch, 'trellis.config');
+    writeFileSync(file, git('show', `refs/remotes/${branch}:trellis.config`));
+    configs.push(loadConfig({file, label: `trellis.config of ${branch}`}));
+  } catch {
+    // The integration branch has no trellis.config.
+  } finally {
+    rmSync(scratch, {recursive: true, force: true});
+  }
+  const named = gatesOf(plan) ?? [];
+  const misses = [];
+  for (const from of configs) {
+    for (const gate of from.subsections('gate').filter(name => !named.includes(name))) {
+      const {patterns, misses: bad} = patternsOf(gate, from);
+      misses.push(...bad);
+      for (const name of files.filter(f => patterns.some(re => re.test(f)))) misses.push(`\`${name}\` is of the gate ${gate}, which the plan does not name`);
+    }
+  }
+  return [...new Set(misses)];
+}
 
 /** Prints each path of a plan that changed on the integration branch since the plan was written. */
 function printChanged(plan) {
@@ -387,9 +426,9 @@ function judge(plan, lines) {
   return misses;
 }
 
-function report(misses) {
+function report(misses, what = 'issue check') {
   if (misses.length === 0) return 0;
-  console.error(`issue check:\n${misses.map(m => `  - ${m}`).join('\n')}`);
+  console.error(`${what}:\n${misses.map(m => `  - ${m}`).join('\n')}`);
   return 1;
 }
 
@@ -403,6 +442,7 @@ if (!['body', 'class'].includes(mode)) {
     process.exitCode = report(judge(plan, linesOf(render(plan))));
     printChanged(plan);
   }
+  if (mode === 'gates') process.exitCode = report(judgeBranch(plan), 'issue gates');
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));
   if (mode === 'deps') {
