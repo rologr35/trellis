@@ -10,8 +10,8 @@
 #
 # FAIL: a key of trellis.config outside lib/schema, a value outside the accepted ones of an enum
 # key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), a value of
-# tracker.search that lib/search.mjs says is none (it does not compile, or matches the empty string, `ls`
-# or `git status`), workspace.kind = other without [hygiene] namedExt, or a command name that names no [command]; a tool of
+# tracker.search that lib/search.mjs says is none (it does not compile, or matches the empty string, `ls`,
+# `git status` or a creation of an issue), a git.worktreeAdd that names no command, workspace.kind = other without [hygiene] namedExt, or a command name that names no [command]; a tool of
 # [toolchain] require missing or older than its minimum; core.hooksPath other than git.hooksPath;
 # a copy of trellis that is not whole, as `trellis verify` says, or, without a copy and out of the
 # repository of trellis, which runs from its own tree, the plugin not installed; Claude Code older than the minimum; node missing while hooks are active;
@@ -109,6 +109,9 @@ else
     else
       fail 'the values of tracker.search could not be judged'
     fi
+  fi
+  if tc_list | grep -q '^git\.worktreeAdd=' && [ -z "$(tc_get git.worktreeAdd | tr -d '[:space:]')" ]; then
+    fail 'trellis.config: git.worktreeAdd names no command'
   fi
   missing_commands=''
   for name in $(tc_all command.check) $(tc_get command.secretScan) $(tc_get command.install) \

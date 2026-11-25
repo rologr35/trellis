@@ -84,9 +84,21 @@ bad_search 'x*' 'matches the empty string, which is no search of the backlog'
 bad_search '^.s' 'matches the command ls, which is no search of the backlog'
 bad_search 'git +st' 'matches the command git status, which is no search of the backlog'
 bad_search '' 'matches the empty string'
+bad_search 'issue' 'matches the command gh issue create, which is no search of the backlog'
+bad_search 'issue new' 'matches the command gh issue new, which is no search of the backlog'
+bad_search 'trellis issue' 'matches the command trellis issue create, which is no search of the backlog'
 git config -f trellis.config --unset-all tracker.search
 tl_eq 'with no value the doctor passes' '0' "$(doctor)"
 tl_lacks 'and says nothing of it' 'tracker.search' "$(out)"
+git config -f trellis.config git.worktreeAdd ''
+tl_eq 'an empty git.worktreeAdd fails' '1' "$(doctor)"
+tl_has 'saying it names no command' 'FAIL  trellis.config: git.worktreeAdd names no command' "$(out)"
+git config -f trellis.config git.worktreeAdd ' '
+tl_eq '  and one of blanks' '1' "$(doctor)"
+git config -f trellis.config git.worktreeAdd 'bin/tree new'
+tl_eq 'a command passes' '0' "$(doctor)"
+tl_lacks '  and is not named' 'git.worktreeAdd' "$(out)"
+git config -f trellis.config --unset git.worktreeAdd
 git config -f trellis.config workspace.kind python
 tl_eq 'workspace.kind outside the schema fails' '1' "$(doctor)"
 tl_has 'naming the value and the accepted ones' 'workspace.kind = python is not one of flutter, dart, node' "$(out)"

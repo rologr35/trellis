@@ -497,6 +497,14 @@ for value in '(' 'x*' '' '^$|find' '^ls|find' 'git +st|find' '.'; do
   git config -f trellis.config --add tracker.search 'backlog find'
   tl_eq '  and a good one beside it counts' 'allow' "$(created)"
 done
+# A value that matches a creation is none: a creation refused before is no search for the next one.
+for value in 'issue' 'gh issue c' 'issue new' 'trellis issue'; do
+  git config -f trellis.config --replace-all tracker.search "$value"
+  for creation in 'gh issue create --title a' 'gh issue new --title a' 'trellis issue create --title a'; do
+    said "$creation"
+    tl_eq "a value that matches a creation: '$value', after $creation" 'deny' "$(created)"
+  done
+done
 cp "$TL_TMP/config.keep" trellis.config
 
 printf '\nmerge\n'
