@@ -52,7 +52,7 @@ A file it prints touches a gate the plan does not name: a person decides, and th
 
 ## 5. The draft
 
-Fetch the integration branch: what the body claims about it is checked there. Write the title and the body to files, the body with `Closes #<n>` and the sections of the method, and `trellis pr-check --body <file>` passes. Push, then:
+Fetch the integration branch: what the body claims about it is checked there. Write the title and the body to files, the body with `Closes #<n>` and the sections `trellis pr-check --body <file>` requires, which it names until it passes. Push in a command of its own: a rule of the project's settings may read the whole line, and the next one names the integration branch. Then:
 
 ```bash
 gh pr create --draft --base <integration> --title "$(cat <title file>)" --body-file <body file>
