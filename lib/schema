@@ -29,7 +29,10 @@ tracker.kind|enum:github,none|github
 autonomy.level|enum:careful,balanced,autonomous|careful
 
 workspace.kind|enum:flutter,dart,node,other|flutter
+workspace.manifest|multi|package.json
+workspace.manifest|multi|pubspec.yaml
 workspace.package|multi|
+workspace.notPackage|multi|
 
 toolchain.require|multi|
 toolchain.envFile|multi|

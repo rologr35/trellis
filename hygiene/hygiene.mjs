@@ -18,7 +18,7 @@
 //     so it carries the nested limit and is not frozen), each rule, each agent (4 KB, fixed) and
 //     all the rules together under their [hygiene] limits; skills and docs/ under their
 //     [hygiene] frozen size plus 2%, every one of them frozen;
-//   - every [workspace] package has its CLAUDE.md (a package at the root, `.`, is the root one);
+//   - every package of lib/packages.mjs has its CLAUDE.md (a package at the root, `.`, is the root one);
 //   - the orientation block lists every nested file and every rule;
 //   - every generated block matches what `trellis sync` generates, the root carries the method
 //     block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks the
@@ -49,6 +49,7 @@ import {loadConfig} from '../lib/config.mjs';
 import {COPY_DIR, hasCopy, ownTree, verifyCopy} from '../lib/copy.mjs';
 import {globToRegExp} from '../lib/glob.mjs';
 import {localeOf} from '../lib/locale.mjs';
+import {inPackage, packagesOf} from '../lib/packages.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
 export const AGENT_LIMIT_BYTES = 4 * 1024;
@@ -95,18 +96,6 @@ export const TRACKER_REF = /(?<![\w&/])#\d+\b/gu;
 /** The extensions a rule names files by, per workspace.kind. */
 const NAMED_EXT = {flutter: ['dart'], dart: ['dart'], node: ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']};
 
-/**
- * A `workspace.package` value as a path from the project's root: `./x`, `x/` and `x//` are `x`, and
- * `.` (or `./`) is the root, the empty string. The one reading of the key.
- */
-export function packagePath(value) {
-  const normalized = path.posix.normalize(value.trim()).replace(/\/+$/u, '');
-  return normalized === '.' ? '' : normalized;
-}
-
-/** A file of a package: the package at the root has its files at the root. */
-export const inPackage = (pkg, file) => (pkg === '' ? file : `${pkg}/${file}`);
-
 /** `<left>: <right> | <reason>` entries of an allowlist, as a set of `<left>: <right>`. */
 const allowlist = values => new Set(values.map(v => v.split('|')[0].trim()));
 
@@ -152,7 +141,12 @@ export function hygiene(root, {staged = false} = {}) {
   // Rules load where they speak.
   const kind = config.get('workspace.kind');
   const extensions = config.all('hygiene.namedExt').length ? config.all('hygiene.namedExt') : NAMED_EXT[kind] ?? [];
-  const packages = [...new Set(config.all('workspace.package').map(packagePath))];
+  let packages = [];
+  try {
+    packages = packagesOf(tree, config);
+  } catch (error) {
+    fail('trellis.config', `[workspace] notPackage: ${error.message}`);
+  }
   const namedElsewhere = allowlist(config.all('hygiene.namedElsewhere'));
   const globsOf = new Map();
   for (const rule of rules) {
@@ -221,7 +215,7 @@ export function hygiene(root, {staged = false} = {}) {
 
   // Packages, orientation and generated content.
   for (const pkg of packages) {
-    if (!tree.has(inPackage(pkg, 'CLAUDE.md'))) fail(pkg || '.', 'is a [workspace] package without its CLAUDE.md (the scaffold skill drafts one)');
+    if (!tree.has(inPackage(pkg, 'CLAUDE.md'))) fail(pkg || '.', 'is a [workspace] package without its CLAUDE.md (the scaffold skill drafts one; notPackage takes out an example or a fixture, with its reason)');
   }
   const generated = generateBlocks(tree, config);
   for (const [file, ids] of Object.entries(BLOCK_FILES)) {

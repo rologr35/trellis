@@ -237,7 +237,7 @@ if (configWas !== null) {
       add(`trellis.config: raises the frozen size of ${file} from ${size} to ${frozenNow.get(file)}`, 'every reader of the file pays the extra bytes', 'rewrite what grew to its current state');
     }
   }
-  for (const key of ['hygiene.keepRef', 'hygiene.namedElsewhere', 'hygiene.mustNotLoad']) {
+  for (const key of ['hygiene.keepRef', 'hygiene.namedElsewhere', 'hygiene.mustNotLoad', 'workspace.notPackage']) {
     const was = oldConfig.all(key).length;
     const now = newConfig.all(key).length;
     if (now > was) {
@@ -250,11 +250,16 @@ if (configWas !== null) {
   if (rank(newConfig) > rank(oldConfig)) {
     add(`trellis.config: raises autonomy.level from ${LEVELS[rank(oldConfig)]} to ${LEVELS[rank(newConfig)]}`, 'what a run wrote only when a person approved it is written without asking', 'keep the level and approve each proposal');
   }
-  for (const key of ['ratchets.suppression', 'ratchets.testFile', 'ratchets.lintConfig']) {
+  for (const [key, cost] of [
+    ['ratchets.suppression', 'what it matched stops being watched by the ratchet'],
+    ['ratchets.testFile', 'what it matched stops being watched by the ratchet'],
+    ['ratchets.lintConfig', 'what it matched stops being watched by the ratchet'],
+    ['workspace.manifest', 'a folder with that manifest is no longer asked for its CLAUDE.md'],
+  ]) {
     const now = new Set(newConfig.all(key));
     const gone = oldConfig.all(key).filter(v => !now.has(v));
     if (gone.length > 0) {
-      add(`trellis.config: ${key} drops ${gone.join(', ')}`, 'what it matched stops being watched by the ratchet', 'keep the entry');
+      add(`trellis.config: ${key} drops ${gone.join(', ')}`, cost, 'keep the entry');
     }
   }
 }

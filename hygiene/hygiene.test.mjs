@@ -285,11 +285,77 @@ test('TESTING.md is not frozen: a new rung needs no setback, the nested limit ho
   fails(p, 'TESTING.md:');
 });
 
-test('a package without CLAUDE.md fails', () => {
+test('a package without a manifest, of workspace.package, without CLAUDE.md fails', () => {
   const p = project();
   p.git('config', '-f', 'trellis.config', '--add', 'workspace.package', 'core');
   p.write('core/lib/core.dart', '\n');
   fails(p, 'core: is a [workspace] package without its CLAUDE.md');
+});
+
+const PACKAGE = 'is a [workspace] package without its CLAUDE.md';
+
+test('a package with a manifest and no CLAUDE.md fails, without a line of workspace.package', () => {
+  const p = project();
+  p.write('core/pubspec.yaml', 'name: core\n');
+  fails(p, `core: ${PACKAGE}`);
+  p.git('add', '-A');
+  fails(p, `core: ${PACKAGE}`, '--staged');
+  p.write('core/CLAUDE.md', '# Core\n');
+  p.trellis('sync');
+  passes(p);
+});
+
+test('workspace.notPackage takes a package out, by a glob of its folder and whatever lists it', () => {
+  for (const glob of ['packages/*/example', './packages/**/example/', 'packages/core/example']) {
+    const p = project();
+    p.write('packages/core/example/pubspec.yaml', 'name: example\n');
+    fails(p, `packages/core/example: ${PACKAGE}`);
+    p.git('config', '-f', 'trellis.config', '--add', 'workspace.notPackage', `${glob} | an example`);
+    passes(p);
+    p.git('config', '-f', 'trellis.config', '--add', 'workspace.package', 'packages/core/example');
+    passes(p);
+  }
+  const p = project();
+  p.write('packages/core/pubspec.yaml', 'name: core\n');
+  p.git('config', '-f', 'trellis.config', '--add', 'workspace.notPackage', 'packages/*/example | an example');
+  fails(p, `packages/core: ${PACKAGE}`);
+  p.git('config', '-f', 'trellis.config', '--add', 'workspace.notPackage', 'packages/{core} | a glob');
+  fails(p, 'trellis.config: [workspace] notPackage: glob packages/{core} uses syntax');
+});
+
+test('a manifest at the root, in .trellis/ or in a folder git ignores asks for nothing', () => {
+  const p = project();
+  p.write('pubspec.yaml', 'name: root\n');
+  p.write('.gitignore', 'node_modules/\n');
+  p.write('node_modules/x/package.json', '{}\n');
+  passes(p);
+  const q = withCopy(project());
+  q.write('.trellis/x/package.json', '{}\n');
+  const r = q.hygiene();
+  assert.match(r.stdout, /\.trellis\/x\/package\.json: is not in the manifest/);
+  assert.ok(!r.stdout.includes(PACKAGE), r.stdout);
+});
+
+test('a monorepo of both manifests asks each one, and workspace.manifest changes which', () => {
+  const p = project();
+  p.write('package.json', '{}\n');
+  p.write('web/package.json', '{}\n');
+  p.write('packages/core/pubspec.yaml', 'name: core\n');
+  p.write('tool/go.mod', 'module tool\n');
+  const asked = () => p.hygiene().stdout.split('\n').filter(l => l.includes(PACKAGE)).map(l => l.trim().split(/\s+|:/)[1]).sort();
+  assert.deepEqual(asked(), ['packages/core', 'web']);
+  p.git('config', '-f', 'trellis.config', '--add', 'workspace.manifest', 'go.mod');
+  assert.deepEqual(asked(), ['tool']);
+});
+
+test('the rule lookup resolves a file a rule names against a package found by its manifest', () => {
+  const p = project();
+  p.write('core/pubspec.yaml', 'name: core\n');
+  p.write('core/CLAUDE.md', '# Core\n');
+  p.write('core/lib/core.dart', '\n');
+  p.write('.claude/rules/app.md', `${p.read('.claude/rules/app.md')}\n\`lib/core.dart\` too.\n`);
+  p.trellis('sync');
+  fails(p, 'names core/lib/core.dart, which does not load it');
 });
 
 test('a package at the root is satisfied by the root CLAUDE.md', () => {
