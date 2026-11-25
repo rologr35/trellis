@@ -1,13 +1,14 @@
 // The writing of `trellis sync` (scripts/sync.sh holds the contract).
 
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {BLOCK_FILES, FIND_TRELLIS_COPY, findTrellisSource, generateBlocks, generatedDeny, missingHooks, pushDenyBranch, replaceBlocks} from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
-import {VERSION_FILE, ownTree} from '../lib/copy.mjs';
+import {VERSION_FILE, generatedFiles, isTrellis, ownTree, refuseOtherCheckout} from '../lib/copy.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
 const root = topLevel();
+refuseOtherCheckout(root, 'sync');
 const config = loadConfig({cwd: root});
 const tree = ownTree(projectTree(root));
 const blocks = generateBlocks(tree, config);
@@ -49,5 +50,31 @@ if (hasSettings || copy) {
 
 if (existsSync(path.join(root, '.githooks'))) write(FIND_TRELLIS_COPY, findTrellisSource());
 
+// The repository of trellis: its skills and agents, as a copy holds them.
+const removed = [];
+if (isTrellis(tree)) {
+  const {expected, leftOver} = generatedFiles(tree);
+  const was = tree.bytes([...expected.keys()]);
+  for (const [file, {bytes}] of expected) {
+    if (was.get(file)?.equals(bytes)) continue;
+    const full = path.join(root, file);
+    mkdirSync(path.dirname(full), {recursive: true});
+    // A symbolic link would write its target, the source itself maybe.
+    rmSync(full, {force: true});
+    writeFileSync(full, bytes);
+    changed.push(file);
+  }
+  for (const file of leftOver) {
+    rmSync(path.join(root, file), {force: true});
+    removed.push(file);
+    try {
+      rmdirSync(path.dirname(path.join(root, file)));
+    } catch {
+      // It holds something else.
+    }
+  }
+}
+
 for (const file of changed) console.log(`sync: wrote ${file}`);
-if (changed.length === 0) console.log('sync: nothing to change');
+for (const file of removed) console.log(`sync: removed ${file}`);
+if (changed.length + removed.length === 0) console.log('sync: nothing to change');

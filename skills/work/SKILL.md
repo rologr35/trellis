@@ -76,4 +76,4 @@ Each finding is verified against the code. It is fixed, or rejected with the rea
 
 With the plan read again, the checks of the pull request green and nothing left to answer: `gh pr ready <pr>`, or the GitHub tool of the session when `gh` cannot. Then the URL is said, and a person merges with `/trellis-merge`.
 
-A red check or a conflict of this pull request is solved on its branch: `git fetch origin <integration>` and `git merge origin/<integration>`, the fix, the rungs, a push. Never a rerun of the old commit.
+A red check or a conflict of this pull request is solved on its branch: `git fetch origin <integration>` and `git merge origin/<integration>`, the fix, the rungs, a push. Never a rerun of the previous commit.

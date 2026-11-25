@@ -24,7 +24,9 @@
 //     method block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks
 //     the ones of the copy, and .githooks/find-trellis.sh is trellis's copy;
 //   - the copy of trellis is whole, as `trellis verify` says, and its files are not judged by anything
-//     above: the project does not write them.
+//     above: the project does not write them;
+//   - in the repository of trellis, which runs from its own tree, its skills and agents under .claude/
+//     are the ones `trellis sync` writes from skills/ and agents/.
 //
 // Prints one line per finding and exits 1 when there is any. Node only, no dependencies.
 
@@ -45,7 +47,7 @@ import {
   rulePaths,
 } from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
-import {COPY_DIR, hasCopy, ownTree, verifyCopy} from '../lib/copy.mjs';
+import {COPY_DIR, generatedFiles, hasCopy, isTrellis, ownTree, refuseOtherCheckout, verifyCopy} from '../lib/copy.mjs';
 import {globToRegExp} from '../lib/glob.mjs';
 import {localeOf} from '../lib/locale.mjs';
 import {inPackage, packagesOf} from '../lib/packages.mjs';
@@ -258,6 +260,15 @@ export function hygiene(root, {staged = false} = {}) {
   if (tree.files.some(f => f.startsWith('.githooks/')) && tree.read(FIND_TRELLIS_COPY) !== findTrellisSource()) {
     fail(FIND_TRELLIS_COPY, 'is not trellis\'s lib/find-trellis.sh: run trellis sync');
   }
+  if (isTrellis(tree)) {
+    const {expected, leftOver} = generatedFiles(tree);
+    const bytes = tree.bytes([...expected.keys()]);
+    for (const [file, {source, bytes: theirs}] of expected) {
+      if (!bytes.get(file)) fail(file, `is not there: trellis sync writes it from ${source}`);
+      else if (!bytes.get(file).equals(theirs)) fail(file, `is not what sync writes from ${source}: run trellis sync`);
+    }
+    for (const file of leftOver) fail(file, 'has no source in skills/ or agents/: run trellis sync');
+  }
   // The settings that load the copy's hooks need it there.
   if (copy || (settingsText ?? '').includes(`${COPY_DIR}/`)) findings.push(...verifyCopy(whole));
 
@@ -294,6 +305,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(2);
   }
   const root = topLevel();
+  refuseOtherCheckout(root, 'hygiene');
   if (args.includes('--freeze')) {
     const {files, rose} = freeze(root);
     console.log(`hygiene: froze ${files.length} file(s) in [hygiene] frozen`);

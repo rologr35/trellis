@@ -31,6 +31,8 @@ set -uo pipefail
 TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/find-trellis.sh
+. "$TRELLIS_ROOT/lib/find-trellis.sh"
 
 CLAUDE_MIN='2.1.330'
 
@@ -165,6 +167,12 @@ elif [ "$copy" = true ]; then
     process.stdout.write(String(Object.entries(on).some(([k, v]) => k.startsWith("trellis@") && v === true)));
   ' "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json)" = true ]; then
     warn 'the plugin trellis is enabled too: every hook runs twice; turn it off here (claude plugin disable trellis@trellis) or take it out of the settings that enable it'
+  fi
+elif is_trellis "$top"; then
+  if [ "$top" -ef "$TRELLIS_ROOT" ]; then
+    ok 'trellis runs from its tree'
+  else
+    warn "this is the trellis of $TRELLIS_ROOT, and the repository of trellis runs from its own tree: run bin/trellis doctor"
   fi
 elif grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
   plugin_installed=true

@@ -72,6 +72,35 @@ function project() {
   return p;
 }
 
+/** The repository of trellis itself, with a root of its own, run from its tree as it runs. */
+function ownTree() {
+  const root = path.join(scratch, `own${++count}`);
+  const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {cwd: TRELLIS_ROOT, encoding: 'utf8'});
+  for (const file of listed.split('\0').filter(f => f && existsSync(path.join(TRELLIS_ROOT, f)) && !/^(?:\.claude|\.githooks)\/|^TESTING\.md$/.test(f))) {
+    cpSync(path.join(TRELLIS_ROOT, file), path.join(root, file));
+  }
+  const write = (file, text) => {
+    mkdirSync(path.dirname(path.join(root, file)), {recursive: true});
+    writeFileSync(path.join(root, file), text);
+  };
+  const git = (...args) => execFileSync('git', args, {cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8'});
+  const trellis = (...args) => spawnSync('bash', [path.join(root, 'bin', 'trellis'), ...args], {cwd: root, env, encoding: 'utf8'});
+  git('init', '-q');
+  write('trellis.config', '[project]\n\tname = trellis\n');
+  write('CLAUDE.md', '# Project\n\n<!-- trellis:method -->\n<!-- /trellis:method -->\n');
+  const sync = trellis('sync');
+  assert.equal(sync.status, 0, sync.stderr);
+  trellis('hygiene', '--freeze');
+  return {
+    root,
+    write,
+    git,
+    trellis,
+    read: file => readFileSync(path.join(root, file), 'utf8'),
+    hygiene: (...args) => trellis('hygiene', ...args),
+  };
+}
+
 const fails = (p, needle, ...args) => {
   const r = p.hygiene(...args);
   assert.equal(r.status, 1, `expected a FAIL with "${needle}":\n${r.stdout}${r.stderr}`);
@@ -290,6 +319,57 @@ test('a package without a manifest, of workspace.package, without CLAUDE.md fail
   p.git('config', '-f', 'trellis.config', '--add', 'workspace.package', 'core');
   p.write('core/lib/core.dart', '\n');
   fails(p, 'core: is a [workspace] package without its CLAUDE.md');
+});
+
+test('the repository of trellis has its skills and agents as sync writes them', () => {
+  const p = ownTree();
+  passes(p);
+  const skill = '.claude/skills/trellis-work/SKILL.md';
+  const agent = '.claude/agents/trellis-plan-check.md';
+  assert.ok(!existsSync(path.join(p.root, '.claude/skills/trellis-init')), 'init is not one of them');
+  p.git('add', '-A');
+  passes(p, '--staged');
+  for (const file of [skill, agent]) {
+    const was = p.read(file);
+    rmSync(path.join(p.root, file));
+    fails(p, `${file}: is not there`);
+    p.write(file, `${was}by hand\n`);
+    fails(p, `${file}: is not what sync writes from `);
+    passes(p, '--staged');
+    p.git('add', '-A');
+    fails(p, `${file}: is not what sync writes from `, '--staged');
+    p.write(file, was);
+    p.git('add', '-A');
+  }
+  for (const file of ['.claude/skills/trellis-gone/SKILL.md', '.claude/agents/trellis-gone.md']) {
+    p.write(file, '# Gone\n');
+    fails(p, `${file}: has no source`);
+    rmSync(path.join(p.root, file));
+  }
+  p.write('skills/work/SKILL.md', `${p.read('skills/work/SKILL.md')}\nOne line more.\n`);
+  fails(p, `${skill}: is not what sync writes from skills/work/SKILL.md`);
+  p.trellis('sync');
+  passes(p);
+});
+
+test('a project that is not trellis keeps a skill with the prefix', () => {
+  const p = project();
+  p.write('.claude/skills/trellis-own/SKILL.md', '# Own\n');
+  p.write('.claude-plugin/plugin.json', '{"name": "another"}\n');
+  p.write('lib/find-trellis.sh', '');
+  p.trellis('hygiene', '--freeze');
+  passes(p);
+});
+
+test('the hygiene of another checkout does not judge the repository of trellis', () => {
+  const p = ownTree();
+  for (const args of [[], ['--staged'], ['--freeze']]) {
+    const was = p.read('trellis.config');
+    const r = spawnSync('bash', [TRELLIS, 'hygiene', ...args], {cwd: path.join(p.root, 'lib'), env, encoding: 'utf8'});
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /hygiene: .*run bin\/trellis/);
+    assert.equal(p.read('trellis.config'), was);
+  }
 });
 
 test('a project without its root CLAUDE.md fails', () => {
