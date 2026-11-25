@@ -16,8 +16,8 @@
 # (an analyzer error set to ignore, a rule set to false or off, inherited ones included, an excluded
 # path, an ESLint rule off or ignored path), the default model of .claude/settings.json raised or
 # a hook dropped, a limit or a frozen size of [hygiene] raised (a size frozen for the first time is
-# not a rise; lowering is free), keepRef, namedElsewhere, mustNotLoad or [workspace] notPackage
-# grown, autonomy.level raised, a [ratchets] list or [workspace] manifest shortened.
+# not a rise; lowering is free), keepRef, namedElsewhere or mustNotLoad grown, a glob more in
+# [workspace] notPackage, autonomy.level raised, a [ratchets] list or [workspace] manifest shortened.
 #
 # The local escape, set only after the person confirmed knowing the cost:
 #   git config branch.<branch>.ratchet-loosened true

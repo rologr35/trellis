@@ -104,6 +104,11 @@ tl_eq 'the git hooks run its code' '1' "$(own_commit -m 'docs: y (#2)')"
 tl_has 'and not the one of the PATH' 'the hygiene of the worktree' "$(cat "$TL_TMP/out.txt")"
 printf '{"name": "another"}\n' > .claude-plugin/plugin.json
 tl_eq 'a project with another name is not trellis' "$own/bin/trellis" "$(found "$own/bin:$PATH")"
+printf '{"name": "another", "author": {"name": "trellis"}}\n' > .claude-plugin/plugin.json
+tl_eq 'nor one whose author has the name' "$own/bin/trellis" "$(found "$own/bin:$PATH")"
+for hook in pre-commit commit-msg pre-push; do
+  tl_eq "its $hook is the one of the template" '0' "$(cmp -s "$TRELLIS_ROOT/templates/githooks/$hook" "$TRELLIS_ROOT/.githooks/$hook" && [ -x "$TRELLIS_ROOT/.githooks/$hook" ]; echo $?)"
+done
 cd "$repo" || exit 1
 
 printf '\nwithout trellis\n'

@@ -158,8 +158,6 @@ The copy of a project holds `bin/`, `hooks/`, `lib/`, `scripts/`, `hygiene/`, `m
 - GitHub is asked through `lib/gh.sh`, as the account of the owner of the repository, with the REST interface.
 - In a worktree the command is `bin/trellis` of that worktree. `sync` and `hygiene` of another checkout refuse.
 - `.trellis/` in the method is the root of this repository: `.trellis/templates/en/issue.md` is `templates/en/issue.md`.
-- The two languages of `method/` and of `templates/` change together, and a change of `skills/` or `agents/` ends with `bin/trellis sync`.
-- Names, comments, commits, issues and pull requests are in English, in short and plain sentences.
 
 ## Never
 

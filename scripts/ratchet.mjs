@@ -8,6 +8,7 @@ import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
 import {MANIFEST_FILE, copiedFiles} from '../lib/copy.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {packagePath} from '../lib/packages.mjs';
 
 const [, , baseRef, branchArg, escaped] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
@@ -237,12 +238,19 @@ if (configWas !== null) {
       add(`trellis.config: raises the frozen size of ${file} from ${size} to ${frozenNow.get(file)}`, 'every reader of the file pays the extra bytes', 'rewrite what grew to its current state');
     }
   }
-  for (const key of ['hygiene.keepRef', 'hygiene.namedElsewhere', 'hygiene.mustNotLoad', 'workspace.notPackage']) {
+  for (const key of ['hygiene.keepRef', 'hygiene.namedElsewhere', 'hygiene.mustNotLoad']) {
     const was = oldConfig.all(key).length;
     const now = newConfig.all(key).length;
     if (now > was) {
       add(`trellis.config: ${key} grows from ${was} to ${now} entries`, 'the hygiene check stops seeing that case', 'fix the file so the check passes as it is');
     }
+  }
+  // By its glob: a wider one in the place of another is as many entries.
+  const notPackage = cfg => cfg.all('workspace.notPackage').map(v => packagePath(v.split('|')[0]));
+  const wasOut = new Set(notPackage(oldConfig));
+  const out = notPackage(newConfig).filter(glob => !wasOut.has(glob));
+  if (out.length > 0) {
+    add(`trellis.config: workspace.notPackage adds ${out.join(', ')}`, 'a folder it matches is not asked for its CLAUDE.md', 'write the CLAUDE.md of the package');
   }
   // A value that is none of the levels is the lowest, as `trellis issue follow-up` reads it.
   const LEVELS = ['careful', 'balanced', 'autonomous'];

@@ -145,7 +145,15 @@ tl_eq 'the ones without the prefix stay' '# Own# Own' "$(cat .claude/skills/own/
 rm .claude/agents/trellis-plan-check.md && ln -s ../../agents/plan-check.md .claude/agents/trellis-plan-check.md
 tl_eq 'a symbolic link to a source' '0' "$(sync)"
 tl_eq 'is replaced, and the source stays' 'name: plan-check name: trellis-plan-check' "$(sed -n 2p agents/plan-check.md) $(sed -n 2p .claude/agents/trellis-plan-check.md)"
+rm -rf .claude/skills/trellis-work && ln -s ../../skills/work .claude/skills/trellis-work
+tl_eq 'a folder linked to the one of a source' '0' "$(sync)"
+tl_eq 'too' 'name: work name: trellis-work' "$(sed -n 2p skills/work/SKILL.md) $(sed -n 2p .claude/skills/trellis-work/SKILL.md)"
 git add -A && git commit -q --no-verify -m 'chore: generated (#1)'
+# On a disk that ignores the case, the same folder under another one is the same checkout.
+other="$(dirname "$own")/$(basename "$own" | tr '[:lower:][:upper:]' '[:upper:][:lower:]')"
+if [ "$other" -ef "$own" ]; then
+  tl_eq 'its path in another case is the same checkout' '0' "$(cd "$other" && bash "$other/bin/trellis" sync > "$TL_TMP/out.txt" 2>&1; echo $?)"
+fi
 tl_eq 'the sync of another checkout refuses' '1' "$(cd lib && bash "$TRELLIS" sync > "$TL_TMP/out.txt" 2>&1; echo $?)"
 tl_has 'and says which to run' 'run bin/trellis' "$(cat "$TL_TMP/out.txt")"
 tl_eq 'with nothing written' '' "$(git status --porcelain)"

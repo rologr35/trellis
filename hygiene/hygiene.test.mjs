@@ -434,6 +434,10 @@ test('a monorepo of both manifests asks each one, and workspace.manifest changes
   assert.deepEqual(asked(), ['packages/core', 'web']);
   p.git('config', '-f', 'trellis.config', '--add', 'workspace.manifest', 'go.mod');
   assert.deepEqual(asked(), ['tool']);
+  for (const value of ['*.csproj', 'web/package.json']) {
+    p.git('config', '-f', 'trellis.config', '--replace-all', 'workspace.manifest', value);
+    fails(p, `trellis.config: [workspace] manifest: ${value} is not the name of a file`);
+  }
 });
 
 test('the rule lookup resolves a file a rule names against a package found by its manifest', () => {

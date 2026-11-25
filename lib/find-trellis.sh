@@ -13,7 +13,8 @@
 
 # Whether the folder is the repository of trellis, which runs from its own tree and not from a copy.
 is_trellis() {
-  [ -f "$1/lib/find-trellis.sh" ] && grep -qE '"name"[[:space:]]*:[[:space:]]*"trellis"' "$1/.claude-plugin/plugin.json" 2>/dev/null
+  [ -f "$1/lib/find-trellis.sh" ] && [ -f "$1/.claude-plugin/plugin.json" ] || return 1
+  node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).name === "trellis" ? 0 : 1)' "$1/.claude-plugin/plugin.json" 2>/dev/null
 }
 
 # The command the project at that top level brings, or nothing.

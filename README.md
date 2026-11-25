@@ -56,7 +56,7 @@ Each package of a project has its `CLAUDE.md`, and `trellis hygiene` names the o
 | `package` | One line per package without a manifest. |
 | `notPackage` | `<glob> \| <reason>`: a folder that is no package, an example or a fixture, whatever lists it. |
 
-The hygiene also resolves the files a rule names against the packages, and fails without a root `CLAUDE.md`. The ratchet stops an entry more in `notPackage` and one less in `manifest`. A project that moves from 0.7.1 or earlier gets one finding for each package without its file: it writes the `CLAUDE.md`, or a line of `notPackage` with its reason, which the ratchet of the pull request of the update stops until a person confirms it.
+The hygiene also resolves the files a rule names against the packages, and fails without a root `CLAUDE.md`. The ratchet stops a glob more in `notPackage` and one less in `manifest`. A project that moves from 0.7.1 or earlier gets one finding for each package without its file, and can get one more for a rule that names a file by its path inside a package. For the first, it writes the `CLAUDE.md`, or a line of `notPackage` with its reason, which the ratchet of the pull request of the update stops until a person confirms it.
 
 ## Language
 

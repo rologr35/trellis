@@ -122,7 +122,14 @@ tl_eq 'a grown allowlist is refused' '1' "$(judge)"
 reset
 git config -f trellis.config --add workspace.notPackage 'packages/*/example | an example' && git add -A
 tl_eq 'a package more without CLAUDE.md is refused' '1' "$(judge)"
-tl_has 'naming it' 'workspace.notPackage grows from 0 to 1 entries' "$(cat "$OUT")"
+tl_has 'naming it' 'workspace.notPackage adds packages/*/example' "$(cat "$OUT")"
+git commit -q --no-verify -m 'chore: an example (#7)'
+git config -f trellis.config workspace.notPackage 'packages/*/example | another reason' && git add -A
+tl_eq 'another reason passes' '0' "$(judge)"
+git config -f trellis.config workspace.notPackage '** | an example' && git add -A
+tl_eq 'a wider glob in its place is refused' '1' "$(judge)"
+tl_has 'naming it' 'workspace.notPackage adds **' "$(cat "$OUT")"
+git config -f trellis.config --unset workspace.notPackage && git commit -qa --no-verify -m 'chore: none (#7)'
 reset
 git config -f trellis.config --add workspace.manifest go.mod && git add -A
 tl_eq 'a manifest declared in place of the default ones is refused' '1' "$(judge)"

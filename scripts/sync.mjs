@@ -1,6 +1,6 @@
 // The writing of `trellis sync` (scripts/sync.sh holds the contract).
 
-import {existsSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync} from 'node:fs';
+import {existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, unlinkSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {BLOCK_FILES, FIND_TRELLIS_COPY, findTrellisSource, generateBlocks, generatedDeny, missingHooks, pushDenyBranch, replaceBlocks} from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
@@ -58,8 +58,10 @@ if (isTrellis(tree)) {
   for (const [file, {bytes}] of expected) {
     if (was.get(file)?.equals(bytes)) continue;
     const full = path.join(root, file);
-    mkdirSync(path.dirname(full), {recursive: true});
-    // A symbolic link would write its target, the source itself maybe.
+    const folder = path.dirname(full);
+    // A symbolic link, of the file or of the folder of a skill, would write its target, the source itself maybe.
+    if (lstatSync(folder, {throwIfNoEntry: false})?.isSymbolicLink()) unlinkSync(folder);
+    mkdirSync(folder, {recursive: true});
     rmSync(full, {force: true});
     writeFileSync(full, bytes);
     changed.push(file);

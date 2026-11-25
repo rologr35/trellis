@@ -143,6 +143,9 @@ export function hygiene(root, {staged = false} = {}) {
   // Rules load where they speak.
   const kind = config.get('workspace.kind');
   const extensions = config.all('hygiene.namedExt').length ? config.all('hygiene.namedExt') : NAMED_EXT[kind] ?? [];
+  for (const value of config.all('workspace.manifest')) {
+    if (/[/*?[\]{}]/u.test(value)) fail('trellis.config', `[workspace] manifest: ${value} is not the name of a file, so it finds no package`);
+  }
   let packages = [];
   try {
     packages = packagesOf(tree, config);

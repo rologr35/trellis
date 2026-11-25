@@ -1,5 +1,6 @@
-# The rules of trellis on its own pull requests, with the code of the branch: the checks of
-# consumer-check.yml that a repository without a copy has, and the close of the issue of a merged one.
+# The rules of trellis on its own pull requests, with the code of the branch and read permission only,
+# so without the protected head of consumer-check.yml, which writes in the pull request; and the close
+# of the issue of a merged one.
 
 name: trellis
 
@@ -47,6 +48,7 @@ jobs:
     uses: ./.github/workflows/consumer-closed.yml
     with:
       trellis-ref: ${{ github.event.pull_request.merge_commit_sha }}
+      trellis-repo: ${{ github.repository }}
     permissions:
       contents: read
       issues: write
