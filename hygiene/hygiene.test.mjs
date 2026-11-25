@@ -292,6 +292,14 @@ test('a package without a manifest, of workspace.package, without CLAUDE.md fail
   fails(p, 'core: is a [workspace] package without its CLAUDE.md');
 });
 
+test('a project without its root CLAUDE.md fails', () => {
+  const p = project();
+  rmSync(path.join(p.root, 'CLAUDE.md'));
+  fails(p, 'CLAUDE.md: is not there');
+  p.git('add', '-A');
+  fails(p, 'CLAUDE.md: is not there', '--staged');
+});
+
 const PACKAGE = 'is a [workspace] package without its CLAUDE.md';
 
 test('a package with a manifest and no CLAUDE.md fails, without a line of workspace.package', () => {

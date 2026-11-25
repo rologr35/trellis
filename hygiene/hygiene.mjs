@@ -20,10 +20,9 @@
 //     [hygiene] frozen size plus 2%, every one of them frozen;
 //   - every package of lib/packages.mjs has its CLAUDE.md (a package at the root, `.`, is the root one);
 //   - the orientation block lists every nested file and every rule;
-//   - every generated block matches what `trellis sync` generates, the root carries the method
-//     block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks the
-//     ones of the copy, and
-//     .githooks/find-trellis.sh is trellis's copy;
+//   - every generated block matches what `trellis sync` generates, the root is there and carries the
+//     method block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks
+//     the ones of the copy, and .githooks/find-trellis.sh is trellis's copy;
 //   - the copy of trellis is whole, as `trellis verify` says, and its files are not judged by anything
 //     above: the project does not write them.
 //
@@ -121,6 +120,7 @@ export function hygiene(root, {staged = false} = {}) {
   const skills = tree.files.filter(f => /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f));
   const docs = tree.files.filter(f => /^docs\/.*\.md$/.test(f));
   const rootFile = tree.has('CLAUDE.md') ? ['CLAUDE.md'] : [];
+  if (rootFile.length === 0) fail('CLAUDE.md', 'is not there, and the method is always loaded from it: write it from the template CLAUDE.root.md');
   const testing = tree.has('TESTING.md') ? ['TESTING.md'] : [];
   const instructions = [...rootFile, ...nested, ...rules, ...agents, ...skills, ...testing];
 

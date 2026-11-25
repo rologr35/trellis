@@ -16,6 +16,8 @@ mkdir .githooks
 cp "$TRELLIS_ROOT"/templates/githooks/* .githooks/
 cp "$TRELLIS_ROOT/lib/find-trellis.sh" .githooks/find-trellis.sh
 printf '[git]\n\treleaseBranch = main\n' > trellis.config
+printf '# Project\n\n<!-- trellis:method -->\n<!-- /trellis:method -->\n' > CLAUDE.md
+bash "$TRELLIS" sync > /dev/null
 git add -A && git commit -q -m 'chore: setup (#1)'
 git config core.hooksPath .githooks
 
