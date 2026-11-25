@@ -15,6 +15,7 @@
 #   trellis issue check --body <file> | check <n> [--print]
 #   trellis issue gates <n>                 the gates the branch touches and the plan does not name
 #   trellis issue claim <n> [--unattended] [--resume]
+#   trellis issue stop <n> --body-file <file>
 #   trellis issue create --title <t> --body-file <file>
 #   trellis issue close <pr> [--done]
 #   trellis check                           runs [command] check in order, fail-fast
@@ -34,7 +35,7 @@ TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,20p' "$self" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,21p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 

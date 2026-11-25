@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # issue: the plan of an issue, written from the mould (templates/<locale>/issue.md) and checked; the
-# claim of the issue; and its close when its pull request is merged.
+# claim of the issue and its stop; and its close when its pull request is merged.
 #
 #   trellis issue check --body <file>    a body, before it is published
 #   trellis issue check <n>              the plan of an issue of this repository, at pick-up
@@ -9,6 +9,8 @@
 #   trellis issue gates <n>              the files of this branch that match a gate the plan does not name
 #   trellis issue claim <n> [--unattended] [--resume]
 #                                        takes the issue for this session
+#   trellis issue stop <n> --body-file <file>
+#                                        leaves the issue stopped, with what it needs in a comment
 #   trellis issue create --title <t> --body-file <file>
 #                                        checks the body, creates the issue, prints its URL
 #   trellis issue close <pr> [--done]    closes the issues of a merged pull request; --done when its
@@ -39,7 +41,12 @@
 # that does not pass the check. Then it assigns the account it asks as and reads the issue again: with
 # another assignee it takes itself off and refuses. --resume takes what its own account already has: the
 # assignment, the branch, and a stopped issue that is its own or nobody's, whose label it takes off.
-# --unattended, for a run without a person, also refuses a plan with Gates other than none or any Needs.
+# --unattended, for a run without a person, also refuses a plan with Gates other than none or any Needs,
+# and a plan it refuses, for that or for the check, is stopped with the reasons. What is taken is not.
+#
+# The stop is one comment, whose first line is a fixed mark, with the sections Done, Missing and Needs of
+# the file, none of them empty (`none` counts), and the label stopped, created when the repository lacks
+# it. The assignee, when there is one, stays.
 #
 # The label of the issue created is the class of its complexity line. S, M and L are created when the
 # repository lacks them.
@@ -70,6 +77,7 @@ usage() {
     printf 'usage: trellis issue check --body <file> | check <n> [--print]\n'
     printf '       trellis issue gates <n>\n'
     printf '       trellis issue claim <n> [--unattended] [--resume]\n'
+    printf '       trellis issue stop <n> --body-file <file>\n'
     printf '       trellis issue create --title <t> --body-file <file>\n'
     printf '       trellis issue close <pr> [--done]\n'
   } >&2
@@ -211,8 +219,39 @@ whoami() {
   ISSUE_ME="$(printf '%s' "$GH_AS_OUT" | tr '[:upper:]' '[:lower:]')"
 }
 
+# The label comes before the comment: a run again after a failure writes one comment.
+write_stop() {
+  ensure_label stopped 5319E7 'Stopped: its last stop says what it needs' \
+    && issue_write 'the label' "$1" "issues/$1/labels" -f 'labels[]=stopped' \
+    && issue_write 'the comment' "$1" "issues/$1/comments" -F "body=@$ISSUE_TMP/stop" --jq .html_url || return 1
+  printf 'issue %s: #%s is stopped: %s\n' "$action" "$1" "$GH_AS_OUT"
+}
+
+# The stop of a plan a run without a person could not take.
+refuse_plan() {
+  judge refusal "$ISSUE_TMP/reasons" "$ISSUE_TMP/stop" && write_stop "$1"
+}
+
+stop_issue() {
+  local number='' file='' n
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --body-file) [ $# -gt 1 ] || usage; file="$2"; shift ;;
+      --body-file=*) file="${1#*=}" ;;
+      -*) usage ;;
+      *) [ -z "$number" ] || usage; number="$1" ;;
+    esac
+    shift
+  done
+  n="${number#\#}"
+  case "$n" in '' | *[!0-9]*) usage ;; esac
+  [ -f "$file" ] || usage
+  make_tmp || return 1
+  judge stop "$file" "$ISSUE_TMP/stop" && write_stop "$n"
+}
+
 claim_issue() {
-  local number='' unattended=false resume=false arg n branches own cannot
+  local number='' unattended=false resume=false arg n branches own checked
   for arg in "$@"; do
     case "$arg" in
       --unattended) unattended=true ;;
@@ -246,11 +285,21 @@ claim_issue() {
     return 1
   fi
 
-  check_plan || { refuse_claim "$n" 'its plan does not pass the check'; return 1; }
+  check_plan > "$ISSUE_TMP/said" 2> "$ISSUE_TMP/reasons"
+  checked=$?
+  cat "$ISSUE_TMP/said"
+  cat "$ISSUE_TMP/reasons" >&2
+  if [ "$checked" -ne 0 ]; then
+    refuse_claim "$n" 'its plan does not pass the check'
+    [ "$unattended" = false ] || refuse_plan "$n"
+    return 1
+  fi
   if [ "$unattended" = true ]; then
     judge attended "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/attended" || return 1
     if [ -s "$ISSUE_TMP/attended" ]; then
       refuse_claim "$n" "a run without a person cannot take it: $(tr '\n' ';' < "$ISSUE_TMP/attended" | sed 's/;$//; s/;/; /g')"
+      mv "$ISSUE_TMP/attended" "$ISSUE_TMP/reasons"
+      refuse_plan "$n"
       return 1
     fi
   fi
@@ -395,6 +444,7 @@ case "$action" in
     esac
     ;;
   claim) claim_issue "$@" ;;
+  stop) stop_issue "$@" ;;
   gates) check_gates "$@" ;;
   create) create_issue "$@" ;;
   close)

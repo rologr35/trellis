@@ -9,6 +9,9 @@
 //   node issue-check.mjs issue-class <json> <comments>
 //   node issue-check.mjs attended <json> <comments>   prints what a run without a person cannot take, one
 //                                       per line
+//   node issue-check.mjs stop <file> <comment>      judges the text of a stop and writes its comment
+//   node issue-check.mjs refusal <file> <comment>   writes the comment of a plan a run could not take, for
+//                                       the reasons of the file, one per line
 //   node issue-check.mjs gates <json> <comments>   judges the files of the branch against the gates of the plan
 // The text is data: nothing in it is run.
 
@@ -18,9 +21,9 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
 import {globToRegExp} from '../lib/glob.mjs';
-import {ISSUE, localeOf} from '../lib/locale.mjs';
+import {ISSUE, PR_SECTIONS, STOP, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
-import {commentsOf, mayWrite} from './issue-close.mjs';
+import {commentsOf, mayWrite, readBody, sectionOf as sectionNamed} from './issue-close.mjs';
 
 const [, , mode, file, commentsFile] = process.argv;
 const config = loadConfig();
@@ -443,10 +446,35 @@ function report(misses, what = 'issue check') {
   return 1;
 }
 
+/** The first line of the comment of a stop. */
+const STOP_MARK = '<!-- trellis:stopped -->';
+
+/** What the text of a stop lacks: one message per miss. */
+function judgeStop(text) {
+  const {lines, prose} = readBody(text);
+  return STOP[localeOf(config)].sections.flatMap(name => {
+    const content = sectionNamed(prose, name, lines);
+    if (!content) return [`missing the section **${name}**`];
+    return content.some(l => /[\p{L}\p{N}]/u.test(l)) ? [] : [`**${name}** is empty; write \`${PR_SECTIONS[localeOf(config)].noneWord}\` when there is nothing`];
+  });
+}
+
+/** The text of the stop of a plan that was refused. */
+function refusal(reasons) {
+  const {sections: [done, missing, needs], notStarted} = STOP[localeOf(config)];
+  const items = reasons.split('\n').map(l => l.trim()).filter(Boolean).map(l => `- ${l.replace(/^- /, '')}`);
+  return `**${done}**: ${PR_SECTIONS[localeOf(config)].noneWord}\n\n**${missing}**: ${notStarted}\n\n**${needs}**:\n\n${items.join('\n')}\n`;
+}
+
 const text = readFileSync(file, 'utf8');
 if (mode === 'body') process.exitCode = report(judge(parse(text), linesOf(text)));
 if (mode === 'class') console.log(parse(text).complexity);
-if (!['body', 'class'].includes(mode)) {
+if (mode === 'stop') {
+  process.exitCode = report(judgeStop(text), 'issue stop');
+  if (process.exitCode === 0) writeFileSync(commentsFile, `${STOP_MARK}\n${text}`);
+}
+if (mode === 'refusal') writeFileSync(commentsFile, `${STOP_MARK}\n${refusal(text)}`);
+if (!['body', 'class', 'stop', 'refusal'].includes(mode)) {
   const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
   if (plan.note && ['issue', 'print'].includes(mode)) console.error(`issue: ${plan.note}`);
   if (mode === 'issue') {

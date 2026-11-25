@@ -100,6 +100,7 @@ if ((m = is(/^issues\/(\d+)(\/.*)?$/))) {
     const all = load(at(`comments-${m[1]}.json`));
     all.push({user: {login: 'x'}, author_association: 'OWNER', created_at: '2026-01-09T00:00:00Z', body: fields.body});
     save(at(`comments-${m[1]}.json`), all);
+    answer({html_url: `https://github.com/rologr35/fixture/issues/${m[1]}#issuecomment-${all.length}`});
   } else if (method === 'POST' && sub === '/assignees') {
     failing('assign');
     issue.assignees ||= [];
@@ -701,7 +702,74 @@ git remote set-url origin "$TL_TMP/no-such-remote"
 tl_eq 'an origin that does not answer is refused' '1' "$(claim_of 33)"
 tl_has '  which it says' 'origin could not be asked for its branch' "$(out)"
 git remote set-url origin "$remote"
+# last_comment <n>: the body of the last comment of an issue.
+last_comment() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).at(-1)?.body ?? ""' "$here/comments-$1.json"; }
+labels_of() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).labels.map(l => l.name).join(" ")' "$here/issue-$1.json"; }
+printf 'bug\n' > "$GH_FIXTURES/labels"
+issue_json 34 "$TL_TMP/symptom.md"
+tl_eq '--unattended refused for the check' '1' "$(claim_of 34 --unattended)"
+tl_has '  ends in a stop, which it says' 'issue claim: #34 is stopped: https://github.com/rologr35/fixture/issues/34#issuecomment-1' "$(out)"
+tl_eq '  with the label, created first' 'POST labels name=stopped|POST issues/34/labels labels=stopped|POST issues/34/comments body|' "$(writes | sed 's/ color=.*//' | tr '\n' '|')"
+tl_eq '  its first line the mark' '<!-- trellis:stopped -->' "$(last_comment 34 | head -n 1)"
+tl_has '  the three sections' '**Done**: none' "$(last_comment 34)"
+tl_has '  the three sections' '**Missing**: the whole plan' "$(last_comment 34)"
+tl_has '  with what the check said' '- no section `## Approved plan`' "$(last_comment 34)"
+tl_eq '  and nobody assigned' '' "$(assignees 34)"
+tl_eq 'a second run is refused for the label' '1' "$(claim_of 34 --unattended)"
+tl_eq '  and writes nothing' '' "$(writes)"
+issue_json 34 "$TL_TMP/good.md" OWNER "$TL_TMP/dated.md"
+facts 34 'i.assignees = [{login: "other"}]'
+tl_eq '--unattended refused because it is taken' '1' "$(claim_of 34 --unattended)"
+tl_eq '  writes nothing' '' "$(writes)"
+git config -f trellis.config gate.notes.paths 'notes/*.md'
+sed 's/^Gates: none\.$/Gates: notes\
+\
+Needs: a key/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 34 "$TL_TMP/case.md"
+tl_eq '--unattended refused for Gates and Needs' '1' "$(claim_of 34 --unattended)"
+tl_has '  ends in a stop with the gate' '- Gates: notes' "$(last_comment 34)"
+tl_has '  and the need' '- Needs: a key' "$(last_comment 34)"
+git config -f trellis.config --remove-section gate.notes
+git config -f trellis.config project.locale es
+issue_json 34 "$TL_TMP/symptom.md"
+tl_eq 'es: the same' '1' "$(claim_of 34 --unattended)"
+tl_has '  in its words' '**Hecho**: nada' "$(last_comment 34)"
+git config -f trellis.config --unset project.locale
 tl_has 'the usage of trellis lists claim' 'issue claim <n> [--unattended] [--resume]' "$("$TRELLIS" help 2>&1)"
+
+printf '\nstop\n'
+# stop_of <n> <text>: a stop with that text, with a clean log.
+stop_of() { rm -f "$GH_FIXTURES"/calls.log "$GH_FIXTURES"/writes.log; printf '%b' "$2" > "$TL_TMP/stop.md"; status_of stop "$1" --body-file "$TL_TMP/stop.md"; }
+done_text='**Done**: the branch 35-thing, pushed.\n\n**Missing**: step 3.\n\n'
+printf 'bug\nstopped\n' > "$GH_FIXTURES/labels"
+issue_json 35 "$TL_TMP/good.md"
+facts 35 'i.assignees = [{login: "rologr35"}]'
+tl_eq 'a stop with the three sections' '0' "$(stop_of 35 "$done_text**Needs**:\n\n- a key of the store\n")"
+tl_eq '  is the label and one comment' 'POST issues/35/labels labels=stopped|POST issues/35/comments body|' "$(writes | tr '\n' '|')"
+tl_eq '  the label is there' 'stopped' "$(labels_of 35)"
+tl_eq '  the first line of the comment is the mark' '<!-- trellis:stopped -->' "$(last_comment 35 | head -n 1)"
+tl_has '  with the text' '- a key of the store' "$(last_comment 35)"
+tl_eq '  the assignee stays' 'rologr35' "$(assignees 35)"
+tl_has '  and its URL is printed' 'issue stop: #35 is stopped: https://github.com/rologr35/fixture/issues/35#issuecomment-1' "$(out)"
+tl_eq 'none counts, and the sections may be headings' '0' "$(stop_of 35 '## Done\n\nnone\n\n## Missing\n\nnone\n\n## Needs\n\nnone\n')"
+stop_fails() { tl_eq "$1" '1' "$(stop_of 35 "$2")"; tl_has '  and is named' "$3" "$(out)"; tl_eq '  with nothing written' '' "$(writes)"; }
+stop_fails 'a stop without Needs' "$done_text" 'missing the section **Needs**'
+stop_fails 'with an empty one' "$done_text**Needs**:\n\n" '**Needs** is empty; write `none`'
+stop_fails 'with a bullet that says nothing' "$done_text**Needs**:\n\n- \n" '**Needs** is empty'
+stop_fails 'with it in a comment' "$done_text<!--\n**Needs**: a key\n-->\n" 'missing the section **Needs**'
+stop_fails 'without Done' '**Missing**: x\n\n**Needs**: y\n' 'missing the section **Done**'
+stop_fails 'with the words of another locale' '**Hecho**: x\n\n**Falta**: y\n\n**Necesita**: z\n' 'missing the section **Done**'
+git config -f trellis.config project.locale es
+tl_eq 'es: its words' '0' "$(stop_of 35 '**Hecho**: x\n\n**Falta**: y\n\n**Necesita**: z\n')"
+git config -f trellis.config --unset project.locale
+touch "$GH_FIXTURES/comment-fails"
+tl_eq 'a comment that fails' '1' "$(stop_of 35 "$done_text**Needs**: a key\n")"
+tl_has '  with the error of gh' 'no comment for you' "$(out)"
+rm "$GH_FIXTURES/comment-fails"
+tl_eq 'no file' '2' "$(status_of stop 35)"
+tl_eq 'a file that does not exist' '2' "$(status_of stop 35 --body-file "$TL_TMP/none.md")"
+tl_eq 'no number' '2' "$(status_of stop --body-file "$TL_TMP/stop.md")"
+tl_has 'the usage of trellis lists stop' 'issue stop <n> --body-file <file>' "$("$TRELLIS" help 2>&1)"
 
 printf '\ncreate\n'
 calls() { cat "$GH_FIXTURES/calls.log" 2>/dev/null; }
