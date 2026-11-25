@@ -17,7 +17,7 @@
 # path, an ESLint rule off or ignored path), the default model of .claude/settings.json raised or
 # a hook dropped, a limit or a frozen size of [hygiene] raised (a size frozen for the first time is
 # not a rise; lowering is free), keepRef, namedElsewhere or mustNotLoad grown, a glob more in
-# [workspace] notPackage, autonomy.level raised, a [ratchets] list or [workspace] manifest shortened,
+# [workspace] notPackage, a value more in tracker.search or copy.without, autonomy.level raised, a [ratchets] list or [workspace] manifest shortened,
 # a section in force dropped by [pr] section (the ones of the language when none is set), the last [pr] action
 # taken out, style.bareReference set to allow, issue.class to label, a check of the project taken out
 # (command.pullRequestCheck, issueCheck or commitCheck) and project.public from true to false.

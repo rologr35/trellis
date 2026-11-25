@@ -291,5 +291,21 @@ tl_eq 'project.public to true passes' '0' "$(to true)"
 from project.public true
 tl_eq 'project.public to false is refused' '1' "$(to false)"
 tl_eq '  and taken out too' '1' "$(to)"
+for name in tracker.search copy.without; do
+  from "$name"
+  tl_eq "a first value of $name is refused" '1' "$(to one)"
+  tl_has '  naming it' "trellis.config: $name adds one" "$(cat "$OUT")"
+  from "$name" one two
+  tl_eq "a value more of $name is refused" '1' "$(to one two three)"
+  tl_has '  naming it alone' "$name adds three" "$(cat "$OUT")"
+  tl_eq 'a value changed for another too' '1' "$(to one three)"
+  tl_has '  naming it' "$name adds three" "$(cat "$OUT")"
+  tl_eq 'and less values with another' '1' "$(to three)"
+  tl_eq 'one less passes' '0' "$(to two)"
+  tl_eq 'none passes' '0' "$(to)"
+  tl_eq 'the same ones in another order pass' '0' "$(to two one)"
+  tl_eq 'an empty one is none' '0' "$(to one two '')"
+  from "$name"
+done
 
 tl_done
