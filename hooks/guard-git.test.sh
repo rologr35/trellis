@@ -399,6 +399,28 @@ tl_eq 'a project that is empty too' 'deny' "$(CLAUDE_PROJECT_DIR='' verdict 'git
 tl_eq 'a session in no repository is judged as today' 'deny' "$(verdict "cd '$clone' && git switch -c 7-thing" "$plain")"
 tl_eq '  with a project in none' 'deny' "$(CLAUDE_PROJECT_DIR="$plain" verdict "cd '$repo' && git switch -c 7-thing" "$plain")"
 
+printf '\nthe command of a worktree: git.worktreeAdd (#48)\n'
+# reason <command>: what the refusal says.
+reason() {
+  node -e 'console.log(JSON.stringify({tool_input: {command: process.argv[1]}, cwd: process.argv[2]}))' "$1" "$repo" | bash "$HOOK" |
+    node -e 'const out = require("fs").readFileSync(0, "utf8"); process.stdout.write(out ? JSON.parse(out).hookSpecificOutput.permissionDecisionReason : "")'
+}
+printf 'open\n' > "$GH_FIXTURES/issue-4"
+# away: the second refusal, from the branch of an open issue.
+away() { git switch -q 4-thing; reason 'git switch develop'; git switch -q develop; }
+cp trellis.config "$TL_TMP/config.keep"
+to_default='The main checkout stays on develop: every issue is worked in its own worktree. Run trellis worktree add <n> <slug> (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path), then EnterWorktree with that path.'
+away_default='The main checkout is on 4-thing and issue 4 is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout develop.'
+tl_eq 'with no key, the refusal of a switch to an issue branch is the one of before' "$to_default" "$(reason 'git switch -c 7-thing')"
+tl_eq '  and so is the one of a switch away' "$away_default" "$(away)"
+git config -f trellis.config git.worktreeAdd 'trellis worktree add'
+tl_eq 'with the default written, too' "$to_default" "$(reason 'git switch -c 7-thing')"
+git config -f trellis.config git.worktreeAdd 'bin/tree new'
+tl_eq 'with another, the refusal names it, without what trellis worktree add does' 'The main checkout stays on develop: every issue is worked in its own worktree. Run bin/tree new <n> <slug>, then EnterWorktree with that path.' "$(reason 'git switch -c 7-thing')"
+tl_eq '  and so does the one of a switch away' "${away_default/trellis worktree add/bin/tree new}" "$(away)"
+cp "$TL_TMP/config.keep" trellis.config
+rm "$GH_FIXTURES/issue-4"
+
 printf '\nissue creation\n'
 transcript="$TL_TMP/transcript.jsonl"
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "ls"}}]}}\n' > "$transcript"

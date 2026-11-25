@@ -24,6 +24,9 @@ git.protected|multi|main
 git.protected|multi|develop
 git.assistantMayMergeInto|multi|develop
 git.hooksPath|single|.githooks
+# The command a session is told to create a worktree with. It takes `<n> <slug>`, and `--resume` after
+# them for a branch that is already on origin, and the last line it prints is the path.
+git.worktreeAdd|single|trellis worktree add
 
 tracker.kind|enum:github,none|github
 # Regular expressions of JavaScript: a command of the session one of them matches is a search of the

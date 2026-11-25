@@ -104,6 +104,7 @@ load_config() {
     INTEGRATION="$(tc_get git.integrationBranch)"
     TRACKER="$(tc_get tracker.kind)"
     SEARCHES="$(tc_all tracker.search)"
+    WORKTREE_ADD="$(tc_get git.worktreeAdd)"
   fi
   [ "$HAS_CONFIG" = true ]
 }
@@ -192,12 +193,13 @@ branch_issue() {
 }
 
 guard_branch_switch() {
-  local dir="$1" target="$2" branch issue state
+  local dir="$1" target="$2" branch issue state does=''
   is_main_checkout "$dir" || return 0
   of_the_session "$dir" || return 0
   of_the_session "$dir" || return 0
   if [ -n "$target" ] && [[ "$target" =~ $ISSUE_REGEX ]]; then
-    deny "The main checkout stays on $INTEGRATION: every issue is worked in its own worktree. Run trellis worktree add <n> <slug> (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path), then EnterWorktree with that path."
+    [ "$WORKTREE_ADD" != 'trellis worktree add' ] || does=' (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path)'
+    deny "The main checkout stays on $INTEGRATION: every issue is worked in its own worktree. Run $WORKTREE_ADD <n> <slug>$does, then EnterWorktree with that path."
   fi
   [ "$TRACKER" = 'github' ] || return 0
   branch="$(git -C "$dir" branch --show-current 2>/dev/null)" || return 0
@@ -210,7 +212,7 @@ guard_branch_switch() {
   fi
   state="$GH_AS_OUT"
   if [ "$state" = 'open' ]; then
-    deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
+    deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: $WORKTREE_ADD <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
   fi
 }
 
