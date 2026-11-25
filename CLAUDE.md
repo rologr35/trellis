@@ -80,7 +80,7 @@ A conflict in a `CLAUDE.md`, a rule or a skill is resolved from the branch's own
 - An issue without a plan (a symptom, a lesson) is legitimate. It is created with `gh issue create` or `gh issue new`, which a guard wants after a search of the backlog, unclassed, and gets its plan later, as an amendment with the five sections and the complexity line.
 - What a piece of work leaves for another issue goes through `trellis issue follow-up`.
 - A pull request opens as a draft. `trellis-plan-check` runs, then `gh pr ready`; an S that only touches Markdown skips it.
-- Its body carries `Closes #<n>`, **Before merging** and **After merging**, each `none` or a list.
+- Its body carries `Closes #<n>`, one line `Lesson:` (`none`, `local: <what>` or `framework: <what>`), **Before merging** and **After merging**, each `none` or a list.
 - A merge goes through `/trellis-merge <pr>`.
 - What merged work left undone: `gh issue list --state closed --label pending-actions`.
 
@@ -173,4 +173,4 @@ The copy of a project holds `bin/`, `hooks/`, `lib/`, `scripts/`, `hygiene/`, `m
 - [ ] `bin/trellis check` green.
 - [ ] `bin/trellis hygiene` green if the change touches instructions.
 - [ ] New tests per the map of `TESTING.md`, seen failing before passing.
-- [ ] Commit on the issue's branch, push with an explicit refspec, pull request with **Summary**, **Verification**, **Before merging** and **After merging**.
+- [ ] Commit on the issue's branch, push with an explicit refspec, pull request with its `Lesson:` line, **Summary**, **Verification**, **Before merging** and **After merging**.

@@ -10,7 +10,7 @@
 import {readFileSync, realpathSync, writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {loadConfig} from '../lib/config.mjs';
-import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {LESSON, PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 
 const LABEL = 'pending-actions';
 
@@ -111,6 +111,18 @@ export function kindOf(content, none) {
   const items = content.map(l => /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(\S.*)$/.exec(l)?.[1]);
   if (items.some(item => item && !none.test(item))) return 'list';
   return content.every(l => none.test(l.replace(/^[-*+]\s+/, ''))) ? 'none' : 'prose';
+}
+
+/** The lesson lines of a body, outside code: the text of each one, and whether it is an answer of the locale. */
+export function lessonsOf(body, locale) {
+  const {label, none, local, framework} = LESSON[locale];
+  const line = new RegExp(`^ {0,3}(?:\\*\\*)?${label}(?:\\*\\*)?\\s*:(?:\\*\\*)?\\s*(.*)$`, 'i');
+  const answer = new RegExp(`^(?:${none}\\.?|(?:${local}|${framework})\\s*:\\s*\\S.*)$`, 'i');
+  return body.prose.flatMap((prose, i) => {
+    if (!line.test(prose)) return [];
+    const text = body.lines[i].trim();
+    return [{text, valid: answer.test(line.exec(text)[1].trim())}];
+  });
 }
 
 /** The numbers of the issues a body closes: the ones written `#n`, and, with `repo`, the ones that name it. */

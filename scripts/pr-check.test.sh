@@ -7,7 +7,12 @@ repo="$(tl_repo)"
 cd "$repo" || exit 1
 git switch -q -c 12-thing
 
-body() { printf '%s\n' "$@" > body.md; }
+# A body, with the lesson line of its locale after its first line, or the one of LESSON.
+body() {
+  local lesson='Lesson: none'
+  [ "$(git config -f trellis.config project.locale 2>/dev/null)" != es ] || lesson='Lección: ninguna'
+  printf '%s\n' "$1" "${LESSON-$lesson}" "${@:2}" > body.md
+}
 # The sections a cycle pull request carries besides, with nothing to do in them.
 EN=('' '**Before merging**' 'none' '' '**After merging**' 'none')
 ES=('' '**Antes de mezclar**' 'nada' '' '**Después de mezclar**' 'nada')
@@ -120,6 +125,40 @@ body "${GOOD[@]}"
 tl_eq 'without a tracker it is judged as any other' '0' "$(status_of --body body.md)"
 rm trellis.config
 
+printf '\nthe lesson line\n'
+# lesson <line>...: the exit of a body with those lines in place of the lesson.
+lesson() { LESSON="$(printf '%s\n' "$@")" body 'Closes #12' "${GOOD[@]}" "${EN[@]}"; status_of --body body.md; }
+for line in 'Lesson: none' 'Lesson: None.' 'lesson: none' 'Lesson: local: the suite of the store runs alone' 'Lesson: framework: a guard read another file' \
+  '**Lesson**: none' '**Lesson:** local: the suite' 'Lesson: framework: `trellis ratchet` says nothing'; do
+  tl_eq "it passes: $line" '0' "$(lesson "$line")"
+done
+tl_eq 'without it, it fails' '1' "$(lesson '')"
+tl_has '  saying the line' 'body: missing the line `Lesson: none`, `Lesson: local: <what>` or `Lesson: framework: <what>`' "$(cat out.txt)"
+for line in 'Lesson:' 'Lesson: local' 'Lesson: local:' 'Lesson: framework: ' 'Lesson: framework: <!-- what -->' 'Lesson: something' 'Lesson: nonessential' 'Lesson: ninguna' 'Lesson: locally: it is'; do
+  tl_eq "it fails: $line" '1' "$(lesson "$line")"
+  tl_has '  quoting it' "body: \`$(printf '%s' "$line" | sed 's/ *$//; s/ *<!--.*//')\` is not \`Lesson: none\`" "$(cat out.txt)"
+done
+tl_eq 'twice fails' '1' "$(lesson 'Lesson: none' 'Lesson: local: the suite')"
+tl_has '  and says so' 'body: 2 lesson lines, and it is one' "$(cat out.txt)"
+for not in '    Lesson: none' '`Lesson: none`' '<!-- Lesson: none -->' 'A Lesson: none' 'Lessons: none' '> Lesson: none'; do
+  tl_eq "not one: $not" '1' "$(lesson '' "$not")"
+  tl_has '  so it is missing' 'missing the line' "$(cat out.txt)"
+done
+tl_eq 'not one in a fence' '1' "$(lesson '```' 'Lesson: none' '```')"
+tl_eq 'one in a fence beside it does not count' '0' "$(lesson '```' 'Lesson: none' '```' 'Lesson: none')"
+printf '[project]\n\tlocale = es\n' > trellis.config
+leccion() { LESSON="$1" body 'Closes #12' '**Resumen**' 'Algo.' '' '**Verificación**' 'ok' "${ES[@]}"; status_of --body body.md; }
+for line in 'Lección: ninguna' 'Lección: Ninguna.' 'Lección: local: la suite corre sola' 'Lección: marco: una guarda leyó otro fichero'; do
+  tl_eq "es: it passes: $line" '0' "$(leccion "$line")"
+done
+tl_eq 'es: in decomposed letters too' '0' "$(leccion "$(printf 'Leccio\314\201n: ninguna')")"
+for line in 'Lesson: none' 'Lección: none' 'Lección: framework: algo' 'Lección: marco:' ''; do
+  tl_eq "es: it fails: $line" '1' "$(leccion "$line")"
+done
+tl_eq 'es: without it' '1' "$(leccion '')"
+tl_has '  saying the line' 'missing the line `Lección: ninguna`, `Lección: local: <what>` or `Lección: marco: <what>`' "$(cat out.txt)"
+rm trellis.config
+
 printf '\nthe sections and the actions of a project\n'
 git config -f trellis.config --add pr.section 'Why (and for whom)'
 git config -f trellis.config --add pr.section 'How it was seen'
@@ -184,6 +223,7 @@ ci_of() { GITHUB_HEAD_REF="$1" GITHUB_BASE_REF="$2" "$TRELLIS" pr-check --body b
 git switch -q --detach
 tl_eq 'in CI, an issue branch into the integration branch is asked' '1' "$(ci_of 12-thing develop)"
 tl_has 'for what it lacks' 'Closes #12' "$(cat out.txt)"
+LESSON='' body "${GOOD[@]}"
 tl_eq 'in CI, a release is not' '0' "$(ci_of develop main)"
 tl_eq 'in CI, a hotfix into main is not' '0' "$(ci_of 12-thing main)"
 tl_eq 'in CI, a probe into the integration branch is not' '0' "$(ci_of probe/x develop)"

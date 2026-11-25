@@ -46,4 +46,4 @@ Ficheros de instrucciones del proyecto y cuándo carga cada uno. `trellis sync` 
 - [ ] `trellis check` en verde.
 - [ ] `trellis hygiene` en verde si el cambio toca instrucciones.
 - [ ] Pruebas nuevas según el mapa de `TESTING.md`, vistas fallar antes de pasar.
-- [ ] Commit en la rama de la issue, push con refspec explícito, pull request con **Resumen**, **Verificación**, **Antes de mezclar** y **Después de mezclar**.
+- [ ] Commit en la rama de la issue, push con refspec explícito, pull request con su línea `Lección:`, **Resumen**, **Verificación**, **Antes de mezclar** y **Después de mezclar**.

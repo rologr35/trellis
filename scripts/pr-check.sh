@@ -15,7 +15,9 @@
 # was accepted, required when the branch has the ratchet's escape (ratchet-loosened). The names
 # live in lib/locale.mjs.
 # The body of a cycle pull request, the one of an issue branch (git.issueBranch) into the integration
-# branch with tracker.kind = github, also closes the branch's issue (`Closes #n`) and carries
+# branch with tracker.kind = github, also closes the branch's issue (`Closes #n`), has one line
+# `Lesson: none`, `Lesson: local: <what>` or `Lesson: framework: <what>` (es: `Lección: ninguna`,
+# `local`, `marco`) outside code, and carries
 # **Before merging** and **After merging** (es: **Antes de mezclar**, **Después de mezclar**), each
 # `none` (es: `nada`) or a list. With pr.action, each item of those two that is not inside another and is
 # not `none` starts with one of its values, after the bullet, the check box and a backtick. In CI the two branches are GITHUB_HEAD_REF and GITHUB_BASE_REF;

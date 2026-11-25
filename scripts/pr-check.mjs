@@ -4,9 +4,9 @@
 
 import {readFileSync, writeFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
-import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {LESSON, PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
-import {closedIssues, itemsOf, kindOf, readBody, sectionOf} from './issue-close.mjs';
+import {closedIssues, itemsOf, kindOf, lessonsOf, readBody, sectionOf} from './issue-close.mjs';
 
 const [, , mode, file, hasSetback, branchArg, loosened, cycleArg = '-', messageFile] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
@@ -70,6 +70,12 @@ if (mode === 'commit') {
     if (own ? !closed.includes(Number(own)) : closed.length === 0) {
       misses.push(`body: does not close the issue of ${cycleArg}; write \`Closes #${own ?? '<n>'}\` outside code`);
     }
+    const {label, none, local, framework} = LESSON[localeOf(config)];
+    const answers = `\`${label}: ${none}\`, \`${label}: ${local}: <what>\` or \`${label}: ${framework}: <what>\``;
+    const lessons = lessonsOf(body, localeOf(config));
+    if (lessons.length === 0) misses.push(`body: missing the line ${answers}, outside code`);
+    if (lessons.length > 1) misses.push(`body: ${lessons.length} lesson lines, and it is one`);
+    for (const {text} of lessons.filter(l => !l.valid)) misses.push(`body: \`${text}\` is not ${answers}`);
     for (const name of [SECTIONS.beforeMerging, SECTIONS.afterMerging]) {
       const kind = kindOf(sectionOf(body.prose, name, body.lines), SECTIONS.none);
       if (kind === 'missing') misses.push(`body: missing the section **${name}**`);
