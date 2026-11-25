@@ -168,6 +168,9 @@ tl_has '  and says so' 'body: **Setback** is empty' "$(cat out.txt)"
 tl_eq '  and is none' '1' "$(status_of --has-setback --body body.md)"
 LESSON='' body 'Closes #12' '**Summary**' '```' 'Lesson: none' '```' '' '**Verification**' 'ok' "${EN[@]}" '' '**Lesson**: none'
 tl_eq 'one in code is content' '0' "$(status_of --body body.md)"
+LESSON='' body 'Closes #12' "${GOOD[@]}" "${EN[@]}" '' 'Lesson `x`: none'
+tl_eq 'a lesson line with code before its answer is none' '1' "$(status_of --body body.md)"
+tl_has '  and is named' 'body: `Lesson `x`: none` is not' "$(cat out.txt)"
 git config -f trellis.config --add pr.action 'Tag'
 tl_eq 'it is no item' '0' "$(last '- Tag it.')"
 git config -f trellis.config --unset pr.action
@@ -365,6 +368,9 @@ tl_has 'the job check only reads' '    permissions:
     ' "$job"
 tl_lacks '  and writes nothing' 'write' "$job"
 tl_has '  nor keeps the token of the checkout' 'persist-credentials: false' "$job"
+tl_eq 'the checks of trellis run before the code of the branch' 'ratchet
+pr-check
+secret scan' "$(printf '%s\n' "$job" | sed -n 's/^      - name: //p' | tail -3)"
 tl_has 'the job of the protected head keeps the write of the workflow' 'permissions:
   contents: read
   pull-requests: write

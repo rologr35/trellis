@@ -18,5 +18,8 @@ fi
 "$trellis" config list >/dev/null || exit 1
 "$trellis" pr-check --commit "$1" || exit 1
 # A comment may stay in the message. The files git lists in it and the diff under the scissors do not.
-message="$(sed -e '/^# -* >8 -*$/,$d' -e "/^#$(printf '\t')/d" "$1")"
+message="$(LC_ALL=C sed -e '/^# -* >8 -*$/,$d' -e "/^#$(printf '\t')/d" "$1")" || {
+  echo 'commit-msg: the message could not be read, and nothing was judged' >&2
+  exit 1
+}
 "$trellis" private-names --text "$message"

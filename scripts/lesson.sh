@@ -74,16 +74,13 @@ trap 'rm -rf "$tmp"' EXIT
 body="$tmp/body"
 cat -- "$file" > "$body" || refuse "$file could not be read"
 
-# A repository by its URL: a text without a scheme nor a user is a path of this machine.
-is_url() { case "$1" in *://* | *@*:*) ;; *) return 1 ;; esac; }
-
 url="$(judge upstream)" || exit 1
-{ is_url "$url" && gh_repo . "$url"; } || refuse "trellis.upstream ($url) is not a repository of GitHub"
+{ gh_is_url "$url" && gh_repo . "$url"; } || refuse "trellis.upstream ($url) is not a repository of GitHub"
 upstream="$GH_REPO_PATH"
 host="$GH_REPO_HOST"
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 origin="$(git remote get-url origin 2>/dev/null)" || origin=''
-if is_url "$origin"; then
+if gh_is_url "$origin"; then
   gh_split "$origin"
   [ "$(lower "$GH_SPLIT_OWNER/$GH_SPLIT_NAME")" != "$(lower "$upstream")" ] \
     || refuse "this is the repository of $upstream: here a lesson goes through trellis issue follow-up"
@@ -92,7 +89,7 @@ fi
 listed="$(judge judge "$title" "$body" "$upstream")" || exit 1
 if [ "$listed" != 'listed' ]; then
   said='this repository cannot be asked whether it is private'
-  if is_url "$origin" && gh_repo . "$origin" \
+  if gh_is_url "$origin" && gh_repo . "$origin" \
       && gh_as_owner . "$(gh_owner . "$origin")" api "repos/$GH_REPO_PATH" ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} --jq .private; then
     said="$GH_AS_OUT"
     case "$said" in true) said='this repository is private' ;; false) ;; *) said='GitHub does not say whether this repository is private' ;; esac
@@ -138,6 +135,13 @@ if [ -n "$issue" ]; then
 else
   gh_label . "$url" lesson BFD4F2 'What a project learned' \
     || refuse "the label lesson could not be read or created as $GH_AS_ACCOUNT: ${GH_AS_ERR:-gh failed}"
-  gh_api . "$url" issues -f "title=$title" -F "body=@$body" -f 'labels[]=lesson' --jq .html_url || unpublished
+  gh_api . "$url" issues -f "title=$title" -F "body=@$body" -f 'labels[]=lesson' \
+    --jq '"\(if any(.labels[]; .name == "lesson") then "labeled" else "unlabeled" end) \(.html_url)"' || unpublished
+  # GitHub opens the issue of an account that cannot label it, without the label and without saying so.
+  case "$GH_AS_OUT" in
+    labeled\ *) ;;
+    *) printf 'lesson: published without the label lesson, which %s cannot put on an issue of %s\n' "$GH_AS_ACCOUNT" "$upstream" >&2 ;;
+  esac
+  GH_AS_OUT="${GH_AS_OUT#* }"
 fi
 printf '%s\n' "$GH_AS_OUT"

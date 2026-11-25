@@ -67,8 +67,6 @@ jobs:
         run: bash "$TRELLIS" verify --upstream --ref "$REF"
       - name: hygiene
         run: bash "$TRELLIS" hygiene
-      - name: pr-check
-        run: bash "$TRELLIS" pr-check --body "$RUNNER_TEMP/pr-body.md"
       - name: ratchet
         env:
           BASE: ${{ github.event.pull_request.base.ref }}
@@ -78,6 +76,9 @@ jobs:
           else
             bash "$TRELLIS" ratchet --base "origin/$BASE"
           fi
+      # It ends with the check of the project, so it comes after what judges the branch without its code.
+      - name: pr-check
+        run: bash "$TRELLIS" pr-check --body "$RUNNER_TEMP/pr-body.md"
       # gitleaks is installed at a pinned version and checksum; another scanner by its ciInstall.
       - name: secret scan
         run: bash "$RUNNER_TEMP/trellis/scripts/secret-scan-ci.sh"

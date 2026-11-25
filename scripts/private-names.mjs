@@ -29,27 +29,29 @@ if (list.terms === null) {
 const findings = [];
 const judge = (text, where) => findings.push(...termsIn(text, list.terms).map(found => ({where: where(found.line), term: found.term})));
 
-/** The added lines of the index, by file, each hunk as one text. */
-function* addedLines(root) {
-  const diff = execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', 'diff', '--cached', '-U0', '--inter-hunk-context=0', '-M', '--no-color', '--no-ext-diff', '--no-textconv', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'], {encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe']});
+/** The added lines of the index, by file, each hunk as one text, without the files that are not text. */
+function addedLines(root) {
+  const diff = execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', 'diff', '--cached', '-U0', '--inter-hunk-context=0', '-M', '--no-color', '--no-ext-diff', '--no-textconv', '--text', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'], {encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe']});
+  const hunks = [];
   let file = '';
   let left = 0;
-  let hunk = null;
   for (const line of diff.split('\n')) {
     if (left > 0 && /^[+-]/.test(line)) {
       left--;
-      if (line.startsWith('+')) hunk.lines.push(line.slice(1));
-      if (left === 0) yield hunk;
+      if (line.startsWith('+')) hunks.at(-1).lines.push(line.slice(1));
       continue;
     }
     const at = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
     if (at) {
       left = Number(at[1] ?? 1) + Number(at[3] ?? 1);
-      hunk = {file, first: Number(at[2]), lines: []};
+      hunks.push({file, first: Number(at[2]), lines: []});
     } else if (line.startsWith('+++ ')) {
       file = line.slice(4).replace(/^b\//, '').replace(/\t$/, '');
     }
   }
+  // The attributes of a file do not say whether it is text: a lock file may be shown as binary.
+  const binary = new Set(hunks.filter(hunk => hunk.lines.some(line => line.includes('\0'))).map(hunk => hunk.file));
+  return hunks.filter(hunk => !binary.has(hunk.file));
 }
 
 for (let i = 0; i < args.length; i++) {

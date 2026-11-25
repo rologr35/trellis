@@ -56,6 +56,9 @@ gh_split() {
   GH_SPLIT_NAME="${GH_SPLIT_NAME%.git}"
 }
 
+# Whether a remote is a URL: without a scheme nor a user it is a path of this machine.
+gh_is_url() { case "$1" in *://* | *@*:*) ;; *) return 1 ;; esac; }
+
 # The owner of a repository of github.com. Prints nothing for another host or for a text that does not
 # parse.
 gh_owner_of() {
@@ -87,8 +90,7 @@ gh_repo() {
   if [ -z "$text" ]; then
     [ -z "${GH_REPO:-}" ] || return 0
     text="$(git -C "$1" remote get-url origin 2>/dev/null)" || return 0
-    # A remote without a scheme nor a user is a path of this machine.
-    case "$text" in *://* | *@*:*) ;; *) return 0 ;; esac
+    gh_is_url "$text" || return 0
   fi
   gh_split "$text"
   if [[ ! "$GH_SPLIT_OWNER/$GH_SPLIT_NAME" =~ ^[A-Za-z0-9_-]+/[A-Za-z0-9._-]+$ ]] || [[ "$GH_SPLIT_NAME" =~ ^\.\.?$ ]] \

@@ -103,6 +103,9 @@ tl_eq 'a message is refused' '1' "$(commit -m 'feat: the acme (#1)')"
 tl_has '  and named' 'the text, line 1: "acme"' "$(cat "$TL_TMP/out.txt")"
 tl_eq '  its body too' '1' "$(commit -m 'feat: d (#1)' -m 'Of acme.')"
 tl_eq '  and a line of it that starts as a comment' '1' "$(commit -m 'feat: d (#1)' -m '# acme')"
+printf 'feat: d caf\351 acme (#1)\n' > "$TL_TMP/latin1"
+tl_eq '  and one that is not UTF-8' '1' "$(LC_ALL=en_US.UTF-8 commit -F "$TL_TMP/latin1")"
+tl_has '  which is named too' 'the text, line 1: "acme"' "$(cat "$TL_TMP/out.txt")"
 printf 'acme\n' > d.txt && git add -A && git commit -q --no-verify -m 'chore: d (#1)'
 printf 'x\n' > d.txt && git add -A
 # An editor that writes the subject above what git put in the message, with the diff of --verbose.
@@ -118,6 +121,11 @@ git branch 3-acme
 tl_eq '  and not by the one it has here' '0' "$(push 3-acme:refs/heads/3-thing)"
 tl_eq 'deleting a branch is not judged' '0' "$(push --delete 1-acme)"
 tl_eq 'another branch passes' '0' "$(push 1-setup)"
+printf 'y\n' > d2.txt && git add -A
+mkdir -p "$TL_TMP/nosed" && printf '#!/bin/sh\nexit 4\n' > "$TL_TMP/nosed/sed" && chmod +x "$TL_TMP/nosed/sed"
+tl_eq 'a message that could not be read is refused' '1' "$(PATH="$TL_TMP/nosed:$PATH" commit -m 'feat: d (#1)')"
+tl_has '  and says so' 'commit-msg: the message could not be read' "$(cat "$TL_TMP/out.txt")"
+git reset -q --hard
 rm "$list"
 printf 'an acme\n' > c.txt && git add -A
 tl_eq 'without a list it goes on' '0' "$(commit -m 'feat: the acme (#1)')"

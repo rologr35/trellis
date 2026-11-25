@@ -66,6 +66,12 @@ text 'acme zephyr
 acme' > /dev/null
 tl_eq 'each term is named once per line' '3' "$(grep -c 'is in the list' "$TL_TMP/out.txt")"
 
+printf '𠮷野家\n' > "$list"
+# A judgment that does not end is stopped, and it is not a refusal.
+tl_eq 'a term that starts outside the first plane is found, and the search ends' '1' \
+  "$(node -e 'process.stdout.write(String(require("child_process").spawnSync("bash", process.argv.slice(1), {timeout: 20000}).status))' "$TRELLIS" private-names --text 'of 𠮷野家 here')"
+printf 'acme\nzephyr\n' > "$list"
+
 printf '\na file\n'
 printf 'one\ntwo acme\n' > body.md
 tl_eq 'a file is judged' '1' "$(names --file body.md)"
@@ -117,6 +123,15 @@ tl_eq 'a removed path passes' '0' "$(staged)"
 git commit -q -m 'chore: no path (#12)'
 printf 'the zephyr\n' > 'a "b" ñ.md' && git add -A
 tl_eq 'a file with an odd name is judged' '1' "$(staged)"
+git reset -q --hard
+printf '*.lock -diff\n' > .gitattributes && printf 'a\nof acme\n' > x.lock && git add -A
+tl_eq 'a text that git shows as binary is judged' '1' "$(staged)"
+tl_has '  by its lines' 'private-names: x.lock:2: "acme"' "$(out)"
+git reset -q --hard
+printf 'x\nacme\0y\nacme\n' > x.bin && printf 'the zephyr\n' > y.md && git add -A
+tl_eq 'a file that is not text is not, and the next one is' '1' "$(staged)"
+tl_lacks '  none of its lines' 'x.bin' "$(out)"
+tl_has '  and only the next one' 'private-names: y.md:1: "zephyr"' "$(out)"
 git reset -q --hard
 first="$(mktemp -d "$TL_TMP/first.XXXXXX")"
 git -C "$first" init -q

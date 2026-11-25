@@ -71,7 +71,10 @@ if (method === 'GET' && rest === 'labels') {
   print((read(`${at}/labels`) ?? '').trim());
 }
 if (method === 'POST' && rest === 'labels') { failing('label'); fs.appendFileSync(`${dir}/${at}/labels`, `${fields.name}\n`); print('{}'); }
-if (method === 'POST' && rest === 'issues') { failing('create'); print('https://github.com/trellis-org/trellis/issues/12'); }
+if (method === 'POST' && rest === 'issues') {
+  failing('create');
+  print(`${read('drops-labels') === null ? 'labeled' : 'unlabeled'} https://github.com/trellis-org/trellis/issues/12`);
+}
 if ((m = /^issues\/(\d+)$/.exec(rest))) {
   const text = read(`${at}/issue-${m[1]}.json`);
   if (text === null) refused(404, 'Not Found');
@@ -185,6 +188,7 @@ tl_eq 'a file with no folder and what trellis writes are none' '4' "$(propose)"
 with 'See zephyr-labs/engine#4.'; refused 'a reference to another repository' 'line 15: "zephyr-labs/engine#4"'
 with 'See https://github.com/zephyr-labs/engine/pull/4.'; refused 'the URL of one' 'line 15: "github.com/zephyr-labs/engine"'
 with 'See https://raw.githubusercontent.com/zephyr-labs/engine/main/a.md.'; refused 'the one of a file of it' 'line 15: "raw.githubusercontent.com/zephyr-labs/engine"'
+with 'See ssh://git@ssh.github.com:443/zephyr-labs/engine.git.'; refused 'the one of ssh by its other port' 'line 15: "ssh.github.com:443/zephyr-labs/engine'
 for host in gist.github.com gist.githubusercontent.com; do
   with "See https://$host/zephyr-labs/0123abcd."; refused "a gist of another owner, in $host" "line 15: \"$host/zephyr-labs\" is a gist of another owner"
 done
@@ -315,6 +319,12 @@ POST issues title=$title body labels[]=lesson" "$(writes)"
 tl_eq 'with the text as it was' "$(cat "$body")" "$(cat "$GH_FIXTURES/body")"
 tl_eq 'a label that is there is not created' '0' "$(propose --approved "$ok")"
 tl_eq '  only the issue' "POST issues title=$title body labels[]=lesson" "$(writes)"
+tl_lacks '  and says nothing of it' 'without the label' "$(out)"
+touch "$GH_FIXTURES/drops-labels"
+tl_eq 'an account that cannot label publishes' '0' "$(propose --approved "$ok")"
+tl_has '  saying that the label is missing' "lesson: published without the label lesson, which the owner's account (trellis-org) cannot put on an issue of trellis-org/trellis" "$(out)"
+tl_has '  and prints its URL' 'https://github.com/trellis-org/trellis/issues/12' "$(out)"
+rm "$GH_FIXTURES/drops-labels"; writes > /dev/null
 touch "$GH_FIXTURES/create-fails"
 tl_eq 'a failure is one' '1' "$(propose --approved "$ok")"
 tl_has '  with who asked and why' "could not be published as the owner's account (trellis-org): gh: no create for you" "$(out)"

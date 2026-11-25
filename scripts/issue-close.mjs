@@ -121,7 +121,7 @@ export function lessonsOf(body, locale) {
   return body.prose.flatMap((prose, i) => {
     if (!line.test(prose)) return [];
     const text = body.lines[i].trim();
-    return [{at: i, text, valid: answer.test(line.exec(text)[1].trim())}];
+    return [{at: i, text, valid: answer.test(line.exec(text)?.[1].trim() ?? '')}];
   });
 }
 
