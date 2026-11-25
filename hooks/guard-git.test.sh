@@ -392,6 +392,12 @@ tl_eq 'with an unreadable base' 'deny' "$(verdict 'gh pr merge 99')"
 for form in '-sb 12 13' '-mF 12 13' '-dt 12 13' '-rsA 12 13' '-bs 13' '-sbtext 13' '-dR x/y 13'; do
   tl_eq "a group of short flags $form judges pull request 13" 'deny' "$(verdict "gh pr merge $form")"
 done
+# Only x/y has pull request 23, so it is judged when x/y is what is read.
+printf 'develop\n' > "$GH_FIXTURES/pr-23"
+printf 'x/y\n' > "$GH_FIXTURES/where-23"
+tl_eq 'a group ending in -R names the repository that is read' 'allow' "$(verdict 'gh pr merge -dR x/y 23')"
+tl_eq 'and without it the one of origin is read' 'deny' "$(verdict 'gh pr merge -d 23')"
+rm "$GH_FIXTURES/where-23"
 tl_eq 'a group ending in a value flag, then an allowed pull request' 'allow' "$(verdict 'gh pr merge -sb 13 12')"
 tl_eq 'a group with a letter gh refuses keeps today'"'"'s reading' 'allow' "$(verdict 'gh pr merge -xb 12 13')"
 printf 'develop\n' > "$GH_FIXTURES/head={owner}:20-thing"

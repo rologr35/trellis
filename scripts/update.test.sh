@@ -95,6 +95,7 @@ tl_eq 'stops the update' '1' "$(update v1)"
 tl_has 'naming the file' '.trellis/hooks/guard-git.sh' "$(out)"
 tl_has 'and the copied agent' '.claude/agents/trellis-plan-check.md' "$(out)"
 tl_has 'saying how to go on' 'Restore those files from git' "$(out)"
+tl_has 'and, for a copy that was never committed, what is deleted' 'If .trellis/ was never committed, delete the whole .trellis/ and run the update again' "$(out)"
 tl_eq 'and naming no folder of the project' '' "$(folders)"
 tl_eq 'and nothing else changes' "$before" "$(tracked)"
 restore
