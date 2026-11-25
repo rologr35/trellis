@@ -18,8 +18,9 @@
 # references of a Depends on line allowed). The names per locale live in lib/locale.mjs.
 #
 # The plan of an issue is its body, with each section, and the complexity line, of the last comment
-# headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only the comments of an
-# owner, a member or a collaborator count. At pick-up, also: every #n and owner/repo#n of the
+# headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only what an owner, a member
+# or a collaborator wrote counts, the body too: with the body of someone else, which the check says, the
+# plan is what the amendments carry. At pick-up, also: every #n and owner/repo#n of the
 # Depends on line of Context is closed. Other text there is printed for a person.
 #
 # The label of the issue created is the class of its complexity line. S, M and L are created when the

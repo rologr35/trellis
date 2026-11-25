@@ -376,6 +376,37 @@ for who in NONE CONTRIBUTOR FIRST_TIME_CONTRIBUTOR ''; do
   issue_json 3 "$TL_TMP/symptom.md" "$who" "$TL_TMP/plan.md"
   tl_eq "one of an outside commenter (${who:-no association}) is ignored" '1' "$(status_of check 3)"
 done
+# opened_by <association> <n>: who opened the issue, as GitHub holds it.
+opened_by() {
+  node -e '
+    const fs = require("fs");
+    const [file, association] = process.argv.slice(1);
+    const issue = {...JSON.parse(fs.readFileSync(file, "utf8")), author_association: association, user: {login: "stranger"}};
+    fs.writeFileSync(file, JSON.stringify(issue));
+  ' "$here/issue-$2.json" "$1"
+}
+for who in NONE CONTRIBUTOR ''; do
+  issue_json 3 "$TL_TMP/good.md"
+  opened_by "$who" 3
+  tl_eq "a body with the five sections by someone outside (${who:-no association}) is not a plan" '1' "$(status_of check 3)"
+  tl_has '  and the check says why' 'the body is not a plan: its author (stranger) is not an owner, a member or a collaborator' "$(out)"
+  tl_has '  naming what is missing' 'no section `## Approved plan`' "$(out)"
+done
+tl_eq '--print of it prints no plan' '0' "$("$TRELLIS" issue check 3 --print 2>"$TL_TMP/err.txt" | grep -c .)"
+tl_has '  and says why, apart from it' 'the body is not a plan' "$(cat "$TL_TMP/err.txt")"
+issue_json 3 "$TL_TMP/good.md" MEMBER "$TL_TMP/plan.md"
+opened_by NONE 3
+tl_eq 'the same text as an amendment of a member is' '0' "$(status_of check 3)"
+tl_has '  and the check says that the body is not' 'the plan is what the amendments carry' "$(out)"
+{ amendment 'risks'; printf '### Risks\n\nGates: none\n'; } > "$TL_TMP/a1-only.md"
+issue_json 3 "$TL_TMP/good.md" OWNER "$TL_TMP/a1-only.md"
+opened_by NONE 3
+tl_eq 'an amendment of one section does not make the rest of that body a plan' '1' "$(status_of check 3)"
+for who in MEMBER COLLABORATOR; do
+  issue_json 3 "$TL_TMP/good.md"
+  opened_by "$who" 3
+  tl_eq "a body of a $who is a plan" '0' "$(status_of check 3)"
+done
 { printf 'A thought first.\n\n'; cat "$TL_TMP/plan.md"; } > "$TL_TMP/buried.md"
 issue_json 3 "$TL_TMP/symptom.md" OWNER "$TL_TMP/buried.md"
 tl_eq 'a comment that is not headed Amendment is ignored' '1' "$(status_of check 3)"

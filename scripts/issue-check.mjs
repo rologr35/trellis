@@ -102,9 +102,15 @@ function amendmentOf(comment) {
   return {sections, complexity: value};
 }
 
-/** The plan of an issue: the body, with each section and the class of the last amendment that has it. */
+/**
+ * The plan of an issue: the body, with each section and the class of the last amendment that has it. The
+ * body of someone who may not write in the repository is none: `note` says so.
+ */
 function resolve(issue, comments) {
-  const plan = parse(issue.body);
+  const plan = parse(mayWrite(issue) ? issue.body : '');
+  if (!mayWrite(issue)) {
+    plan.note = `the body is not a plan: its author (${issue.user?.login ?? 'unknown'}) is not an owner, a member or a collaborator of the repository, so the plan is what the amendments carry`;
+  }
   for (const comment of [...comments].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))) {
     const amendment = amendmentOf(comment);
     if (!amendment) continue;
@@ -315,6 +321,7 @@ if (mode === 'body') process.exitCode = report(judge(parse(text), linesOf(text))
 if (mode === 'class') console.log(parse(text).complexity);
 if (!['body', 'class'].includes(mode)) {
   const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
+  if (plan.note && ['issue', 'print'].includes(mode)) console.error(`issue: ${plan.note}`);
   if (mode === 'issue') process.exitCode = report(judge(plan, linesOf(render(plan))));
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));
