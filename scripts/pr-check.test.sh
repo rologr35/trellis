@@ -129,7 +129,7 @@ printf '\nthe lesson line\n'
 # lesson <line>...: the exit of a body with those lines in place of the lesson.
 lesson() { LESSON="$(printf '%s\n' "$@")" body 'Closes #12' "${GOOD[@]}" "${EN[@]}"; status_of --body body.md; }
 for line in 'Lesson: none' 'Lesson: None.' 'lesson: none' 'Lesson: local: the suite of the store runs alone' 'Lesson: framework: a guard read another file' \
-  '**Lesson**: none' '**Lesson:** local: the suite' 'Lesson: framework: `trellis ratchet` says nothing'; do
+  '**Lesson**: none' '**Lesson:** local: the suite' 'Lesson: framework: `trellis ratchet` says nothing' 'Lesson: local: `npm ci`'; do
   tl_eq "it passes: $line" '0' "$(lesson "$line")"
 done
 tl_eq 'without it, it fails' '1' "$(lesson '')"

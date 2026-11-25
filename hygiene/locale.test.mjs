@@ -180,6 +180,15 @@ test('the skill work holds one procedure, with and without a person', () => {
   assert.doesNotMatch(skill, /gh pr merge/, 'it never merges');
 });
 
+test('a lesson for the framework goes through trellis lesson, and the skills say so', () => {
+  const skill = name => readFileSync(path.join(TRELLIS_ROOT, 'skills', name, 'SKILL.md'), 'utf8');
+  for (const text of ['trellis lesson --title <t> --body-file <file> --search', '`Kind: defect`', '`Kind: rule`', '**Incident**', '**What must stop happening**', '`--approved <digest>`', '`--issue <n>`']) {
+    assert.ok(skill('retro').includes(text), `retro names ${text}`);
+  }
+  assert.doesNotMatch(skill('retro'), /gh issue (?:create|list)/);
+  assert.ok(skill('merge').includes('offer `trellis lesson`'));
+});
+
 test('every locale defines the same words of a stop', () => {
   const [first, ...rest] = LOCALES;
   for (const locale of rest) {

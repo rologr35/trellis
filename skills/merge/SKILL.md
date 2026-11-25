@@ -40,7 +40,7 @@ It closes the issues of the body and, with actions in **After merging**, leaves 
 
 ## 5. After merging
 
-Do each action that is yours and reversible, one at a time, and check its result. The rest (a deploy, a release, an installation on a machine, a credential) is told to the person as a list. When all of them are done, yours and theirs:
+Do each action that is yours and reversible, one at a time, checking each. The rest (a deploy, a release, a credential) is told to the person as a list. A body whose lesson says framework: offer `trellis lesson`. When all are done:
 
 ```bash
 trellis issue close <pr> --done

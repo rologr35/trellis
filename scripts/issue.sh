@@ -386,19 +386,11 @@ claim_issue() {
   [ -z "$branches" ] || printf 'issue claim: its branch on origin: %s (trellis worktree add %s <slug> --resume)\n' "$branches" "$n"
 }
 
-# ensure_label <name> <colour> <description>: makes sure the repository has the label. GitHub
-# compares the names of labels without case.
+# ensure_label <name> <colour> <description>: gh_label, saying a failure.
 ensure_label() {
-  local name="$1" colour="$2" description="$3"
-  if ! gh_api . '' 'labels?per_page=100' --paginate --jq '.[].name'; then
-    printf 'issue: the labels could not be read as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-    return 1
-  fi
-  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$name" && return 0
-  if ! gh_api . '' labels -f "name=$name" -f "color=$colour" -f "description=$description"; then
-    printf 'issue: the label %s could not be created as %s: %s\n' "$name" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-    return 1
-  fi
+  gh_label . '' "$@" && return 0
+  printf 'issue: the label %s could not be read or created as %s: %s\n' "$1" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+  return 1
 }
 
 create_issue() {
@@ -493,10 +485,7 @@ follow_up() {
     return 1
   fi
 
-  gh_repo . '' || true
-  if ! gh_as_owner . "$(gh_owner . '')" api search/issues -X GET ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} \
-      -F "q=repo:$GH_REPO_PATH is:issue $words" -F per_page=100 \
-      --jq '"\(.total_count) match(es)", (.items[] | "#\(.number) \(.state) \(.title)")'; then
+  if ! gh_search . '' "$words"; then
     refuse_follow_up "the backlog could not be searched as $GH_AS_ACCOUNT: ${GH_AS_ERR:-gh failed}"
     return 1
   fi

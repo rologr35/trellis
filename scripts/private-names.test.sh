@@ -49,10 +49,18 @@ for other in 'acmed' 'pacme' 'acme2' '2acme' 'zephyr/cloud' 'zephyr' 'cloud' 'ze
 done
 printf 'he\ncat\n' > "$list"
 tl_eq 'a capital letter belongs to the word that follows it' '0' "$(text 'The Scat')"
+printf 'ana\n' > "$list"
+tl_eq 'one that starts inside another is found' '1' "$(text 'the anAna')"
+printf 'zephyr\n' > "$list"
+tl_eq 'one of six letters is found inside a word' '1' "$(text 'myzephyrs')"
 printf 'zephyrCloud\n' > "$list"
 tl_eq 'the words of a term written in one' '1' "$(text 'the zephyr-cloud')"
 printf 'acme.*\n' > "$list"
 tl_eq 'a term is not a pattern' '0' "$(text 'acmeish')"
+printf 'acme+co\nlab#4\n' > "$list"
+tl_eq '  nor is its sign' '0' "$(text 'acmeeco')"
+tl_eq '  which is found as it is' '1' "$(text 'of acme+co')"
+tl_eq 'a # inside a word is no comment' '0' "$(text 'the lab')"
 printf 'acme\nzephyr\n' > "$list"
 text 'acme zephyr
 acme' > /dev/null
@@ -80,9 +88,13 @@ tl_eq '  from a folder too' '1' "$(cd sub && staged)"
 git config diff.noprefix true && git config diff.external false && git config color.ui always
 tl_eq '  whatever the config of git' '1' "$(staged)"
 tl_has '  and it is named the same' 'private-names: sub/x.md:2: "acme"' "$(out)"
-git config --unset diff.noprefix && git config --unset diff.external && git config --unset color.ui
+git config --unset diff.noprefix && git config diff.mnemonicPrefix true
+tl_has '  with each of its prefixes' 'private-names: sub/x.md:2: "acme"' "$(staged > /dev/null; out)"
+git config --unset diff.mnemonicPrefix && git config --unset diff.external && git config --unset color.ui
 git commit -q -m 'chore: x (#12)'
 tl_eq 'a line that is already there passes' '0' "$(staged)"
+printf 'a\nacme one\nb\nacme two\n' > sub/x.md
+tl_eq 'a line that is not staged passes' '0' "$(staged)"
 printf 'a\nb\nc\n' > sub/x.md && git add -A
 tl_eq 'a removed line passes' '0' "$(staged)"
 printf '++ acme\n' > sub/x.md && git add -A
@@ -168,9 +180,11 @@ for url in 'git@github.com:acme/warehouse.git' 'https://github.com/acme/warehous
 1 the name of the repository: warehouse" "$(of_project 'of Acme, the WareHouse')"
   git remote remove origin
 done
-git remote add origin "$TL_TMP/acme/warehouse.git"
+git remote add origin /acme/warehouse.git
 tl_eq 'a path has only a name' '1 the name of the repository: warehouse' "$(of_project 'of Acme, the WareHouse')"
-git remote set-url origin "file://$TL_TMP/acme/warehouse.git"
+git remote set-url origin file:///acme/warehouse.git
+tl_eq '  with its host too' '1 the name of the repository: warehouse' "$(git remote set-url origin file://host/acme/warehouse.git; of_project 'of Acme, the WareHouse')"
+git remote set-url origin file:///acme/warehouse.git
 tl_eq 'and a URL of a path' '1 the name of the repository: warehouse' "$(of_project 'of Acme, the WareHouse')"
 git remote set-url origin 'git@github.com:Rologr35/warehouse.git'
 tl_eq 'an owner that is also the one of the upstream is none' '' "$(of_project 'of rologr35')"

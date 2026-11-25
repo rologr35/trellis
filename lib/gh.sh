@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Asking GitHub as the account that owns the repository, for the hook, worktree prune and trellis issue.
+# Asking GitHub as the account that owns the repository, for the hook, worktree prune,
+# trellis issue and trellis lesson.
 #
 #   . "$TRELLIS_ROOT/lib/gh.sh"
 #   gh_api <dir> '' pulls/8 --jq .base.ref
@@ -14,7 +15,7 @@
 # The account gh has active is not always the one that sees the repository: a person signed in on
 # two accounts keeps one active, and a private repository of the other answers "not found". The
 # calls here are reads, and the writes a person asks for with `trellis issue` (an issue, a comment, a
-# label, an assignee, a state). Each borrows the token of the owner's account for that one gh
+# label, an assignee, a state) and with `trellis lesson` (an issue, a comment, a label, a state). Each borrows the token of the owner's account for that one gh
 # call. The token is never printed, written or exported.
 #
 # Neither is run in a command substitution: they set, in the caller's shell,
@@ -114,6 +115,23 @@ gh_api() {
   fi
   gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" api "repos/$GH_REPO_PATH/$endpoint" \
     ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} "$@"
+}
+
+# gh_search <dir> <hint or ''> <words>: what a search finds in the issues of a repository, open and closed,
+# in GH_AS_OUT: how many, and one line for each.
+gh_search() {
+  gh_repo "$1" "$2" || true
+  gh_as_owner "$1" "$(gh_owner "$1" "$2")" api search/issues -X GET ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} \
+    -F "q=repo:$GH_REPO_PATH is:issue $3" -F per_page=100 \
+    --jq '"\(.total_count) match(es)", (.items[] | "#\(.number) \(.state) \(.title)")'
+}
+
+# gh_label <dir> <hint or ''> <name> <colour> <description>: makes sure the repository has the label.
+# GitHub compares the names of labels without case.
+gh_label() {
+  gh_api "$1" "$2" 'labels?per_page=100' --paginate --jq '.[].name' || return 1
+  printf '%s\n' "$GH_AS_OUT" | grep -qix -- "$3" && return 0
+  gh_api "$1" "$2" labels -f "name=$3" -f "color=$4" -f "description=$5"
 }
 
 # Sets GH_TOK to the token of <owner>'s account when gh holds one (empty otherwise), from the cache
