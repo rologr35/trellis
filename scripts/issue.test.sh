@@ -67,6 +67,12 @@ if (method !== 'GET') {
 const is = re => re.exec(rest || '');
 let m;
 if (method === 'GET') {
+  if (path === 'search/issues') {
+    failing('search');
+    const items = JSON.parse(read('search.json') ?? '[]');
+    console.log([`${items.length} match(es)`, ...items.map(i => `#${i.number} ${i.state} ${i.title}`)].join('\n'));
+    process.exit(0);
+  }
   if (path === 'user') answer({login: 'rologr35'});
   if ((m = is(/^issues\/(\d+)$/))) answer(load(at(`issue-${m[1]}.json`)));
   if ((m = is(/^issues\/(\d+)\/comments$/))) answer(load(at(`comments-${m[1]}.json`)));
@@ -770,6 +776,69 @@ tl_eq 'no file' '2' "$(status_of stop 35)"
 tl_eq 'a file that does not exist' '2' "$(status_of stop 35 --body-file "$TL_TMP/none.md")"
 tl_eq 'no number' '2' "$(status_of stop --body-file "$TL_TMP/stop.md")"
 tl_has 'the usage of trellis lists stop' 'issue stop <n> --body-file <file>' "$("$TRELLIS" help 2>&1)"
+
+printf '\nfollow-up\n'
+printf 'What was seen.\n' > "$TL_TMP/seen.md"
+created_labels() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).labels.join()' "$GH_FIXTURES/created.json"; }
+# follow <flags>: a follow-up with a clean log.
+follow() {
+  rm -f "$GH_FIXTURES"/calls.log "$GH_FIXTURES"/writes.log "$GH_FIXTURES"/created*
+  status_of follow-up --title 'fix: the thing' --body-file "$TL_TMP/seen.md" --search 'the thing' "$@"
+}
+printf '[{"number": 3, "state": "open", "title": "a"}, {"number": 4, "state": "closed", "title": "b"}]' > "$GH_FIXTURES/search.json"
+printf 'bug\n' > "$GH_FIXTURES/labels"
+head_sha="$(git ls-remote origin refs/heads/develop | cut -f1)"
+tl_eq 'at careful a follow-up stops at the proposal' '4' "$(follow --checked "$head_sha")"
+tl_eq '  and creates nothing' '' "$(writes)"
+tl_has '  it prints the open matches' '#3 open a' "$(out)"
+tl_has '  and the closed ones' '#4 closed b' "$(out)"
+tl_has '  of a search of this repository' 'api|search/issues|-X|GET|-F|q=repo:{owner}/{repo} is:issue the thing|' "$(calls)"
+tl_has '  and the proposal' 'Title: fix: the thing' "$(out)"
+tl_has '  its label' 'Label: follow-up' "$(out)"
+tl_has '  its body' 'What was seen.' "$(out)"
+tl_eq 'a person approved it' '0' "$(follow --checked "$head_sha" --approved)"
+tl_has '  it is created' 'https://github.com/rologr35/fixture/issues/12' "$(out)"
+tl_has '  with its label, created first' 'POST labels name=follow-up' "$(writes | head -n 1)"
+tl_eq '  and the issue has it' 'follow-up' "$(created_labels)"
+for level in balanced autonomous; do
+  git config -f trellis.config autonomy.level "$level"
+  tl_eq "at $level it is created" '0' "$(follow --checked "$head_sha")"
+  tl_eq '  as the file says' 'What was seen.' "$(cat "$GH_FIXTURES/created-body")"
+  tl_has '  with the matches printed' '#3 open a' "$(out)"
+done
+tl_eq 'a deferred one with a date' '0' "$(follow --checked="$head_sha" --reopen 2027-01-31)"
+tl_eq '  has its label' 'deferred' "$(created_labels)"
+tl_eq '  and its first line' 'Reopen: 2027-01-31||What was seen.' "$(tr '\n' '|' < "$GH_FIXTURES/created-body" | sed 's/|$//')"
+tl_eq 'and one with a fact' '0' "$(follow --checked "$head_sha" --when 'the store answers')"
+tl_eq '  in its first line' 'Reopen: the store answers' "$(head -n 1 "$GH_FIXTURES/created-body")"
+git config -f trellis.config project.locale es
+tl_eq 'es: the same' '0' "$(follow --checked "$head_sha" --when 'la tienda conteste')"
+tl_eq '  in its words' 'Reabrir: la tienda conteste' "$(head -n 1 "$GH_FIXTURES/created-body")"
+git config -f trellis.config --unset project.locale
+follow_fails() { tl_eq "$1" '1' "$(follow "${@:3}")"; tl_has '  which it says' "$2" "$(out)"; tl_eq '  with nothing written' '' "$(writes)"; }
+follow_fails 'a date that is not one is refused' '--reopen takes a date' --checked "$head_sha" --reopen soon
+follow_fails 'and one that does not exist' '--reopen takes a date' --checked "$head_sha" --reopen 2027-02-30
+follow_fails 'a sha that is not the head is refused' "the head of origin/develop is $head_sha" --checked "$(git rev-parse HEAD~1 2>/dev/null || echo abc)x"
+(cd "$other" && git fetch -q && git switch -q --detach origin/develop && git commit -q --allow-empty -m 'chore: on (#1)' && git push -q origin HEAD:develop)
+follow_fails 'the head is read after a fetch' "--checked is $head_sha and the head" --checked "$head_sha"
+head_sha="$(git ls-remote origin refs/heads/develop | cut -f1)"
+touch "$GH_FIXTURES/search-fails"
+follow_fails 'a search that fails is refused' 'the backlog could not be searched as' --checked "$head_sha"
+rm "$GH_FIXTURES/search-fails"
+printf '<!-- nothing -->\n' > "$TL_TMP/seen.md"
+follow_fails 'an empty body is refused' 'the body is empty' --checked "$head_sha"
+printf 'What was seen.\n' > "$TL_TMP/seen.md"
+git remote set-url origin "$TL_TMP/no-such-remote"
+follow_fails 'an integration branch that is not fetched is refused' 'origin/develop could not be fetched' --checked "$head_sha"
+git remote set-url origin "$remote"
+tl_eq 'a date and a fact together' '2' "$(follow --checked "$head_sha" --reopen 2027-01-31 --when x)"
+tl_eq 'no search' '2' "$(status_of follow-up --title t --body-file "$TL_TMP/seen.md" --checked "$head_sha")"
+tl_eq 'no sha' '2' "$(follow)"
+tl_eq 'a flag without its value' '2' "$(follow --checked)"
+git config -f trellis.config autonomy.level reckless
+tl_eq 'a level that is none of the three is careful' '4' "$(follow --checked "$head_sha")"
+git config -f trellis.config --remove-section autonomy
+tl_has 'the usage of trellis lists follow-up' 'issue follow-up --title <t>' "$("$TRELLIS" help 2>&1)"
 
 printf '\ncreate\n'
 calls() { cat "$GH_FIXTURES/calls.log" 2>/dev/null; }

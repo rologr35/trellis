@@ -12,6 +12,8 @@
 //   node issue-check.mjs stop <file> <comment>      judges the text of a stop and writes its comment
 //   node issue-check.mjs refusal <file> <comment>   writes the comment of a plan a run could not take, for
 //                                       the reasons of the file, one per line
+//   node issue-check.mjs follow-up <file> <body> <reopen>  judges the body of a follow-up and writes it,
+//                                       with the line of what reopens it when there is one
 //   node issue-check.mjs gates <json> <comments>   judges the files of the branch against the gates of the plan
 // The text is data: nothing in it is run.
 
@@ -25,7 +27,7 @@ import {ISSUE, PR_SECTIONS, STOP, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
 import {commentsOf, mayWrite, readBody, sectionOf as sectionNamed} from './issue-close.mjs';
 
-const [, , mode, file, commentsFile] = process.argv;
+const [, , mode, file, commentsFile, reopen = ''] = process.argv;
 const config = loadConfig();
 const L = ISSUE[localeOf(config)];
 const CLASSES = ['S', 'M', 'L'];
@@ -473,8 +475,13 @@ if (mode === 'stop') {
   process.exitCode = report(judgeStop(text), 'issue stop');
   if (process.exitCode === 0) writeFileSync(commentsFile, `${STOP_MARK}\n${text}`);
 }
+if (mode === 'follow-up') {
+  process.exitCode = report(text.replace(/<!--[\s\S]*?(?:-->|$)/g, '').trim() ? [] : ['the body is empty'], 'issue follow-up');
+  const fact = reopen.trim().replace(/\s+/g, ' ');
+  if (process.exitCode === 0) writeFileSync(commentsFile, `${fact ? `${L.reopen}: ${fact}\n\n` : ''}${text}`);
+}
 if (mode === 'refusal') writeFileSync(commentsFile, `${STOP_MARK}\n${refusal(text)}`);
-if (!['body', 'class', 'stop', 'refusal'].includes(mode)) {
+if (!['body', 'class', 'stop', 'refusal', 'follow-up'].includes(mode)) {
   const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
   if (plan.note && ['issue', 'print'].includes(mode)) console.error(`issue: ${plan.note}`);
   if (mode === 'issue') {

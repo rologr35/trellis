@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # issue: the plan of an issue, written from the mould (templates/<locale>/issue.md) and checked; the
-# claim of the issue and its stop; and its close when its pull request is merged.
+# claim of the issue and its stop; the follow-up of what it leaves; and its close when its pull request
+# is merged.
 #
 #   trellis issue check --body <file>    a body, before it is published
 #   trellis issue check <n>              the plan of an issue of this repository, at pick-up
@@ -13,6 +14,9 @@
 #                                        leaves the issue stopped, with what it needs in a comment
 #   trellis issue create --title <t> --body-file <file>
 #                                        checks the body, creates the issue, prints its URL
+#   trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>
+#                           [--reopen <date> | --when <fact>] [--approved]
+#                                        what the work leaves for another issue
 #   trellis issue close <pr> [--done]    closes the issues of a merged pull request; --done when its
 #                                        pending actions are done
 #
@@ -51,6 +55,12 @@
 # The label of the issue created is the class of its complexity line. S, M and L are created when the
 # repository lacks them.
 #
+# The follow-up is refused unless --checked is the head of origin/<git.integrationBranch> after a fetch,
+# where the problem was seen. It prints what the search of the backlog finds, open and closed. At
+# autonomy.level careful it then prints the proposal and exits 4, with nothing created, until a person
+# approved it (--approved); at the other levels it creates the issue. Its label is follow-up, or deferred
+# with --reopen or --when, which write the first line of the body (`Reopen:`, per locale).
+#
 # The close refuses a pull request that is not merged into git.integrationBranch. It takes the issues
 # of this repository its body closes outside code (Closes, Fixes, Resolves) and skips the number of a
 # pull request. With actions in the section After merging, each issue first gets the label
@@ -79,6 +89,8 @@ usage() {
     printf '       trellis issue claim <n> [--unattended] [--resume]\n'
     printf '       trellis issue stop <n> --body-file <file>\n'
     printf '       trellis issue create --title <t> --body-file <file>\n'
+    printf '       trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>\n'
+    printf '                               [--reopen <date> | --when <fact>] [--approved]\n'
     printf '       trellis issue close <pr> [--done]\n'
   } >&2
   exit 2
@@ -91,12 +103,15 @@ fi
 
 judge() { node "$TRELLIS_ROOT/scripts/issue-check.mjs" "$@"; }
 
+fetch_now() {
+  GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
+    fetch --quiet origin "$(tc_get git.integrationBranch)" 2>/dev/null </dev/null
+}
+
 # The paths are judged against the integration branch as it is now. Offline, the last fetch judges.
 fetch_integration() {
   git remote get-url origin >/dev/null 2>&1 || return 0
-  GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
-    fetch --quiet origin "$(tc_get git.integrationBranch)" 2>/dev/null </dev/null \
-    || printf 'issue: origin/%s could not be fetched, so the paths are judged by the last fetch\n' "$(tc_get git.integrationBranch)" >&2
+  fetch_now || printf 'issue: origin/%s could not be fetched, so the paths are judged by the last fetch\n' "$(tc_get git.integrationBranch)" >&2
 }
 
 check_body() {
@@ -358,12 +373,96 @@ create_issue() {
   judge body "$file" || return 1
   class="$(judge class "$file")"
   case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
-  ensure_label "$class" "$colour" "Complexity $class" || return 1
-  if ! gh_api . '' issues -f "title=$title" -F "body=@$file" -f "labels[]=$class" --jq .html_url; then
+  ensure_label "$class" "$colour" "Complexity $class" && post_issue "$title" "$file" "$class"
+}
+
+# post_issue <title> <file> <label>: creates the issue and prints its URL.
+post_issue() {
+  if ! gh_api . '' issues -f "title=$1" -F "body=@$2" -f "labels[]=$3" --jq .html_url; then
     printf 'issue: it could not be created as %s: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
     return 1
   fi
   printf '%s\n' "$GH_AS_OUT"
+}
+
+refuse_follow_up() {
+  printf 'issue follow-up: nothing is created: %s\n' "$1" >&2
+  return 1
+}
+
+follow_up() {
+  local title='' file='' words='' checked='' reopen='' approved=false flag value branch head label level
+  while [ $# -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$flag" in
+      --approved) approved=true; continue ;;
+      --*=*) value="${flag#*=}"; flag="${flag%%=*}" ;;
+      --title | --body-file | --search | --checked | --reopen | --when)
+        [ $# -gt 0 ] || usage
+        value="$1"
+        shift
+        ;;
+      *) usage ;;
+    esac
+    [ -n "$value" ] || usage
+    case "$flag" in
+      --title) title="$value" ;;
+      --body-file) file="$value" ;;
+      --search) words="$value" ;;
+      --checked) checked="$value" ;;
+      --reopen | --when)
+        [ -z "$reopen" ] || usage
+        reopen="$value"
+        [ "$flag" = --when ] || node -e '
+          const text = process.argv[1];
+          const date = new Date(`${text}T00:00:00Z`);
+          process.exit(/^\d{4}-\d{2}-\d{2}$/.test(text) && !Number.isNaN(date.getTime()) && date.toISOString().startsWith(text) ? 0 : 1);
+        ' "$value" || { refuse_follow_up "--reopen takes a date, YYYY-MM-DD, and --when a fact"; return 1; }
+        ;;
+      *) usage ;;
+    esac
+  done
+  [ -n "$title" ] && [ -f "$file" ] && [ -n "$words" ] && [ -n "$checked" ] || usage
+  make_tmp || return 1
+  judge follow-up "$file" "$ISSUE_TMP/follow-up" "$reopen" || return 1
+
+  branch="$(tc_get git.integrationBranch)"
+  fetch_now || { refuse_follow_up "origin/$branch could not be fetched"; return 1; }
+  head="$(git rev-parse --verify --quiet "refs/remotes/origin/$branch")" || { refuse_follow_up "there is no origin/$branch"; return 1; }
+  if [ "$checked" != "$head" ]; then
+    refuse_follow_up "--checked is $checked and the head of origin/$branch is $head: look for the problem there, and name that sha"
+    return 1
+  fi
+
+  gh_repo . '' || true
+  if ! gh_as_owner . "$(gh_owner . '')" api search/issues -X GET ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} \
+      -F "q=repo:$GH_REPO_PATH is:issue $words" -F per_page=100 \
+      --jq '"\(.total_count) match(es)", (.items[] | "#\(.number) \(.state) \(.title)")'; then
+    refuse_follow_up "the backlog could not be searched as $GH_AS_ACCOUNT: ${GH_AS_ERR:-gh failed}"
+    return 1
+  fi
+  printf 'The backlog, searched by "%s": %s\n' "$words" "$GH_AS_OUT"
+
+  label=follow-up
+  [ -z "$reopen" ] || label=deferred
+  level="$(tc_get autonomy.level)"
+  case "$level" in
+    balanced | autonomous) ;;
+    *)
+      if [ "$approved" = false ]; then
+        printf '\nNothing is created at autonomy.level careful. The proposal, for a person to approve (--approved creates it):\n\n'
+        printf 'Title: %s\nLabel: %s\n\n' "$title" "$label"
+        cat "$ISSUE_TMP/follow-up"
+        return 4
+      fi
+      ;;
+  esac
+  case "$label" in
+    deferred) ensure_label deferred C5DEF5 'Waits for what its first line says' || return 1 ;;
+    *) ensure_label follow-up D4C5F9 'What another issue left' || return 1 ;;
+  esac
+  post_issue "$title" "$ISSUE_TMP/follow-up" "$label"
 }
 
 # One issue of the pull request <pr> of <repo>. The label comes before the comment, whose mark says
@@ -446,6 +545,7 @@ case "$action" in
   claim) claim_issue "$@" ;;
   stop) stop_issue "$@" ;;
   gates) check_gates "$@" ;;
+  follow-up) follow_up "$@" ;;
   create) create_issue "$@" ;;
   close)
     number=''

@@ -26,6 +26,8 @@ git.hooksPath|single|.githooks
 
 tracker.kind|enum:github,none|github
 
+autonomy.level|enum:careful,balanced,autonomous|careful
+
 workspace.kind|enum:flutter,dart,node,other|flutter
 workspace.package|multi|
 
