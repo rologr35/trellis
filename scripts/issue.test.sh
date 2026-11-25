@@ -1119,6 +1119,19 @@ tl_eq 'tracker.kind = none exits 2' '2' "$(close_of 40)"
 tl_eq '  with no gh call' '' "$(calls)"
 git config -f trellis.config --unset tracker.kind
 
+printf '\na directory with no trellis.config (#41)\n'
+bare="$TL_TMP/bare"
+mkdir -p "$bare"
+in_bare() { (cd "$bare" && "$TRELLIS" issue "$@" > "$bare/out.txt" 2>&1); echo $?; }
+tl_eq 'check --body exits 2' '2' "$(in_bare check --body "$TL_TMP/good.md")"
+tl_has '  and says what is missing' 'trellis.config' "$(cat "$bare/out.txt")"
+tl_lacks '  and judges nothing' 'ok (' "$(cat "$bare/out.txt")"
+tl_eq '  a bad body too' '2' "$(printf '## Nothing\n' > "$TL_TMP/bad41.md"; in_bare check --body "$TL_TMP/bad41.md")"
+tl_lacks '  with no miss of it' '  - ' "$(cat "$bare/out.txt")"
+tl_eq 'a body that does not exist is still a usage error' '2' "$(in_bare check --body "$TL_TMP/none.md")"
+tl_has '  which shows the usage' 'trellis issue check' "$(cat "$bare/out.txt")"
+tl_eq 'and in the project the same body is judged' '0' "$(status_of check --body "$TL_TMP/good.md")"
+
 printf '\nusage\n'
 tl_eq 'no arguments' '2' "$(status_of)"
 tl_eq 'a body that does not exist' '2' "$(status_of check --body "$TL_TMP/none.md")"

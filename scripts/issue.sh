@@ -117,6 +117,11 @@ fetch_integration() {
 
 check_body() {
   [ $# -eq 1 ] && [ -f "$1" ] || usage
+  # A body is judged against the paths and branches of its project: outside of it every miss would be false.
+  if [ ! -f "$(tc_config_file)" ]; then
+    printf 'issue check: no trellis.config at %s, so the body was not judged; run it from the project\n' "$(dirname "$(tc_config_file)")" >&2
+    exit 2
+  fi
   fetch_integration
   judge body "$1" || return 1
   printf 'issue check: ok (%s)\n' "$(judge class "$1")"
