@@ -7,6 +7,8 @@
 //                                       line: ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
 //   node issue-check.mjs print <json> <comments>   prints the plan of an issue, its amendments resolved
 //   node issue-check.mjs issue-class <json> <comments>
+//   node issue-check.mjs attended <json> <comments>   prints what a run without a person cannot take, one
+//                                       per line
 //   node issue-check.mjs gates <json> <comments>   judges the files of the branch against the gates of the plan
 // The text is data: nothing in it is run.
 
@@ -322,6 +324,15 @@ function judgeBranch(plan) {
   return [...new Set(misses)];
 }
 
+/** What a run without a person cannot take of a plan: its gates and what it needs. */
+function attended(plan) {
+  const gates = gatesOf(plan) ?? [];
+  const needs = labelled(plan.sections.flatMap(s => s.lines), L.needs)
+    .map(group => [group.inline, ...group.lines.map(l => l.text.trim())].filter(Boolean).join(' '))
+    .filter(text => !L.none.test(text));
+  return [...(gates.length ? [`${L.gates}: ${gates.join(', ')}`] : []), ...needs.map(text => `${L.needs}: ${text}`)];
+}
+
 /** Prints each path of a plan that changed on the integration branch since the plan was written. */
 function printChanged(plan) {
   const branch = `origin/${config.get('git.integrationBranch')}`;
@@ -442,6 +453,7 @@ if (!['body', 'class'].includes(mode)) {
     process.exitCode = report(judge(plan, linesOf(render(plan))));
     printChanged(plan);
   }
+  if (mode === 'attended') for (const line of attended(plan)) console.log(line);
   if (mode === 'gates') process.exitCode = report(judgeBranch(plan), 'issue gates');
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));

@@ -65,6 +65,37 @@ out="$("$TRELLIS" worktree prune 2>&1)"
 tl_has 'keeps a fresh one' "(6-from-inside): no commits yet" "$out"
 tl_eq 'the main checkout stays' "$repo" "$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
 
+printf '\nadd --resume\n'
+add 11 resumed --resume >/dev/null
+tl_has 'refuses a branch that is not on origin' 'branch 11-resumed is not on origin' "$(cat "$TL_TMP/err.txt")"
+git push -q origin origin/develop:refs/heads/11-resumed
+add 11 resumed >/dev/null
+tl_has 'without --resume one on origin is refused' 'branch 11-resumed already exists on origin' "$(cat "$TL_TMP/err.txt")"
+from="$TL_TMP/from-another-clone"
+git clone -q -b 11-resumed "$origin" "$from" 2>/dev/null
+(cd "$from" && printf 'r\n' > r.txt && git add r.txt && git -c user.name=t -c user.email=t@example.com commit -q -m 'feat: r (#11)' && git push -q origin 11-resumed)
+path="$(add 11 --resume resumed)"
+tl_eq 'checks it out' "$repo/.claude/worktrees/11-resumed" "$path"
+tl_eq 'on its branch' '11-resumed' "$(git -C "$path" branch --show-current)"
+tl_eq 'as origin has it' "$(git rev-parse origin/11-resumed)" "$(git -C "$path" rev-parse HEAD)"
+tl_eq 'with its files' 'r' "$(cat "$path/r.txt")"
+tl_eq 'without an upstream' '' "$(git -C "$path" config branch.11-resumed.merge)"
+tl_eq 'the install ran inside it' 'yes' "$([ -f "$path/installed" ] && echo yes)"
+add 11 resumed --resume >/dev/null
+tl_has 'refuses one that is checked out' 'already exists; nothing was created' "$(cat "$TL_TMP/err.txt")"
+git worktree remove --force "$path"
+(cd "$from" && printf 's\n' > s.txt && git add s.txt && git -c user.name=t -c user.email=t@example.com commit -q -m 'feat: s (#11)' && git push -q origin 11-resumed)
+path="$(add 11 resumed --resume)"
+tl_eq 'a branch that is here and behind origin is taken to it' "$(git rev-parse origin/11-resumed)" "$(git -C "$path" rev-parse HEAD)"
+(cd "$path" && printf 't\n' > t.txt && git add t.txt && git commit -q -m 'feat: t (#11)')
+git worktree remove --force "$path"
+add 11 resumed --resume >/dev/null
+tl_has 'one with commits of its own is refused' 'branch 11-resumed has commits here that origin does not have' "$(cat "$TL_TMP/err.txt")"
+add 11 resumed more --resume >/dev/null
+tl_has 'a third word is refused' 'usage: trellis worktree add <issue-number> <slug> [--resume]' "$(cat "$TL_TMP/err.txt")"
+git branch -q -D 11-resumed
+git push -q origin --delete 11-resumed
+
 printf '\nprune asks GitHub as the owner\n'
 # 9: merged with a merge commit whose subject does not name the branch, so only GitHub can say the
 # pull request was this branch's. The origin of this repository is a local path, so a git shim

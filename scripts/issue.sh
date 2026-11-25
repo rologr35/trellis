@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# issue: the plan of an issue, written from the mould (templates/<locale>/issue.md) and checked, and
-# the close of the issue when its pull request is merged.
+# issue: the plan of an issue, written from the mould (templates/<locale>/issue.md) and checked; the
+# claim of the issue; and its close when its pull request is merged.
 #
 #   trellis issue check --body <file>    a body, before it is published
 #   trellis issue check <n>              the plan of an issue of this repository, at pick-up
 #   trellis issue check <n> --print      prints that plan and judges nothing
 #   trellis issue gates <n>              the files of this branch that match a gate the plan does not name
+#   trellis issue claim <n> [--unattended] [--resume]
+#                                        takes the issue for this session
 #   trellis issue create --title <t> --body-file <file>
 #                                        checks the body, creates the issue, prints its URL
 #   trellis issue close <pr> [--done]    closes the issues of a merged pull request; --done when its
@@ -31,6 +33,13 @@
 # The gates: every file the commits of the branch change, from where it left origin/<git.integrationBranch>,
 # which is fetched first, against the paths of each [gate] that Risks does not name. A gate that only
 # the integration branch declares counts too.
+#
+# The claim refuses, in this order: an issue that is closed or is a pull request, one with the label
+# stopped, one assigned to anybody (the own account too), one whose branch <n>-* is on origin, and a plan
+# that does not pass the check. Then it assigns the account it asks as and reads the issue again: with
+# another assignee it takes itself off and refuses. --resume takes what its own account already has: the
+# assignment, the branch, and a stopped issue that is its own or nobody's, whose label it takes off.
+# --unattended, for a run without a person, also refuses a plan with Gates other than none or any Needs.
 #
 # The label of the issue created is the class of its complexity line. S, M and L are created when the
 # repository lacks them.
@@ -60,6 +69,7 @@ usage() {
   {
     printf 'usage: trellis issue check --body <file> | check <n> [--print]\n'
     printf '       trellis issue gates <n>\n'
+    printf '       trellis issue claim <n> [--unattended] [--resume]\n'
     printf '       trellis issue create --title <t> --body-file <file>\n'
     printf '       trellis issue close <pr> [--done]\n'
   } >&2
@@ -105,6 +115,7 @@ check_dependency() {
 }
 
 make_tmp() {
+  [ -z "${ISSUE_TMP:-}" ] || return 0
   ISSUE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/trellis-issue.XXXXXX")" || return 1
   trap 'rm -rf "$ISSUE_TMP"' EXIT
 }
@@ -126,13 +137,19 @@ want_issue() {
 }
 
 check_issue() {
-  local n="${1#\#}" print="$2" kind a b status=0 deps_ok=true
+  local n="${1#\#}" print="$2"
   case "$n" in '' | *[!0-9]*) usage ;; esac
   want_issue "$n" || return 1
   if [ "$print" = true ]; then
     judge print "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json"
     return $?
   fi
+  check_plan
+}
+
+# The plan of the issue that was read.
+check_plan() {
+  local kind a b status=0 deps_ok=true
   fetch_integration
   judge issue "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || status=1
   judge deps "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/deps" || return 1
@@ -155,6 +172,108 @@ check_gates() {
   fetch_integration
   judge gates "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || return 1
   printf 'issue gates: ok\n'
+}
+
+# issue_facts: the state, the labels and the assignees of the issue that was read, one per line each.
+issue_facts() {
+  node -e '
+    const issue = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const names = (list, key) => (list || []).map(x => x[key].toLowerCase()).join(" ");
+    console.log(issue.pull_request ? "a pull request" : issue.state);
+    console.log((issue.labels || []).some(l => l.name.toLowerCase() === "stopped"));
+    console.log(names(issue.assignees, "login"));
+  ' "$ISSUE_TMP/issue.json" > "$ISSUE_TMP/facts" || return 1
+  { IFS= read -r ISSUE_STATE; IFS= read -r ISSUE_STOPPED; IFS= read -r ISSUE_ASSIGNEES; } < "$ISSUE_TMP/facts"
+}
+
+refuse_claim() {
+  printf 'issue claim: #%s is not claimed: %s\n' "$1" "$2" >&2
+  return 1
+}
+
+# issue_write <what> <n> <endpoint> [<arguments of gh api>]: one call on issue <n>, and the error of gh
+# when it fails.
+issue_write() {
+  local what="$1" n="$2"
+  shift 2
+  gh_api . '' "$@" && return 0
+  printf 'issue %s: #%s: %s failed as %s: %s\n' "$action" "$n" "$what" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+  return 1
+}
+
+# The account GitHub is asked as, in ISSUE_ME.
+whoami() {
+  gh_repo . '' || true
+  if ! gh_as_owner . "$(gh_owner . '')" api user ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} --jq .login || [ -z "$GH_AS_OUT" ]; then
+    printf 'issue: GitHub did not say who %s is: %s\n' "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 1
+  fi
+  ISSUE_ME="$(printf '%s' "$GH_AS_OUT" | tr '[:upper:]' '[:lower:]')"
+}
+
+claim_issue() {
+  local number='' unattended=false resume=false arg n branches own cannot
+  for arg in "$@"; do
+    case "$arg" in
+      --unattended) unattended=true ;;
+      --resume) resume=true ;;
+      -*) usage ;;
+      *) [ -z "$number" ] || usage; number="$arg" ;;
+    esac
+  done
+  n="${number#\#}"
+  case "$n" in '' | *[!0-9]*) usage ;; esac
+  want_issue "$n" && whoami && issue_facts || return 1
+
+  [ "$ISSUE_STATE" = 'open' ] || { refuse_claim "$n" "it is $ISSUE_STATE"; return 1; }
+  if [ "$ISSUE_STOPPED" = true ] && [ "$resume" = false ]; then
+    refuse_claim "$n" 'it is stopped: --resume takes it, when what its last stop needs is there'
+    return 1
+  fi
+  own=false
+  [ "$ISSUE_ASSIGNEES" = "$ISSUE_ME" ] && own=true
+  if [ -n "$ISSUE_ASSIGNEES" ] && { [ "$resume" = false ] || [ "$own" = false ]; }; then
+    refuse_claim "$n" "it is assigned to $ISSUE_ASSIGNEES"
+    return 1
+  fi
+  if ! branches="$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "refs/heads/$n-*" 2>/dev/null </dev/null)"; then
+    refuse_claim "$n" 'origin could not be asked for its branch'
+    return 1
+  fi
+  branches="$(printf '%s\n' "$branches" | sed -n 's|^.*refs/heads/||p' | tr '\n' ' ' | sed 's/ $//')"
+  if [ -n "$branches" ] && { [ "$resume" = false ] || { [ "$own" = false ] && [ "$ISSUE_STOPPED" = false ]; }; }; then
+    refuse_claim "$n" "origin has its branch: $branches"
+    return 1
+  fi
+
+  check_plan || { refuse_claim "$n" 'its plan does not pass the check'; return 1; }
+  if [ "$unattended" = true ]; then
+    judge attended "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/attended" || return 1
+    if [ -s "$ISSUE_TMP/attended" ]; then
+      refuse_claim "$n" "a run without a person cannot take it: $(tr '\n' ';' < "$ISSUE_TMP/attended" | sed 's/;$//; s/;/; /g')"
+      return 1
+    fi
+  fi
+
+  if [ "$own" = false ]; then
+    issue_write 'the assignment' "$n" "issues/$n/assignees" -f "assignees[]=$ISSUE_ME" || return 1
+    if ! want_issue "$n" || ! issue_facts; then
+      refuse_claim "$n" "it was assigned to $ISSUE_ME and could not be read again"
+      return 1
+    fi
+    if [ "$ISSUE_ASSIGNEES" != "$ISSUE_ME" ]; then
+      case " $ISSUE_ASSIGNEES " in
+        *" $ISSUE_ME "*) issue_write 'taking the assignment off' "$n" "issues/$n/assignees" -X DELETE -f "assignees[]=$ISSUE_ME" ;;
+      esac
+      refuse_claim "$n" "after the assignment it is of ${ISSUE_ASSIGNEES:-nobody}: GitHub did not leave it to $ISSUE_ME alone"
+      return 1
+    fi
+  fi
+  if [ "$ISSUE_STOPPED" = true ]; then
+    issue_write 'taking the label stopped off' "$n" "issues/$n/labels/stopped" -X DELETE || return 1
+  fi
+  printf 'issue claim: #%s is assigned to %s\n' "$n" "$ISSUE_ME"
+  [ -z "$branches" ] || printf 'issue claim: its branch on origin: %s (trellis worktree add %s <slug> --resume)\n' "$branches" "$n"
 }
 
 # ensure_label <name> <colour> <description>: makes sure the repository has the label. GitHub
@@ -198,16 +317,6 @@ create_issue() {
   printf '%s\n' "$GH_AS_OUT"
 }
 
-# close_write <what> <n> <endpoint> [<arguments of gh api>]: one call on issue <n>, and the error of gh
-# when it fails.
-close_write() {
-  local what="$1" n="$2"
-  shift 2
-  gh_api . '' "$@" && return 0
-  printf 'issue close: #%s: %s failed as %s: %s\n' "$n" "$what" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-  return 1
-}
-
 # One issue of the pull request <pr> of <repo>. The label comes before the comment, whose mark says
 # both are done, and the close comes last.
 close_one() {
@@ -224,20 +333,20 @@ close_one() {
   read -r state labelled commented <<< "$answer"
   if [ "$done" = true ]; then
     [ "$labelled" = true ] || return 0
-    close_write 'the label' "$n" "issues/$n/labels/pending-actions" -X DELETE || return 1
+    issue_write 'the label' "$n" "issues/$n/labels/pending-actions" -X DELETE || return 1
     printf 'issue close: #%s: no actions pending\n' "$n"
     return 0
   fi
   if [ -s "$comment" ] && [ "$commented" = false ]; then
     if [ "$labelled" = false ]; then
       ensure_label pending-actions D93F0B 'Merged with actions pending' || return 1
-      close_write 'the label' "$n" "issues/$n/labels" -f 'labels[]=pending-actions' || return 1
+      issue_write 'the label' "$n" "issues/$n/labels" -f 'labels[]=pending-actions' || return 1
     fi
-    close_write 'the comment' "$n" "issues/$n/comments" -F "body=@$comment" || return 1
+    issue_write 'the comment' "$n" "issues/$n/comments" -F "body=@$comment" || return 1
     printf 'issue close: #%s: actions pending, in a comment\n' "$n"
   fi
   if [ "$state" = 'open' ]; then
-    close_write 'the close' "$n" "issues/$n" -X PATCH -f state=closed || return 1
+    issue_write 'the close' "$n" "issues/$n" -X PATCH -f state=closed || return 1
     printf 'issue close: #%s: closed\n' "$n"
   fi
 }
@@ -285,6 +394,7 @@ case "$action" in
         ;;
     esac
     ;;
+  claim) claim_issue "$@" ;;
   gates) check_gates "$@" ;;
   create) create_issue "$@" ;;
   close)

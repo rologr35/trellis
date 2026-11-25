@@ -9,11 +9,12 @@
 #   trellis verify [--staged | --upstream] [--ref <sha>]
 #   trellis hygiene [--staged] [--freeze]   the contract of the instruction files
 #   trellis setup [--quiet]                 core.hooksPath and the PATH of a session
-#   trellis worktree add <n> <slug> | prune
+#   trellis worktree add <n> <slug> [--resume] | prune
 #   trellis ratchet [--base <ref>] [--allow-loosen]
 #   trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>
 #   trellis issue check --body <file> | check <n> [--print]
 #   trellis issue gates <n>                 the gates the branch touches and the plan does not name
+#   trellis issue claim <n> [--unattended] [--resume]
 #   trellis issue create --title <t> --body-file <file>
 #   trellis issue close <pr> [--done]
 #   trellis check                           runs [command] check in order, fail-fast
@@ -33,7 +34,7 @@ TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,19p' "$self" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,20p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 

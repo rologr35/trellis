@@ -7,7 +7,8 @@
 # GitHub in files: <owner>_<repo>/issue-<n>.json, comments-<n>.json and pr-<n>.json, in the shape of REST,
 # and `labels`. {owner}/{repo} is rologr35/fixture. Each call is logged with the token it ran with (fake
 # values), each write with its fields, and `auth token -u <user>` prints token-<user> or fails, as gh does
-# for an account not signed in. A file <what>-fails makes that write fail.
+# for an account not signed in. A file <what>-fails makes that write fail, and `race` holds who else is
+# assigned at the same time.
 stubs="$TL_TMP/stubs"
 mkdir -p "$stubs"
 cat > "$stubs/gh" <<'GH'
@@ -99,6 +100,15 @@ if ((m = is(/^issues\/(\d+)(\/.*)?$/))) {
     const all = load(at(`comments-${m[1]}.json`));
     all.push({user: {login: 'x'}, author_association: 'OWNER', created_at: '2026-01-09T00:00:00Z', body: fields.body});
     save(at(`comments-${m[1]}.json`), all);
+  } else if (method === 'POST' && sub === '/assignees') {
+    failing('assign');
+    issue.assignees ||= [];
+    const also = read('race');
+    const who = read('assign-ignored') === null ? fields.assignees : [];
+    for (const login of [...(also === null ? [] : [also.trim()]), ...who]) if (!issue.assignees.some(a => a.login === login)) issue.assignees.push({login});
+  } else if (method === 'DELETE' && sub === '/assignees') {
+    failing('unassign');
+    issue.assignees = issue.assignees.filter(a => !fields.assignees.includes(a.login));
   } else if (method === 'POST' && sub === '/labels') {
     failing('edit');
     for (const name of fields.labels) if (!issue.labels.some(l => l.name === name)) issue.labels.push({name});
@@ -583,6 +593,115 @@ git -C "$other" pull -q origin develop
 git -C "$other" revert --no-edit HEAD >/dev/null
 git -C "$other" push -q origin HEAD:develop
 git fetch -q origin
+
+printf '\nclaim\n'
+calls() { cat "$GH_FIXTURES/calls.log" 2>/dev/null; }
+writes() { cat "$GH_FIXTURES/writes.log" 2>/dev/null; }
+# claim_of <n> [<flags>]: a claim with a clean log.
+claim_of() { rm -f "$GH_FIXTURES"/calls.log "$GH_FIXTURES"/writes.log; status_of claim "$@"; }
+# facts <n> <javascript>: changes the issue, `i`.
+facts() { node -e 'const fs = require("fs"); const [f, js] = process.argv.slice(1); const i = JSON.parse(fs.readFileSync(f)); eval(js); fs.writeFileSync(f, JSON.stringify(i));' "$here/issue-$1.json" "$2"; }
+assignees() { node -p 'JSON.parse(require("fs").readFileSync(process.argv[1])).assignees.map(a => a.login).join(" ")' "$here/issue-$1.json"; }
+issue_json 30 "$TL_TMP/good.md"
+tl_eq 'a claim of a free issue' '0' "$(claim_of 30)"
+tl_eq '  assigns the account it asks as' 'rologr35' "$(assignees 30)"
+tl_has '  and says so' 'issue claim: #30 is assigned to rologr35' "$(out)"
+tl_eq '  with no other write' 'POST issues/30/assignees assignees=rologr35' "$(writes)"
+tl_eq '  and the issue read again after it' '2' "$(calls | grep -c 'api|repos/{owner}/{repo}/issues/30|')"
+tl_eq 'a claim of its own issue is refused' '1' "$(claim_of 30)"
+tl_has '  which it says' 'it is assigned to rologr35' "$(out)"
+tl_eq '  and writes nothing' '' "$(writes)"
+tl_eq '--resume accepts it' '0' "$(claim_of 30 --resume)"
+tl_eq '  and writes nothing' '' "$(writes)"
+facts 30 'i.assignees = [{login: "other"}]'
+for flags in '' --resume; do
+  # shellcheck disable=SC2086
+  tl_eq "an issue of another account is refused ($flags)" '1' "$(claim_of 30 $flags)"
+  tl_has '  naming it' 'it is assigned to other' "$(out)"
+done
+facts 30 'i.assignees = [{login: "other"}, {login: "rologr35"}]'
+tl_eq 'and one of two accounts, its own among them' '1' "$(claim_of 30 --resume)"
+facts 30 'i.assignees = []; i.state = "closed"'
+tl_eq 'a closed issue is refused' '1' "$(claim_of 30)"
+tl_has '  which it says' 'it is closed' "$(out)"
+facts 30 'i.state = "open"; i.pull_request = {}'
+tl_eq 'a pull request is refused' '1' "$(claim_of 30)"
+tl_has '  which it says' 'it is a pull request' "$(out)"
+facts 30 'delete i.pull_request'
+git push -q origin origin/develop:refs/heads/30-thing
+tl_eq 'an issue with its branch on origin is refused' '1' "$(claim_of 30)"
+tl_has '  naming it' 'origin has its branch: 30-thing' "$(out)"
+tl_eq '--resume of a branch that is nobody'"'"'s is refused too' '1' "$(claim_of 30 --resume)"
+facts 30 'i.assignees = [{login: "RoloGR35"}]'
+tl_eq '--resume accepts the branch of its own issue, whatever the case of the account' '0' "$(claim_of 30 --resume)"
+tl_has '  and says how it is checked out' 'its branch on origin: 30-thing (trellis worktree add 30 <slug> --resume)' "$(out)"
+facts 30 'i.labels = [{name: "stopped"}]'
+tl_eq 'a stopped issue is refused' '1' "$(claim_of 30)"
+tl_has '  naming --resume' 'it is stopped: --resume takes it' "$(out)"
+tl_eq '--resume takes it' '0' "$(claim_of 30 --resume)"
+tl_eq '  and takes the label off' 'DELETE issues/30/labels/stopped' "$(writes)"
+facts 30 'i.labels = [{name: "stopped"}]; i.assignees = []'
+tl_eq '--resume takes a stopped issue nobody is assigned to, with its branch' '0' "$(claim_of 30 --resume)"
+tl_eq '  assigning it' 'rologr35' "$(assignees 30)"
+tl_has '  and with the label off' 'DELETE issues/30/labels/stopped' "$(writes)"
+facts 30 'i.labels = [{name: "stopped"}]; i.assignees = [{login: "other"}]'
+tl_eq 'but not a stopped issue of another account' '1' "$(claim_of 30 --resume)"
+git push -q origin :refs/heads/30-thing
+git push -q origin origin/develop:refs/heads/300-thing
+facts 30 'i.labels = []; i.assignees = []'
+tl_eq 'a branch of another number does not count' '0' "$(claim_of 30)"
+git push -q origin :refs/heads/300-thing
+issue_json 31 "$TL_TMP/good.md"
+printf 'other\n' > "$GH_FIXTURES/race"
+tl_eq 'with another assignee after the assignment it refuses' '1' "$(claim_of 31)"
+tl_eq '  and takes itself off' 'other' "$(assignees 31)"
+tl_has '  which it says' 'after the assignment it is of other rologr35' "$(out)"
+rm "$GH_FIXTURES/race"
+issue_json 31 "$TL_TMP/good.md"
+touch "$GH_FIXTURES/assign-ignored"
+tl_eq 'an assignment GitHub does not take refuses' '1' "$(claim_of 31)"
+tl_has '  which it says' 'it is of nobody' "$(out)"
+rm "$GH_FIXTURES/assign-ignored"
+touch "$GH_FIXTURES/assign-fails"
+tl_eq 'an assignment that fails refuses' '1' "$(claim_of 31)"
+tl_has '  with the error of gh' 'no assign for you' "$(out)"
+rm "$GH_FIXTURES/assign-fails"
+issue_json 31 "$TL_TMP/symptom.md"
+tl_eq 'a plan that does not pass the check is refused' '1' "$(claim_of 31)"
+tl_has '  which it says' '#31 is not claimed: its plan does not pass the check' "$(out)"
+tl_eq '  with nothing written' '' "$(writes)"
+git config -f trellis.config gate.notes.paths 'notes/*.md'
+sed 's/^Gates: none\.$/Gates: notes/' "$TL_TMP/good.md" > "$TL_TMP/gated.md"
+issue_json 32 "$TL_TMP/gated.md"
+tl_eq '--unattended refuses a plan with a gate' '1' "$(claim_of 32 --unattended)"
+tl_has '  naming it' 'a run without a person cannot take it: Gates: notes' "$(out)"
+tl_eq '  and assigns nobody' '' "$(assignees 32)"
+tl_eq 'which a person takes' '0' "$(claim_of 32)"
+git config -f trellis.config --remove-section gate.notes
+for needs in 'Needs: a key of the store' '- **Needs**: a step of a person' 'Needs:\
+\
+- a key of the store'; do
+  sed "s/^Gates: none\.\$/Gates: none.\\
+\\
+$needs/" "$TL_TMP/good.md" > "$TL_TMP/case.md"
+  issue_json 32 "$TL_TMP/case.md"
+  tl_eq "--unattended refuses a plan with Needs ($(printf '%s' "$needs" | head -n 1))" '1' "$(claim_of 32 --unattended)"
+  tl_has '  naming it' 'cannot take it: Needs: ' "$(out)"
+done
+sed 's/^Gates: none\.$/Gates: none.\
+\
+Needs: none/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 32 "$TL_TMP/case.md"
+tl_eq '--unattended takes a plan with none of both' '0' "$(claim_of 32 --unattended)"
+tl_eq 'no number' '2' "$(claim_of --resume)"
+tl_eq 'a flag it does not know' '2' "$(claim_of 32 --force)"
+tl_eq 'an issue gh cannot read' '1' "$(claim_of 404)"
+issue_json 33 "$TL_TMP/good.md"
+git remote set-url origin "$TL_TMP/no-such-remote"
+tl_eq 'an origin that does not answer is refused' '1' "$(claim_of 33)"
+tl_has '  which it says' 'origin could not be asked for its branch' "$(out)"
+git remote set-url origin "$remote"
+tl_has 'the usage of trellis lists claim' 'issue claim <n> [--unattended] [--resume]' "$("$TRELLIS" help 2>&1)"
 
 printf '\ncreate\n'
 calls() { cat "$GH_FIXTURES/calls.log" 2>/dev/null; }
