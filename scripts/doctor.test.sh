@@ -89,6 +89,21 @@ tl_has 'and names what needs it' 'the pinned marketplace and --scope local need 
 stub claude '2.1.330 (Claude Code)'
 mv "$HOME/.claude/plugins/installed_plugins.json" "$TL_TMP/plugins.json"
 tl_eq 'the plugin not installed fails' '1' "$(doctor)"
+mkdir -p .claude-plugin lib && printf '{\n  "name": "trellis"\n}\n' > .claude-plugin/plugin.json
+tl_lacks 'a plugin.json alone is not the repository of trellis' 'this is the trellis of' "$(doctor; out)"
+touch lib/find-trellis.sh
+tl_eq 'the repository of trellis asks for no plugin' '0' "$(doctor)"
+tl_has 'the code of another checkout is a warning' 'warn  this is the trellis of' "$(out)"
+own="$(tl_upstream)"
+tl_has 'it runs from its tree' 'ok    trellis runs from its tree' "$(cd "$own" && PATH="$tools" bash bin/trellis doctor 2>&1)"
+tl_lacks 'the plugin is not asked for' 'plugin trellis' "$(cd "$own" && PATH="$tools" bash bin/trellis doctor 2>&1)"
+rm "$tools/node"
+tl_lacks 'without node it asks for no plugin' 'plugin trellis not installed' "$(doctor; out)"
+tl_has 'and says it was not recognized' 'info  the repository of trellis was not recognized (node not found)' "$(out)"
+ln -s "$NODE" "$tools/node"
+printf '{"name": "another", "author": {"name": "x"}}\n' > .claude-plugin/plugin.json
+tl_eq 'a project with another name asks for the plugin' '1' "$(doctor)"
+rm -r .claude-plugin lib
 mv "$TL_TMP/plugins.json" "$HOME/.claude/plugins/installed_plugins.json"
 rm "$tools/node"
 tl_eq 'node missing with hooks active fails' '1' "$(doctor)"

@@ -16,6 +16,8 @@ mkdir .githooks
 cp "$TRELLIS_ROOT"/templates/githooks/* .githooks/
 cp "$TRELLIS_ROOT/lib/find-trellis.sh" .githooks/find-trellis.sh
 printf '[git]\n\treleaseBranch = main\n' > trellis.config
+printf '# Project\n\n<!-- trellis:method -->\n<!-- /trellis:method -->\n' > CLAUDE.md
+bash "$TRELLIS" sync > /dev/null
 git add -A && git commit -q -m 'chore: setup (#1)'
 git config core.hooksPath .githooks
 
@@ -76,6 +78,38 @@ tl_eq 'an issue branch is pushed' '0' "$(push 1-setup)"
 git branch feature/x
 tl_eq 'a branch out of git.issueBranch is refused' '1' "$(push feature/x)"
 tl_eq 'the release branch is a person'"'"'s to push' '0' "$(push main)"
+
+printf '\nthe repository of trellis\n'
+own="$(tl_upstream)"
+cd "$own" || exit 1
+mkdir -p .githooks && cp "$TRELLIS_ROOT"/templates/githooks/* .githooks/
+printf '[project]\n\tname = trellis\n' > trellis.config
+printf '# Project\n\n<!-- trellis:method -->\n<!-- /trellis:method -->\n' > CLAUDE.md
+rm -rf .claude TESTING.md
+bash bin/trellis sync > /dev/null && bash bin/trellis hygiene --freeze > /dev/null
+git add -A && git commit -q --no-verify -m 'chore: setup (#1)'
+git config core.hooksPath .githooks
+git worktree add -q "$TL_TMP/wt" -b 2-wt
+cd "$TL_TMP/wt" || exit 1
+found() { (. "$TRELLIS_ROOT/lib/find-trellis.sh"; PATH="$1" find_trellis); }
+tl_eq 'its command is the one of the worktree, before the one of the PATH' "$TL_TMP/wt/bin/trellis" "$(found "$own/bin:$PATH")"
+tl_eq 'from a folder of it too' "$TL_TMP/wt/bin/trellis" "$(cd lib && found "$own/bin:$PATH")"
+tl_eq 'it is not found without node, which runs it' '' "$(found /usr/bin:/bin)"
+own_commit() { PATH="$own/bin:$PATH" git commit -q "$@" > "$TL_TMP/out.txt" 2>&1; echo $?; }
+printf 'x\n' > x.md && git add -A
+tl_eq 'a commit of the worktree passes' '0' "$(own_commit -m 'docs: x (#2)')"
+printf 'console.log("the hygiene of the worktree");\nprocess.exit(1);\n' > hygiene/hygiene.mjs
+printf 'y\n' >> x.md && git add x.md
+tl_eq 'the git hooks run its code' '1' "$(own_commit -m 'docs: y (#2)')"
+tl_has 'and not the one of the PATH' 'the hygiene of the worktree' "$(cat "$TL_TMP/out.txt")"
+printf '{"name": "another"}\n' > .claude-plugin/plugin.json
+tl_eq 'a project with another name is not trellis' "$own/bin/trellis" "$(found "$own/bin:$PATH")"
+printf '{"name": "another", "author": {"name": "trellis"}}\n' > .claude-plugin/plugin.json
+tl_eq 'nor one whose author has the name' "$own/bin/trellis" "$(found "$own/bin:$PATH")"
+for hook in pre-commit commit-msg pre-push; do
+  tl_eq "its $hook is the one of the template" '0' "$(cmp -s "$TRELLIS_ROOT/templates/githooks/$hook" "$TRELLIS_ROOT/.githooks/$hook" && [ -x "$TRELLIS_ROOT/.githooks/$hook" ]; echo $?)"
+done
+cd "$repo" || exit 1
 
 printf '\nwithout trellis\n'
 printf 'y\n' > b.txt && git add -A

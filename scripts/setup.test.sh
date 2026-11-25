@@ -56,4 +56,20 @@ rm trellis.config && : > "$env_file"
 CLAUDE_ENV_FILE="$env_file" "$TRELLIS" setup --quiet
 tl_eq 'no trellis.config: untouched' '' "$(cat "$env_file")"
 
+printf '\nthe repository of trellis\n'
+own="$(tl_upstream)"
+cd "$own" || exit 1
+: > "$env_file"
+CLAUDE_ENV_FILE="$env_file" bash bin/trellis setup --quiet
+tl_eq 'its own command is on the PATH of the session' "$own/bin/trellis" "$(. "$env_file"; command -v trellis)"
+CLAUDE_ENV_FILE="$env_file" bash bin/trellis setup --quiet
+tl_eq 'a second start adds nothing' '1' "$(grep -c '' "$env_file")"
+git worktree add -q "$TL_TMP/wt" -b 2-wt
+: > "$env_file"
+(cd "$TL_TMP/wt" && CLAUDE_ENV_FILE="$env_file" bash "$own/bin/trellis" setup --quiet)
+tl_eq 'the one of the worktree, in a worktree' "$TL_TMP/wt/bin/trellis" "$(. "$env_file"; command -v trellis)"
+printf '{"name": "another"}\n' > .claude-plugin/plugin.json && : > "$env_file"
+CLAUDE_ENV_FILE="$env_file" bash bin/trellis setup --quiet
+tl_eq 'a project with another name adds nothing' '' "$(cat "$env_file")"
+
 tl_done

@@ -1,8 +1,49 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
   "permissions": {
     "allow": [
       "Bash(gh pr merge *)",
       "Bash(GH_TOKEN=$(gh auth token -u rologr35) gh pr merge *)"
+    ],
+    "deny": [
+      "Bash(git reset --hard*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push * +main)",
+      "Bash(git push * +main *)",
+      "Bash(git push * refs/heads/main)",
+      "Bash(git push * refs/heads/main *)",
+      "Bash(git push * +refs/heads/main)",
+      "Bash(git push * +refs/heads/main *)",
+      "Bash(git push *:main)",
+      "Bash(git push *:main *)",
+      "Bash(git push *:refs/heads/main)",
+      "Bash(git push *:refs/heads/main *)",
+      "Bash(git -C * push * main)",
+      "Bash(git -C * push * main *)",
+      "Bash(git -C * push * +main)",
+      "Bash(git -C * push * +main *)",
+      "Bash(git -C * push * refs/heads/main)",
+      "Bash(git -C * push * refs/heads/main *)",
+      "Bash(git -C * push * +refs/heads/main)",
+      "Bash(git -C * push * +refs/heads/main *)",
+      "Bash(git -C * push *:main)",
+      "Bash(git -C * push *:main *)",
+      "Bash(git -C * push *:refs/heads/main)",
+      "Bash(git -C * push *:refs/heads/main *)",
+      "mcp__github__merge_pull_request",
+      "mcp__github__enable_pr_auto_merge",
+      "mcp__github__push_files",
+      "mcp__github__create_or_update_file",
+      "mcp__github__delete_file"
     ]
   },
   "hooks": {
@@ -13,6 +54,16 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/hooks/guard-git.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/bin/trellis\" setup --quiet"
           }
         ]
       }

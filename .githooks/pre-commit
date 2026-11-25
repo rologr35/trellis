@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# pre-commit of a trellis project, a convenience: the barrier is the CI of the pull request.
+#   - refuses a commit on git.releaseBranch (the integration branch has no mechanical guard on
+#     purpose: a person may commit a small change there; for Claude the rule is in the method);
+#   - runs [command] secretScan (configured and missing: a warning, and `trellis doctor` FAILs);
+#   - runs `trellis verify --staged`, in a project with a copy of trellis: nobody edits it by hand, and
+#     it is not removed while .claude/settings.json loads its hooks;
+#   - runs `trellis ratchet` on every commit, and `trellis hygiene --staged` when the staged change
+#     touches .md, .claude/, docs/ or trellis.config. The aggregate limits run only in CI: two
+#     branches under a shared budget can merge over it, and a local absolute check would block
+#     somebody else's commit.
+# Without trellis at hand (lib/find-trellis.sh) it warns and lets the commit through.
+
+set -uo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/find-trellis.sh"
+trellis="$(find_trellis)"
+if [ -z "$trellis" ]; then
+  echo 'pre-commit: trellis not found (.trellis and node, PATH or the installed plugin), checks skipped' >&2
+  exit 0
+fi
+# A config that does not parse stops the hook with its error (trellis exits 3).
+"$trellis" config list >/dev/null || exit 1
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+release="$("$trellis" config get git.releaseBranch)"
+if [ -n "$branch" ] && [ "$branch" = "$release" ]; then
+  echo "pre-commit: no commit on $release, the release branch. Work on an issue branch." >&2
+  exit 1
+fi
+
+if [ -n "$(git ls-files .trellis)" ] || git grep -q --cached -F '.trellis/' -- .claude/settings.json; then
+  "$trellis" verify --staged || exit 1
+fi
+
+scan="$("$trellis" config get command.secretScan)"
+if [ -n "$scan" ]; then
+  run="$("$trellis" config get "command.$scan.run")"
+  if command -v "${run%% *}" >/dev/null 2>&1; then
+    bash -c "$run" || { echo "pre-commit: the secret scan ($run) failed" >&2; exit 1; }
+  else
+    echo "pre-commit: the secret scanner ${run%% *} is not installed, scan skipped (trellis doctor)" >&2
+  fi
+fi
+
+"$trellis" ratchet || exit 1
+
+if git diff --cached --name-only | grep -qE '\.md$|^\.claude/|^docs/|^trellis\.config$'; then
+  "$trellis" hygiene --staged || exit 1
+fi

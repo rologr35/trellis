@@ -28,14 +28,6 @@ jobs:
           echo "$RUNNER_TEMP/bash32" >> "$GITHUB_PATH"
           echo "TRELLIS_EXPECT_BASH=3.2" >> "$GITHUB_ENV"
       - name: shell tests
-        run: |
-          status=0
-          for t in lib/*.test.sh scripts/*.test.sh hooks/*.test.sh; do
-            [ -f "$t" ] || continue
-            echo "::group::$t"
-            bash "$t" || status=1
-            echo "::endgroup::"
-          done
-          exit $status
+        run: ./test.sh shell
       - name: hygiene tests
-        run: node --test hygiene/*.test.mjs
+        run: ./test.sh node

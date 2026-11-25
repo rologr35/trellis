@@ -120,6 +120,27 @@ git reset -q --hard HEAD~1
 git config -f trellis.config --add hygiene.keepRef 'CLAUDE.md: #4 | reason' && git add -A
 tl_eq 'a grown allowlist is refused' '1' "$(judge)"
 reset
+git config -f trellis.config --add workspace.notPackage 'packages/*/example | an example' && git add -A
+tl_eq 'a package more without CLAUDE.md is refused' '1' "$(judge)"
+tl_has 'naming it' 'workspace.notPackage adds packages/*/example' "$(cat "$OUT")"
+git commit -q --no-verify -m 'chore: an example (#7)'
+git config -f trellis.config workspace.notPackage 'packages/*/example | another reason' && git add -A
+tl_eq 'another reason passes' '0' "$(judge)"
+git config -f trellis.config workspace.notPackage '** | an example' && git add -A
+tl_eq 'a wider glob in its place is refused' '1' "$(judge)"
+tl_has 'naming it' 'workspace.notPackage adds **' "$(cat "$OUT")"
+git config -f trellis.config --unset workspace.notPackage && git commit -qa --no-verify -m 'chore: none (#7)'
+reset
+git config -f trellis.config --add workspace.manifest go.mod && git add -A
+tl_eq 'a manifest declared in place of the default ones is refused' '1' "$(judge)"
+tl_has 'naming the ones that go' 'workspace.manifest drops package.json, pubspec.yaml' "$(cat "$OUT")"
+git config -f trellis.config --add workspace.manifest package.json && git config -f trellis.config --add workspace.manifest pubspec.yaml && git add -A
+tl_eq 'a manifest more passes' '0' "$(judge)"
+git commit -q --no-verify -m 'chore: manifests (#7)'
+git config -f trellis.config --unset workspace.manifest go.mod && git add -A
+tl_eq 'a manifest less is refused' '1' "$(judge)"
+tl_has 'naming it' 'workspace.manifest drops go.mod' "$(cat "$OUT")"
+git reset -q --hard HEAD~1
 
 printf '[hygiene\n' > "$TL_TMP/broken.config"
 cp trellis.config "$TL_TMP/good.config"

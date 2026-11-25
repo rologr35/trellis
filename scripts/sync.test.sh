@@ -119,4 +119,60 @@ rm .claude/settings.json
 "$TRELLIS" sync >/dev/null 2>&1
 tl_eq 'the settings are written when there are none' '1' "$(at s.hooks.PreToolUse.length)"
 
+printf '\nthe repository of trellis\n'
+own="$(tl_upstream)"
+cd "$own" || exit 1
+sync() { bash "$own/bin/trellis" sync > "$TL_TMP/out.txt" 2>&1; echo $?; }
+rm -rf .claude/skills .claude/agents
+tl_eq 'its sync exits 0' '0' "$(sync)"
+tl_eq 'the skills, all but init' 'trellis-debugging trellis-merge trellis-retro trellis-scaffold trellis-work' "$(ls .claude/skills 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+tl_eq 'the agents' 'trellis-plan-check.md trellis-plan-reviewer.md' "$(ls .claude/agents 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+tl_eq 'a skill carries the name of its folder' 'name: trellis-retro' "$(sed -n 2p .claude/skills/trellis-retro/SKILL.md)"
+tl_eq 'and the rest of the source' "$(sed -n '3,$p' skills/retro/SKILL.md)" "$(sed -n '3,$p' .claude/skills/trellis-retro/SKILL.md)"
+tl_eq 'as the copy of a project has it' '0' "$(cd "$(tl_repo)" && tl_copy "$own" && cmp -s .claude/skills/trellis-retro/SKILL.md "$own/.claude/skills/trellis-retro/SKILL.md"; echo $?)"
+tl_eq 'a second run changes nothing' '0' "$(sync)"
+tl_has 'and says it' 'nothing to change' "$(cat "$TL_TMP/out.txt")"
+mkdir -p .claude/skills/trellis-gone .claude/skills/own
+printf '# Gone\n' | tee .claude/skills/trellis-gone/SKILL.md > .claude/agents/trellis-gone.md
+printf '# Own\n' | tee .claude/skills/own/SKILL.md > .claude/agents/own.md
+printf 'by hand\n' >> .claude/agents/trellis-plan-check.md
+git add -A && git commit -q --no-verify -m 'chore: by hand (#1)'
+tl_eq 'the ones with no source' '0' "$(sync)"
+tl_has 'are removed, and named' 'sync: removed .claude/skills/trellis-gone/SKILL.md' "$(cat "$TL_TMP/out.txt")"
+tl_eq 'with their folder' 'no no' "$([ -e .claude/skills/trellis-gone ] && echo yes || echo no) $([ -e .claude/agents/trellis-gone.md ] && echo yes || echo no)"
+tl_eq 'one edited by hand is written again' "$(sed -n '3,$p' agents/plan-check.md)" "$(sed -n '3,$p' .claude/agents/trellis-plan-check.md)"
+tl_eq 'the ones without the prefix stay' '# Own# Own' "$(cat .claude/skills/own/SKILL.md)$(cat .claude/agents/own.md)"
+mkdir -p .claude/skills/trellis-draft
+printf '# Draft\n' | tee .claude/skills/trellis-draft/SKILL.md > .claude/agents/trellis-draft.md
+git add .claude/agents/trellis-draft.md && git commit -q --no-verify -m 'chore: a draft (#1)'
+printf 'a line more\n' >> .claude/agents/trellis-draft.md
+tl_eq 'a left over one git cannot give back' '0' "$(sync)"
+tl_eq 'stays when it is untracked' '# Draft' "$(cat .claude/skills/trellis-draft/SKILL.md 2>/dev/null)"
+tl_has 'and says why' 'sync: kept .claude/skills/trellis-draft/SKILL.md, which has no source: it is not tracked' "$(cat "$TL_TMP/out.txt")"
+tl_eq 'and when it is modified' 'a line more' "$(tail -1 .claude/agents/trellis-draft.md 2>/dev/null)"
+tl_has 'and says why, too' 'sync: kept .claude/agents/trellis-draft.md, which has no source: it has changes that are not in the index' "$(cat "$TL_TMP/out.txt")"
+tl_lacks 'and there was something to say' 'nothing to change' "$(cat "$TL_TMP/out.txt")"
+git add -A
+tl_eq 'once git can give them back' '0' "$(sync)"
+tl_eq 'they go' 'no no' "$([ -e .claude/skills/trellis-draft ] && echo yes || echo no) $([ -e .claude/agents/trellis-draft.md ] && echo yes || echo no)"
+git add -A && git commit -q --no-verify -m 'chore: no draft (#1)'
+rm .claude/agents/trellis-plan-check.md && ln -s ../../agents/plan-check.md .claude/agents/trellis-plan-check.md
+tl_eq 'a symbolic link to a source' '0' "$(sync)"
+tl_eq 'is replaced, and the source stays' 'name: plan-check name: trellis-plan-check' "$(sed -n 2p agents/plan-check.md) $(sed -n 2p .claude/agents/trellis-plan-check.md)"
+rm -rf .claude/skills/trellis-work && ln -s ../../skills/work .claude/skills/trellis-work
+tl_eq 'a folder linked to the one of a source' '0' "$(sync)"
+tl_eq 'too' 'name: work name: trellis-work' "$(sed -n 2p skills/work/SKILL.md) $(sed -n 2p .claude/skills/trellis-work/SKILL.md)"
+git add -A && git commit -q --no-verify -m 'chore: generated (#1)'
+# On a disk that ignores the case, the same folder under another one is the same checkout.
+other="$(dirname "$own")/$(basename "$own" | tr '[:lower:][:upper:]' '[:upper:][:lower:]')"
+if [ "$other" -ef "$own" ]; then
+  tl_eq 'its path in another case is the same checkout' '0' "$(cd "$other" && bash "$other/bin/trellis" sync > "$TL_TMP/out.txt" 2>&1; echo $?)"
+fi
+tl_eq 'the sync of another checkout refuses' '1' "$(cd lib && bash "$TRELLIS" sync > "$TL_TMP/out.txt" 2>&1; echo $?)"
+tl_has 'and says which to run' 'run bin/trellis' "$(cat "$TL_TMP/out.txt")"
+tl_eq 'with nothing written' '' "$(git status --porcelain)"
+git worktree add -q "$TL_TMP/wt" -b 2-wt
+tl_eq 'the one of the main checkout, in a worktree, too' '1' "$(cd "$TL_TMP/wt" && bash "$own/bin/trellis" sync > "$TL_TMP/out.txt" 2>&1; echo $?)"
+tl_eq 'and the one of the worktree runs' '0' "$(cd "$TL_TMP/wt" && bash bin/trellis sync > "$TL_TMP/out.txt" 2>&1; echo $?)"
+
 tl_done

@@ -12,8 +12,8 @@
 # key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), workspace.kind =
 # other without [hygiene] namedExt, or a command name that names no [command]; a tool of
 # [toolchain] require missing or older than its minimum; core.hooksPath other than git.hooksPath;
-# a copy of trellis that is not whole, as `trellis verify` says, or, without a copy, the plugin not
-# installed; Claude Code older than the minimum; node missing while hooks are active;
+# a copy of trellis that is not whole, as `trellis verify` says, or, without a copy and out of the
+# repository of trellis, which runs from its own tree, the plugin not installed; Claude Code older than the minimum; node missing while hooks are active;
 # ANTHROPIC_API_KEY exported (the subscription stops being used and every token is billed as API
 # usage, silently, so it is a FAIL and not a warning); a branch that is neither the integration
 # branch, the release branch nor an issue branch; a [command] secretScan configured and missing;
@@ -23,7 +23,7 @@
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
 # parser); .github/workflows/trellis.yml that does not name consumer-closed.yml, with tracker.kind =
 # github; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
-# sha the project pins; no secret scanner configured; uncommitted changes, unpushed
+# sha the project pins; the repository of trellis judged by another checkout; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail
@@ -31,6 +31,8 @@ set -uo pipefail
 TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/find-trellis.sh
+. "$TRELLIS_ROOT/lib/find-trellis.sh"
 
 CLAUDE_MIN='2.1.330'
 
@@ -165,6 +167,14 @@ elif [ "$copy" = true ]; then
     process.stdout.write(String(Object.entries(on).some(([k, v]) => k.startsWith("trellis@") && v === true)));
   ' "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json)" = true ]; then
     warn 'the plugin trellis is enabled too: every hook runs twice; turn it off here (claude plugin disable trellis@trellis) or take it out of the settings that enable it'
+  fi
+elif [ -f "$top/lib/find-trellis.sh" ] && [ -f "$top/.claude-plugin/plugin.json" ] && ! command -v node >/dev/null 2>&1; then
+  info 'the repository of trellis was not recognized (node not found)'
+elif is_trellis "$top"; then
+  if [ "$top" -ef "$TRELLIS_ROOT" ]; then
+    ok 'trellis runs from its tree'
+  else
+    warn "this is the trellis of $TRELLIS_ROOT, and the repository of trellis runs from its own tree: run bin/trellis doctor"
   fi
 elif grep -q '"trellis@' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
   plugin_installed=true

@@ -18,14 +18,15 @@
 //     so it carries the nested limit and is not frozen), each rule, each agent (4 KB, fixed) and
 //     all the rules together under their [hygiene] limits; skills and docs/ under their
 //     [hygiene] frozen size plus 2%, every one of them frozen;
-//   - every [workspace] package has its CLAUDE.md (a package at the root, `.`, is the root one);
+//   - every package of lib/packages.mjs has its CLAUDE.md (a package at the root, `.`, is the root one);
 //   - the orientation block lists every nested file and every rule;
-//   - every generated block matches what `trellis sync` generates, the root carries the method
-//     block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks the
-//     ones of the copy, and
-//     .githooks/find-trellis.sh is trellis's copy;
+//   - every generated block matches what `trellis sync` generates, the root is there and carries the
+//     method block, the deny of .claude/settings.json keeps every entry sync generates, and its hooks
+//     the ones of the copy, and .githooks/find-trellis.sh is trellis's copy;
 //   - the copy of trellis is whole, as `trellis verify` says, and its files are not judged by anything
-//     above: the project does not write them.
+//     above: the project does not write them;
+//   - in the repository of trellis, which runs from its own tree, its skills and agents under .claude/
+//     are the ones `trellis sync` writes from skills/ and agents/.
 //
 // Prints one line per finding and exits 1 when there is any. Node only, no dependencies.
 
@@ -46,9 +47,10 @@ import {
   rulePaths,
 } from '../lib/blocks.mjs';
 import {loadConfig} from '../lib/config.mjs';
-import {COPY_DIR, hasCopy, ownTree, verifyCopy} from '../lib/copy.mjs';
+import {COPY_DIR, generatedFiles, hasCopy, isTrellis, ownTree, refuseOtherCheckout, verifyCopy} from '../lib/copy.mjs';
 import {globToRegExp} from '../lib/glob.mjs';
 import {localeOf} from '../lib/locale.mjs';
+import {inPackage, packagesOf} from '../lib/packages.mjs';
 import {projectTree, topLevel} from '../lib/tree.mjs';
 
 export const AGENT_LIMIT_BYTES = 4 * 1024;
@@ -95,18 +97,6 @@ export const TRACKER_REF = /(?<![\w&/])#\d+\b/gu;
 /** The extensions a rule names files by, per workspace.kind. */
 const NAMED_EXT = {flutter: ['dart'], dart: ['dart'], node: ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']};
 
-/**
- * A `workspace.package` value as a path from the project's root: `./x`, `x/` and `x//` are `x`, and
- * `.` (or `./`) is the root, the empty string. The one reading of the key.
- */
-export function packagePath(value) {
-  const normalized = path.posix.normalize(value.trim()).replace(/\/+$/u, '');
-  return normalized === '.' ? '' : normalized;
-}
-
-/** A file of a package: the package at the root has its files at the root. */
-export const inPackage = (pkg, file) => (pkg === '' ? file : `${pkg}/${file}`);
-
 /** `<left>: <right> | <reason>` entries of an allowlist, as a set of `<left>: <right>`. */
 const allowlist = values => new Set(values.map(v => v.split('|')[0].trim()));
 
@@ -132,6 +122,7 @@ export function hygiene(root, {staged = false} = {}) {
   const skills = tree.files.filter(f => /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(f));
   const docs = tree.files.filter(f => /^docs\/.*\.md$/.test(f));
   const rootFile = tree.has('CLAUDE.md') ? ['CLAUDE.md'] : [];
+  if (rootFile.length === 0) fail('CLAUDE.md', 'is not there, and the method is always loaded from it: write it from the template CLAUDE.root.md');
   const testing = tree.has('TESTING.md') ? ['TESTING.md'] : [];
   const instructions = [...rootFile, ...nested, ...rules, ...agents, ...skills, ...testing];
 
@@ -152,7 +143,15 @@ export function hygiene(root, {staged = false} = {}) {
   // Rules load where they speak.
   const kind = config.get('workspace.kind');
   const extensions = config.all('hygiene.namedExt').length ? config.all('hygiene.namedExt') : NAMED_EXT[kind] ?? [];
-  const packages = [...new Set(config.all('workspace.package').map(packagePath))];
+  for (const value of config.all('workspace.manifest')) {
+    if (/[/*?[\]{}]/u.test(value)) fail('trellis.config', `[workspace] manifest: ${value} is not the name of a file, so it finds no package`);
+  }
+  let packages = [];
+  try {
+    packages = packagesOf(tree, config);
+  } catch (error) {
+    fail('trellis.config', `[workspace] notPackage: ${error.message}`);
+  }
   const namedElsewhere = allowlist(config.all('hygiene.namedElsewhere'));
   const globsOf = new Map();
   for (const rule of rules) {
@@ -221,7 +220,7 @@ export function hygiene(root, {staged = false} = {}) {
 
   // Packages, orientation and generated content.
   for (const pkg of packages) {
-    if (!tree.has(inPackage(pkg, 'CLAUDE.md'))) fail(pkg || '.', 'is a [workspace] package without its CLAUDE.md (the scaffold skill drafts one)');
+    if (!tree.has(inPackage(pkg, 'CLAUDE.md'))) fail(pkg || '.', 'is a [workspace] package without its CLAUDE.md (the scaffold skill drafts one; notPackage takes out an example or a fixture, with its reason)');
   }
   const generated = generateBlocks(tree, config);
   for (const [file, ids] of Object.entries(BLOCK_FILES)) {
@@ -264,6 +263,15 @@ export function hygiene(root, {staged = false} = {}) {
   if (tree.files.some(f => f.startsWith('.githooks/')) && tree.read(FIND_TRELLIS_COPY) !== findTrellisSource()) {
     fail(FIND_TRELLIS_COPY, 'is not trellis\'s lib/find-trellis.sh: run trellis sync');
   }
+  if (isTrellis(tree)) {
+    const {expected, leftOver} = generatedFiles(tree);
+    const bytes = tree.bytes([...expected.keys()]);
+    for (const [file, {source, bytes: theirs}] of expected) {
+      if (!bytes.get(file)) fail(file, `is not there: trellis sync writes it from ${source}`);
+      else if (!bytes.get(file).equals(theirs)) fail(file, `is not what sync writes from ${source}: run trellis sync`);
+    }
+    for (const file of leftOver) fail(file, 'has no source in skills/ or agents/: run trellis sync');
+  }
   // The settings that load the copy's hooks need it there.
   if (copy || (settingsText ?? '').includes(`${COPY_DIR}/`)) findings.push(...verifyCopy(whole));
 
@@ -300,6 +308,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(2);
   }
   const root = topLevel();
+  refuseOtherCheckout(root, 'hygiene');
   if (args.includes('--freeze')) {
     const {files, rose} = freeze(root);
     console.log(`hygiene: froze ${files.length} file(s) in [hygiene] frozen`);

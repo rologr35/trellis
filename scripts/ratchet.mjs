@@ -8,6 +8,7 @@ import path from 'node:path';
 import {loadConfig} from '../lib/config.mjs';
 import {MANIFEST_FILE, copiedFiles} from '../lib/copy.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {packagePath} from '../lib/packages.mjs';
 
 const [, , baseRef, branchArg, escaped] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
@@ -244,17 +245,29 @@ if (configWas !== null) {
       add(`trellis.config: ${key} grows from ${was} to ${now} entries`, 'the hygiene check stops seeing that case', 'fix the file so the check passes as it is');
     }
   }
+  // By its glob: a wider one in the place of another is as many entries.
+  const notPackage = cfg => cfg.all('workspace.notPackage').map(v => packagePath(v.split('|')[0]));
+  const wasOut = new Set(notPackage(oldConfig));
+  const out = notPackage(newConfig).filter(glob => !wasOut.has(glob));
+  if (out.length > 0) {
+    add(`trellis.config: workspace.notPackage adds ${out.join(', ')}`, 'a folder it matches is not asked for its CLAUDE.md', 'write the CLAUDE.md of the package');
+  }
   // A value that is none of the levels is the lowest, as `trellis issue follow-up` reads it.
   const LEVELS = ['careful', 'balanced', 'autonomous'];
   const rank = cfg => Math.max(0, LEVELS.indexOf(cfg.get('autonomy.level')));
   if (rank(newConfig) > rank(oldConfig)) {
     add(`trellis.config: raises autonomy.level from ${LEVELS[rank(oldConfig)]} to ${LEVELS[rank(newConfig)]}`, 'what a run wrote only when a person approved it is written without asking', 'keep the level and approve each proposal');
   }
-  for (const key of ['ratchets.suppression', 'ratchets.testFile', 'ratchets.lintConfig']) {
+  for (const [key, cost] of [
+    ['ratchets.suppression', 'what it matched stops being watched by the ratchet'],
+    ['ratchets.testFile', 'what it matched stops being watched by the ratchet'],
+    ['ratchets.lintConfig', 'what it matched stops being watched by the ratchet'],
+    ['workspace.manifest', 'a folder with that manifest is no longer asked for its CLAUDE.md'],
+  ]) {
     const now = new Set(newConfig.all(key));
     const gone = oldConfig.all(key).filter(v => !now.has(v));
     if (gone.length > 0) {
-      add(`trellis.config: ${key} drops ${gone.join(', ')}`, 'what it matched stops being watched by the ratchet', 'keep the entry');
+      add(`trellis.config: ${key} drops ${gone.join(', ')}`, cost, 'keep the entry');
     }
   }
 }
