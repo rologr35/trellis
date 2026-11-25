@@ -10,8 +10,8 @@
 //   node issue-check.mjs attended <json> <comments>   prints what a run without a person cannot take, one
 //                                       per line
 //   node issue-check.mjs stop <file> <comment>      judges the text of a stop and writes its comment
-//   node issue-check.mjs refusal <file> <comment>   writes the comment of a plan a run could not take, for
-//                                       the reasons of the file, one per line
+//   node issue-check.mjs refusal <file> <comment> [<branches>]   writes the comment of a plan a run could not
+//                                       take, for the reasons of the file, one per line
 //   node issue-check.mjs follow-up <file> <body> <reopen>  judges the body of a follow-up and writes it,
 //                                       with the line of what reopens it when there is one
 //   node issue-check.mjs gates <json> <comments>   judges the files of the branch against the gates of the plan
@@ -436,6 +436,10 @@ function judge(plan, lines) {
   }
 
   const risks = plan.sections.filter(s => s.name === risksName);
+  if (risks.length === 1) {
+    const left = /\{\{[^}]*\}\}/.exec(risks[0].lines.filter(l => !l.code).map(l => l.text.replace(/`[^`]*`/g, '')).join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, ''));
+    if (left && gatesOf(plan)) misses.push(`${risksName} has a placeholder of the mould: ${left[0]}`);
+  }
   if (risks.length === 1 && !isEmpty(risks[0].lines)) misses.push(...judgeGates(plan, pathsOf(layers, tree), tree));
 
   misses.push(...styleMisses(withoutReferences(lines), 'style'));
@@ -462,10 +466,11 @@ function judgeStop(text) {
 }
 
 /** The text of the stop of a plan that was refused. */
-function refusal(reasons) {
-  const {sections: [done, missing, needs], notStarted} = STOP[localeOf(config)];
+function refusal(reasons, branches) {
+  const {sections: [done, missing, needs], notStarted, started, rest} = STOP[localeOf(config)];
   const items = reasons.split('\n').map(l => l.trim()).filter(Boolean).map(l => `- ${l.replace(/^- /, '')}`);
-  return `**${done}**: ${PR_SECTIONS[localeOf(config)].noneWord}\n\n**${missing}**: ${notStarted}\n\n**${needs}**:\n\n${items.join('\n')}\n`;
+  const [has, lacks] = branches ? [started(branches), rest] : [PR_SECTIONS[localeOf(config)].noneWord, notStarted];
+  return `**${done}**: ${has}\n\n**${missing}**: ${lacks}\n\n**${needs}**:\n\n${items.join('\n')}\n`;
 }
 
 const text = readFileSync(file, 'utf8');
@@ -480,7 +485,7 @@ if (mode === 'follow-up') {
   const fact = reopen.trim().replace(/\s+/g, ' ');
   if (process.exitCode === 0) writeFileSync(commentsFile, `${fact ? `${L.reopen}: ${fact}\n\n` : ''}${text}`);
 }
-if (mode === 'refusal') writeFileSync(commentsFile, `${STOP_MARK}\n${refusal(text)}`);
+if (mode === 'refusal') writeFileSync(commentsFile, `${STOP_MARK}\n${refusal(text, process.argv[5])}`);
 if (!['body', 'class', 'stop', 'refusal', 'follow-up'].includes(mode)) {
   const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
   if (plan.note && ['issue', 'print'].includes(mode)) console.error(`issue: ${plan.note}`);

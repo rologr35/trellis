@@ -342,6 +342,13 @@ fails 'Gates that says nothing' 's/^Gates: none\.$/Gates:\
 \
 It may break./' "$no_gates"
 fails 'Gates with the placeholder' 's/^Gates: none\.$/Gates: {{none}}/' "$no_gates"
+fails 'a placeholder of the mould left in Risks' 's/^Gates: none\.$/Gates: none\
+\
+{{The ratchet it loosens.}}/' 'Risks has a placeholder of the mould: {{The ratchet it loosens.}}'
+fails 'and in Needs' 's/^Gates: none\.$/Gates: none\
+\
+Needs: {{a credential}}/' 'Risks has a placeholder of the mould: {{a credential}}'
+tl_eq 'one in code is not of the mould' '0' "$(case_of 's/^Gates: none\.$/Gates: none. It writes `{{sha}}`./')"
 tl_eq 'a text after none' '0' "$(case_of 's/^Gates: none\.$/Gates: none. It may break, in lib./')"
 tl_eq 'Gates after a comment' '0' "$(case_of 's/^Gates: none\.$/<!-- a note -->\
 **Gates**: none/')"
@@ -575,12 +582,20 @@ tl_has '  and is named' '`lib/a.sh` is of the gate money, which the plan does no
 tl_lacks '  without the files of no gate' 'README.md' "$(out)"
 sed 's/^Gates: none\.$/Gates: money/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 22 "$TL_TMP/case.md"
+tl_eq 'a branch of another issue is refused' '1' "$(status_of gates 22)"
+tl_has '  naming it' 'issue gates: 21-thing is not a branch of #22' "$(out)"
+git branch -q -m 22-thing
 tl_eq 'the gate named passes' '0' "$(status_of gates 22)"
 { amendment 'gates'; printf '### Risks\n\nGates: notes\n'; } > "$TL_TMP/a7.md"
 issue_json 22 "$TL_TMP/case.md" OWNER "$TL_TMP/a7.md"
 tl_eq 'the gates are the ones of the last amendment' '1' "$(status_of gates 22)"
 issue_json 22 "$TL_TMP/symptom.md"
 tl_eq 'an issue without a plan names none' '1' "$(status_of gates 22)"
+git switch -q --detach
+tl_eq 'no branch is refused' '1' "$(status_of gates 22)"
+tl_has '  which it says' 'issue gates: no branch is not a branch of #22' "$(out)"
+git switch -q 22-thing
+git branch -q -m 21-thing
 git mv lib/a.sh moved.sh
 git config -f trellis.config --remove-section gate.money
 git commit -q -am 'feat: move'
@@ -589,6 +604,7 @@ tl_has '  still answers to the gate of the integration branch' '`lib/a.sh` is of
 tl_eq 'no number' '2' "$(status_of gates)"
 tl_eq 'two numbers' '2' "$(status_of gates 21 22)"
 tl_eq 'an issue gh cannot read' '1' "$(status_of gates 404)"
+tl_has '  which it says' '#404 could not be read' "$(out)"
 git config -f trellis.config git.integrationBranch nowhere
 tl_eq 'an integration branch that is not known' '1' "$(status_of gates 21)"
 tl_has '  which it says' 'are not known against origin/nowhere' "$(out)"
@@ -723,6 +739,23 @@ tl_has '  with what the check said' '- no section `## Approved plan`' "$(last_co
 tl_eq '  and nobody assigned' '' "$(assignees 34)"
 tl_eq 'a second run is refused for the label' '1' "$(claim_of 34 --unattended)"
 tl_eq '  and writes nothing' '' "$(writes)"
+facts 34 'i.labels = [{name: "stopped"}]; i.assignees = [{login: "rologr35"}]'
+git push -q origin origin/develop:refs/heads/34-thing
+tl_eq 'one with work on its branch, resumed and refused' '1' "$(claim_of 34 --unattended --resume)"
+tl_has '  says the branch that has it' '**Done**: what is in `34-thing`, which its stop before this one says' "$(last_comment 34)"
+tl_has '  and what is missing' '**Missing**: the rest of the plan' "$(last_comment 34)"
+git push -q origin --delete 34-thing
+sed 's/^Depends on:.*$/Depends on: #404/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 34 "$TL_TMP/case.md"
+tl_eq '--unattended, with a dependency that cannot be read' '1' "$(claim_of 34 --unattended)"
+tl_has '  is refused' 'its plan could not be checked' "$(out)"
+tl_eq '  and writes nothing' '' "$(writes)"
+sed 's/^Depends on:.*$/Depends on: #404, #8/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 34 "$TL_TMP/case.md"
+state_of rologr35_fixture 8 open
+tl_eq '  one that is open beside it' '1' "$(claim_of 34 --unattended)"
+tl_has '  ends in a stop' 'depends on #8, which is open' "$(last_comment 34)"
+state_of rologr35_fixture 8 closed
 issue_json 34 "$TL_TMP/good.md" OWNER "$TL_TMP/dated.md"
 facts 34 'i.assignees = [{login: "other"}]'
 tl_eq '--unattended refused because it is taken' '1' "$(claim_of 34 --unattended)"

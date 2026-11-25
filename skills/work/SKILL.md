@@ -20,9 +20,9 @@ trellis issue claim <n>                 # with --unattended in a run without a p
 trellis worktree add <n> <slug>         # its last line is the path: enter it
 ```
 
-A refusal ends the run, and is said. An unattended claim already wrote the stop it needed.
+A refusal ends the run, and is said. An unattended claim already wrote the stop it needed; a worktree that fails after it is a stop.
 
-To go on with an issue this account left, or a stopped one, both take `--resume`. The work starts from the branch and from the last comment of the issue whose first line is `<!-- trellis:stopped -->`, when an owner, a member or a collaborator wrote it. A stopped issue without a branch on origin takes the worktree without `--resume`. What its **Needs** asked is checked first, and without it the run stops again.
+To go on with an issue this account left, or a stopped one, both take `--resume`. The work starts from the branch and from the last comment of the issue whose first line is `<!-- trellis:stopped -->`, when an owner, a member or a collaborator wrote it. A stopped issue without a branch on origin takes the worktree without `--resume`, and a worktree of its branch that is already on this machine (`git worktree list`) is entered as it is, in place of the add. What its **Needs** asked is checked first, and without it the run stops again.
 
 ## 2. Read the plan
 

@@ -36,7 +36,7 @@
 # Each path of Layers and files that changed on the integration branch since the plan, or its last
 # amendment, was written is printed, and fails nothing.
 #
-# The gates: every file the commits of the branch change, from where it left origin/<git.integrationBranch>,
+# The gates: every file the commits of the branch, one of the issue (<n>-*), change, from where it left origin/<git.integrationBranch>,
 # which is fetched first, against the paths of each [gate] that Risks does not name. A gate that only
 # the integration branch declares counts too.
 #
@@ -46,7 +46,8 @@
 # another assignee it takes itself off and refuses. --resume takes what its own account already has: the
 # assignment, the branch, and a stopped issue that is its own or nobody's, whose label it takes off.
 # --unattended, for a run without a person, also refuses a plan with Gates other than none or any Needs,
-# and a plan it refuses, for that or for the check, is stopped with the reasons. What is taken is not.
+# and a plan it refuses, for that or for the check, is stopped with the reasons. What is taken is not, nor
+# a plan whose dependency could not be read.
 #
 # The stop is one comment, whose first line is a fixed mark, with the sections Done, Missing and Needs of
 # the file, none of them empty (`none` counts), and the label stopped, created when the repository lacks
@@ -121,13 +122,13 @@ check_body() {
   printf 'issue check: ok (%s)\n' "$(judge class "$1")"
 }
 
-# One dependency: prints the miss when the issue is open or cannot be read.
+# One dependency: prints the miss when the issue is open or cannot be read, and then returns 2.
 check_dependency() {
   local repo="$1" n="$2" name="#$2" hint=''
   if [ "$repo" != '-' ]; then name="$repo#$n"; hint="$repo"; fi
   if ! gh_api . "$hint" "issues/$n" --jq .state; then
     printf 'issue check: depends on %s, whose state could not be read as %s: %s\n' "$name" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
-    return 1
+    return 2
   fi
   case "$GH_AS_OUT" in
     closed) return 0 ;;
@@ -167,22 +168,26 @@ check_issue() {
     judge print "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json"
     return $?
   fi
-  check_plan
+  check_plan || return 1
 }
 
-# The plan of the issue that was read.
+# The plan of the issue that was read. Returns 2 when all it lacks is the state of a dependency that could
+# not be read.
 check_plan() {
-  local kind a b status=0 deps_ok=true
+  local kind a b status=0 unread=false
   fetch_integration
   judge issue "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || status=1
   judge deps "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/deps" || return 1
   while IFS=$'\t' read -r kind a b <&4; do
     case "$kind" in
-      ref) check_dependency "$a" "$b" || deps_ok=false ;;
+      ref)
+        check_dependency "$a" "$b"
+        case $? in 0) ;; 2) unread=true ;; *) status=1 ;; esac
+        ;;
       text) printf 'issue: the plan depends on this, which a person confirms: %s\n' "$a" ;;
     esac
   done 4< "$ISSUE_TMP/deps"
-  [ "$deps_ok" = true ] || status=1
+  [ "$status" -ne 0 ] || [ "$unread" = false ] || status=2
   [ "$status" -eq 0 ] && printf 'issue check: ok (%s)\n' "$(judge issue-class "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json")"
   return "$status"
 }
@@ -192,6 +197,10 @@ check_gates() {
   case "$n" in '' | *[!0-9]*) usage ;; esac
   [ $# -eq 1 ] || usage
   want_issue "$n" || return 1
+  case "$(git branch --show-current)" in
+    "$n"-*) ;;
+    *) printf 'issue gates: %s is not a branch of #%s\n' "$(git branch --show-current | grep . || echo 'no branch')" "$n" >&2; return 1 ;;
+  esac
   fetch_integration
   judge gates "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || return 1
   printf 'issue gates: ok\n'
@@ -242,9 +251,9 @@ write_stop() {
   printf 'issue %s: #%s is stopped: %s\n' "$action" "$1" "$GH_AS_OUT"
 }
 
-# The stop of a plan a run without a person could not take.
+# refuse_plan <n> [<branches on origin>]: the stop of a plan a run without a person could not take.
 refuse_plan() {
-  judge refusal "$ISSUE_TMP/reasons" "$ISSUE_TMP/stop" && write_stop "$1"
+  judge refusal "$ISSUE_TMP/reasons" "$ISSUE_TMP/stop" "${2:-}" && write_stop "$1"
 }
 
 stop_issue() {
@@ -304,9 +313,13 @@ claim_issue() {
   checked=$?
   cat "$ISSUE_TMP/said"
   cat "$ISSUE_TMP/reasons" >&2
+  if [ "$checked" -eq 2 ]; then
+    refuse_claim "$n" 'its plan could not be checked'
+    return 1
+  fi
   if [ "$checked" -ne 0 ]; then
     refuse_claim "$n" 'its plan does not pass the check'
-    [ "$unattended" = false ] || refuse_plan "$n"
+    [ "$unattended" = false ] || refuse_plan "$n" "$branches"
     return 1
   fi
   if [ "$unattended" = true ]; then
@@ -314,7 +327,7 @@ claim_issue() {
     if [ -s "$ISSUE_TMP/attended" ]; then
       refuse_claim "$n" "a run without a person cannot take it: $(tr '\n' ';' < "$ISSUE_TMP/attended" | sed 's/;$//; s/;/; /g')"
       mv "$ISSUE_TMP/attended" "$ISSUE_TMP/reasons"
-      refuse_plan "$n"
+      refuse_plan "$n" "$branches"
       return 1
     fi
   fi
