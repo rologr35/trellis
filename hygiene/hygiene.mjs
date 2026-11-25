@@ -31,8 +31,6 @@
 // Prints one line per finding and exits 1 when there is any. Node only, no dependencies.
 
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
-import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {
@@ -46,7 +44,7 @@ import {
   missingHooks,
   rulePaths,
 } from '../lib/blocks.mjs';
-import {loadConfig} from '../lib/config.mjs';
+import {loadConfig, stagedConfig} from '../lib/config.mjs';
 import {COPY_DIR, generatedFiles, hasCopy, isTrellis, ownTree, refuseOtherCheckout, verifyCopy} from '../lib/copy.mjs';
 import {globToRegExp} from '../lib/glob.mjs';
 import {localeOf} from '../lib/locale.mjs';
@@ -103,17 +101,7 @@ const allowlist = values => new Set(values.map(v => v.split('|')[0].trim()));
 export function hygiene(root, {staged = false} = {}) {
   const whole = projectTree(root, {staged});
   const tree = ownTree(whole);
-  let config;
-  if (staged) {
-    const scratch = mkdtempSync(path.join(tmpdir(), 'trellis-hygiene-'));
-    const file = path.join(scratch, 'trellis.config');
-    const text = tree.read('trellis.config');
-    if (text !== null) writeFileSync(file, text);
-    config = loadConfig({file, cwd: root, label: 'trellis.config (staged)'});
-    rmSync(scratch, {recursive: true, force: true});
-  } else {
-    config = loadConfig({cwd: root});
-  }
+  const config = staged ? stagedConfig(tree) : loadConfig({cwd: root});
 
   const findings = [];
   const fail = (file, message) => findings.push(`${file}: ${message}`);

@@ -119,6 +119,59 @@ tl_eq 'a manifest naming a file that is not of a copy stops it' '1' "$(update v1
 tl_eq 'and that file is not removed' 'yes' "$([ -f CLAUDE.md ] && echo yes)"
 restore
 
+printf '\nwhat a project does without: copy.without (#48)\n'
+verify() { bash "$TRELLIS" verify "$@" > "$OUT" 2>&1; echo $?; }
+has() { if [ -e "$1" ]; then echo yes; else echo no; fi; }
+manifest="$(cat .trellis/MANIFEST)"
+git config -f trellis.config --add copy.without trellis-work
+git config -f trellis.config --add copy.without trellis-plan-check
+git config -f trellis.config --add copy.without ''
+tl_eq 'the key added to a copy that has them fails verify' '1' "$(verify)"
+tl_eq 'the update passes' '0' "$(update v2)"
+tl_eq 'a skill the previous copy wrote goes, with its folder' 'no' "$(has .claude/skills/trellis-work)"
+tl_eq 'and an agent' 'no' "$(has .claude/agents/trellis-plan-check.md)"
+tl_eq 'and nothing else' ' D .claude/agents/trellis-plan-check.md| D .claude/skills/trellis-work/SKILL.md| M .trellis/MANIFEST| M trellis.config|' "$(tracked | tr '\n' '|')"
+tl_eq 'the manifest is the one of before without them' "$(printf '%s\n' "$manifest" | grep -v -e '/trellis-work/' -e '/trellis-plan-check')" "$(cat .trellis/MANIFEST)"
+tl_eq 'verify passes' '0' "$(verify)"
+tl_eq 'and against the upstream' '0' "$(verify --upstream)"
+tl_eq 'the same update again passes' '0' "$(update v2)"
+mkdir .claude/skills/trellis-work
+printf '# Mine\n' > .claude/skills/trellis-work/SKILL.md
+cp "$upstream/agents/plan-check.md" .claude/agents/trellis-plan-check.md
+tl_eq 'a skill of the project with the name of one left out stops nothing' '0' "$(update v2)"
+tl_eq 'and stays' '# Mine' "$(cat .claude/skills/trellis-work/SKILL.md)"
+tl_eq 'and so does an agent' "$(cat "$upstream/agents/plan-check.md")" "$(cat .claude/agents/trellis-plan-check.md)"
+tl_eq 'verify says nothing of them' '0' "$(verify)"
+tl_eq 'nor against the upstream' '0' "$(verify --upstream)"
+restore
+git config -f trellis.config copy.without trellis-work
+rm -rf .trellis .claude/skills/trellis-merge .claude/skills/trellis-retro .claude/skills/trellis-scaffold .claude/skills/trellis-work .claude/agents
+tl_eq 'a first copy passes' '0' "$(update v2)"
+tl_eq 'without what is left out' 'no' "$(has .claude/skills/trellis-work)"
+tl_eq 'and with the rest' 'yes' "$(has .claude/agents/trellis-plan-check.md)"
+git config -f trellis.config --unset copy.without
+tl_eq 'the key taken out' '0' "$(update v2)"
+tl_eq 'brings the copy of before back, byte by byte' '' "$(tracked | grep -v trellis.config)"
+restore
+for name in work trellis-init .claude/skills/trellis-work/SKILL.md trellis-debugging; do
+  git config -f trellis.config --replace-all copy.without trellis-work
+  git config -f trellis.config --add copy.without "$name"
+  tl_eq "a name that is none of the version stops the update: $name" '1' "$(update v2)"
+  tl_has '  which names it' "copy.without names $name, which is no skill or agent" "$(out)"
+  tl_has '  and lists the ones there are' 'trellis-merge, trellis-plan-check, trellis-plan-reviewer, trellis-retro, trellis-scaffold, trellis-work' "$(out)"
+  tl_eq '  and nothing is written' ' M trellis.config' "$(tracked)"
+  restore
+done
+git config -f trellis.config copy.without trellis-debugging
+tl_eq 'the names are the ones of the version that is copied' '0' "$(update v1)"
+restore
+git config -f trellis.config copy.without trellis-work
+printf 'x\n' >> .claude/skills/trellis-work/SKILL.md
+tl_eq 'one edited by hand stops the update, as any other' '1' "$(update v2)"
+tl_has 'which names it' '.claude/skills/trellis-work/SKILL.md: is not the file that was copied' "$(out)"
+tl_eq 'and it stays' 'yes' "$(has .claude/skills/trellis-work/SKILL.md)"
+restore
+
 printf '\nwhat is in the way\n'
 git rm -rq .trellis .claude/skills/trellis-merge .claude/skills/trellis-retro .claude/skills/trellis-scaffold .claude/skills/trellis-work .claude/agents && git commit -q -m 'chore: no copy (#1)'
 mkdir -p .claude/skills/trellis-merge && printf '# Mine\n' > .claude/skills/trellis-merge/SKILL.md

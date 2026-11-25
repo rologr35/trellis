@@ -16,6 +16,8 @@ project.locale|enum:en,es|en
 project.public|enum:true,false|false
 
 trellis.upstream|single|rologr35/trellis
+# The skills and agents of trellis the project does without, by the name they have in it (trellis-work).
+copy.without|multi|
 
 git.releaseBranch|single|main
 git.integrationBranch|single|develop

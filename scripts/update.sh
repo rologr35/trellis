@@ -7,12 +7,14 @@
 #   - .trellis/: the runtime (bin, hooks, lib, scripts, hygiene, method, templates, LICENSE) without
 #     its tests; .trellis/VERSION, the version and the full sha; .trellis/MANIFEST, the sha256 of every
 #     file written;
-#   - .claude/skills/trellis-<name>/SKILL.md and .claude/agents/trellis-<name>.md, every skill but init;
+#   - .claude/skills/trellis-<name>/SKILL.md and .claude/agents/trellis-<name>.md, every skill but init,
+#     and none that copy.without names;
 #   - the new sha over the one of the previous copy in .github/workflows/trellis.yml.
 #
 # What the previous copy had and this one does not is removed. Nothing is written, and the files are
 # named, when the previous copy was edited by hand, when a file of the project has the name of a copied
-# one, or when git ignores one. It ends with `trellis sync`, run from the new copy.
+# one, or when git ignores one; nor when copy.without has a name that is none of the version, which is
+# said with the ones there are. It ends with `trellis sync`, run from the new copy.
 
 set -uo pipefail
 
@@ -33,7 +35,8 @@ main() {
     const load = name => import(pathToFileURL(`${lib}/${name}`).href);
     const [{update}, {loadConfig}] = [await load("copy.mjs"), await load("config.mjs")];
     try {
-      const done = await update(root, loadConfig({cwd: root}).get("trellis.upstream"), ref);
+      const config = loadConfig({cwd: root});
+      const done = await update(root, config.get("trellis.upstream"), ref, config.all("copy.without"));
       if (done.workflow) console.log(`update: ${done.workflow} calls the new sha`);
       console.log(`update: trellis ${done.version} (${done.sha}), ${done.files} files written, ${done.removed} removed`);
     } catch (error) {
