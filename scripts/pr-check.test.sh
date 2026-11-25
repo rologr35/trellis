@@ -146,6 +146,33 @@ for not in '    Lesson: none' '`Lesson: none`' '<!-- Lesson: none -->' 'A Lesson
 done
 tl_eq 'not one in a fence' '1' "$(lesson '```' 'Lesson: none' '```')"
 tl_eq 'one in a fence beside it does not count' '0' "$(lesson '```' 'Lesson: none' '```' 'Lesson: none')"
+printf '\nthe lesson line in a section\n'
+# last <line>...: the exit of a body that ends with those lines and the lesson.
+last() { LESSON='' body 'Closes #12' "${GOOD[@]}" '' '**Before merging**' 'none' '' '**After merging**' "$@" "${LAST-Lesson: none}"; status_of --body body.md; }
+for end in none '- none' '- Tag it.' '- [ ] Tag it.'; do
+  tl_eq "the last line, after $end" '0' "$(last "$end" '')"
+  tl_eq "  with no line between them, after $end" '0' "$(last "$end")"
+done
+tl_eq 'a section with only that line is empty' '1' "$(last)"
+tl_has '  and says so' 'body: missing the section **After merging**' "$(cat out.txt)"
+tl_eq '  one that is no answer too' '1' "$(LAST='Lesson: something'; last)"
+tl_has '  and says so' 'body: missing the section **After merging**' "$(cat out.txt)"
+tl_eq 'prose beside it is prose' '1' "$(last 'Tag it.' '')"
+tl_has '  and says so' 'body: **After merging** is `none` or a list' "$(cat out.txt)"
+LESSON='' body 'Closes #12' '**Summary**' 'A thing.' '' '**Verification**' 'Lesson: none' "${EN[@]}"
+tl_eq 'a required section with only that line is empty' '1' "$(status_of --body body.md)"
+tl_has '  and says so' 'body: missing the section **Verification**' "$(cat out.txt)"
+LESSON='' body 'Closes #12' "${GOOD[@]}" '' '**Setback**' 'Lesson: none' "${EN[@]}"
+tl_eq 'a setback with only that line is empty' '1' "$(status_of --body body.md)"
+tl_has '  and says so' 'body: **Setback** is empty' "$(cat out.txt)"
+tl_eq '  and is none' '1' "$(status_of --has-setback --body body.md)"
+LESSON='' body 'Closes #12' '**Summary**' '```' 'Lesson: none' '```' '' '**Verification**' 'ok' "${EN[@]}" '' '**Lesson**: none'
+tl_eq 'one in code is content' '0' "$(status_of --body body.md)"
+git config -f trellis.config --add pr.action 'Tag'
+tl_eq 'it is no item' '0' "$(last '- Tag it.')"
+git config -f trellis.config --unset pr.action
+rm -f trellis.config
+
 printf '[project]\n\tlocale = es\n' > trellis.config
 leccion() { LESSON="$1" body 'Closes #12' '**Resumen**' 'Algo.' '' '**Verificación**' 'ok' "${ES[@]}"; status_of --body body.md; }
 for line in 'Lección: ninguna' 'Lección: Ninguna.' 'Lección: local: la suite corre sola' 'Lección: marco: una guarda leyó otro fichero'; do

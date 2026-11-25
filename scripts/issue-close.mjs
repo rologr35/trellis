@@ -113,7 +113,7 @@ export function kindOf(content, none) {
   return content.every(l => none.test(l.replace(/^[-*+]\s+/, ''))) ? 'none' : 'prose';
 }
 
-/** The lesson lines of a body, outside code: the text of each one, and whether it is an answer of the locale. */
+/** The lesson lines of a body, outside code: where, the text of each one, and whether it is an answer of the locale. */
 export function lessonsOf(body, locale) {
   const {label, none, local, framework} = LESSON[locale];
   const line = new RegExp(`^ {0,3}(?:\\*\\*)?${label}(?:\\*\\*)?\\s*:(?:\\*\\*)?\\s*(.*)$`, 'i');
@@ -121,8 +121,14 @@ export function lessonsOf(body, locale) {
   return body.prose.flatMap((prose, i) => {
     if (!line.test(prose)) return [];
     const text = body.lines[i].trim();
-    return [{text, valid: answer.test(line.exec(text)[1].trim())}];
+    return [{at: i, text, valid: answer.test(line.exec(text)[1].trim())}];
   });
+}
+
+/** What empties, in the lines of a body, the ones of its lesson, which are the content of no section. */
+export function withoutLessons(body, locale) {
+  const lessons = new Set(lessonsOf(body, locale).map(lesson => lesson.at));
+  return lines => lines.map((line, i) => (lessons.has(i) ? '' : line));
 }
 
 /** The numbers of the issues a body closes: the ones written `#n`, and, with `repo`, the ones that name it. */
@@ -139,7 +145,7 @@ export function closedIssues(body, repo = '') {
 /** The content of the section of what is left after the merge, '' when nothing is. */
 export function pendingActions(body, locale) {
   const {afterMerging, none} = PR_SECTIONS[locale];
-  const lines = sectionLines(body.prose, afterMerging, body.lines);
+  const lines = sectionLines(body.prose, afterMerging, withoutLessons(body, locale)(body.lines));
   const kind = kindOf(lines?.map(l => l.trim()).filter(Boolean), none);
   return kind === 'missing' || kind === 'none' ? '' : lines.join('\n').replace(/^\s*\n/, '').trimEnd();
 }

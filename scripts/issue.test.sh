@@ -1213,6 +1213,15 @@ tl_eq '  is not the mark' '3' "$(count_of 12)"
 issue_of 12 open '' '[{"user":{"login":"github-actions[bot]"},"author_association":"NONE","body":"<!-- trellis:pending-actions pr=40 -->"}]'
 tl_eq 'the mark of the workflow' '0' "$(close_of 40)"
 tl_eq '  is the mark' "$CLOSE" "$(writes)"
+pr_json 40 merged develop 'Closes #12' '' '**After merging**' 'none' '' 'Lesson: none'
+issue_of 12 open
+tl_eq 'the lesson line is not pending' '0' "$(close_of 40)"
+tl_eq '  and writes nothing' '' "$(comments_of 12)"
+pr_json 40 merged develop 'Closes #12' '' '**After merging**' '- Tag it.' '' 'Lesson: none'
+issue_of 12 open
+tl_eq '  nor beside what is' '0' "$(close_of 40)"
+tl_lacks '  which is written without it' 'Lesson' "$(comments_of 12)"
+tl_has '  and alone' 'Tag it.' "$(comments_of 12)"
 pr_json 40 merged develop 'Closes #12' '' '**After merging**: tag it'
 issue_of 12 open
 tl_eq 'actions written as prose' '0' "$(close_of 40)"

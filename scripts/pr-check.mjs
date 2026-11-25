@@ -6,7 +6,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
 import {LESSON, PR_SECTIONS, localeOf, requiredSections} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
-import {closedIssues, itemsOf, kindOf, lessonsOf, readBody, sectionOf} from './issue-close.mjs';
+import {closedIssues, itemsOf, kindOf, lessonsOf, readBody, sectionOf, withoutLessons} from './issue-close.mjs';
 
 const [, , mode, file, hasSetback, branchArg, loosened, cycleArg = '-', messageFile] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
@@ -42,20 +42,22 @@ if (mode === 'commit') {
   }
   style(message, 'commit');
 } else {
-  const lines = text.split('\n');
-  const setback = (sectionOf(lines, SECTIONS.setback) ?? []).filter(l => !SECTIONS.none.test(l.replace(/^[-*]\s*/, '')));
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const body = readBody(text);
+  const without = withoutLessons(body, localeOf(config));
+  const contentOf = name => sectionOf(lines, name, without(lines));
+  const setback = (contentOf(SECTIONS.setback) ?? []).filter(l => !SECTIONS.none.test(l.replace(/^[-*]\s*/, '')));
   if (hasSetback === 'true') process.exit(setback.length > 0 ? 0 : 1);
   for (const name of required) {
-    const content = sectionOf(lines, name);
+    const content = contentOf(name);
     if (!content || content.length === 0) misses.push(`body: missing the section **${name}**`);
   }
-  if (sectionOf(lines, SECTIONS.setback) && setback.length === 0) {
+  if (contentOf(SECTIONS.setback) && setback.length === 0) {
     misses.push(`body: **${SECTIONS.setback}** is empty; it says what regresses, its cost and why it was accepted`);
   }
   if (loosened === 'true' && setback.length === 0) {
     misses.push(`body: the branch loosens a ratchet (ratchet-loosened): **${SECTIONS.setback}** says what regresses, its cost and why it was accepted`);
   }
-  const body = readBody(text);
   for (const name of actions.length > 0 ? [SECTIONS.beforeMerging, SECTIONS.afterMerging] : []) {
     for (const item of itemsOf(body, name).filter(text => !SECTIONS.none.test(text))) {
       if (actions.some(action => item.replace(/^`/, '').startsWith(action))) continue;
@@ -76,7 +78,7 @@ if (mode === 'commit') {
     if (lessons.length > 1) misses.push(`body: ${lessons.length} lesson lines, and it is one`);
     for (const {text} of lessons.filter(l => !l.valid)) misses.push(`body: \`${text}\` is not ${answers}`);
     for (const name of [SECTIONS.beforeMerging, SECTIONS.afterMerging]) {
-      const kind = kindOf(sectionOf(body.prose, name, body.lines), SECTIONS.none);
+      const kind = kindOf(sectionOf(body.prose, name, without(body.lines)), SECTIONS.none);
       if (kind === 'missing') misses.push(`body: missing the section **${name}**`);
       if (kind === 'prose') misses.push(`body: **${name}** is \`${SECTIONS.noneWord}\` or a list`);
     }

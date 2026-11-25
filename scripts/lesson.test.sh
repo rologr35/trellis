@@ -184,6 +184,13 @@ with 'It was in the Makefile, in .githooks/pre-push and in trellis.config.'
 tl_eq 'a file with no folder and what trellis writes are none' '4' "$(propose)"
 with 'See zephyr-labs/engine#4.'; refused 'a reference to another repository' 'line 15: "zephyr-labs/engine#4"'
 with 'See https://github.com/zephyr-labs/engine/pull/4.'; refused 'the URL of one' 'line 15: "github.com/zephyr-labs/engine"'
+with 'See https://raw.githubusercontent.com/zephyr-labs/engine/main/a.md.'; refused 'the one of a file of it' 'line 15: "raw.githubusercontent.com/zephyr-labs/engine"'
+for host in gist.github.com gist.githubusercontent.com; do
+  with "See https://$host/zephyr-labs/0123abcd."; refused "a gist of another owner, in $host" "line 15: \"$host/zephyr-labs\" is a gist of another owner"
+done
+with 'See https://gist.github.com/Trellis-Org/0123abcd and https://raw.githubusercontent.com/trellis-org/trellis/main/a.md.'
+tl_eq 'the ones of the upstream are none, in those too' '4' "$(propose)"
+with 'See https://raw.githubusercontent.com/trellis-org/other/main/a.md.'; refused 'another repository of its owner is one' 'trellis-org/other'
 with 'See trellis-org/trellis#4 and https://github.com/trellis-org/trellis/issues/4.'
 tl_eq 'the ones of the upstream are none' '4' "$(propose)"
 good; title='guard: a push of tienda azul'
@@ -227,6 +234,8 @@ rm -f "$list"
 git remote set-url origin "$TL_TMP/zephyr-co/ledger"
 printf '{"private": false}' > "$GH_FIXTURES/zephyr-co_ledger/repo.json"
 refused 'an origin that is a path cannot be asked' 'has neither the name of the project'
+git remote set-url origin zephyr-co/ledger
+refused '  nor one that looks like a repository' 'has neither the name of the project'
 GH_REPO=zephyr-co/ledger
 export GH_REPO
 refused '  and GH_REPO does not stand in for it' 'has neither the name of the project'
@@ -242,6 +251,9 @@ git remote set-url origin git@github.com:Trellis-Org/Trellis.git
 refused 'its own repository' 'trellis issue follow-up'
 git remote set-url origin git@work:trellis-org/trellis.git
 refused '  by an alias of ssh too' 'trellis issue follow-up'
+git config -f trellis.config trellis.upstream Trellis-Org/Trellis
+refused '  and in another letter case' 'trellis issue follow-up'
+git config -f trellis.config trellis.upstream trellis-org/trellis
 git remote set-url origin https://github.com/zephyr-co/ledger.git
 git config -f trellis.config trellis.upstream "$TL_TMP/upstream/trellis"
 refused 'one that is a path' 'is not a repository of GitHub'
@@ -283,6 +295,10 @@ tl_eq 'of another search' '1' "$(lesson --title "$title" --body-file "$body" --s
 tl_eq 'of an issue' '1' "$(propose --issue 7 --approved "$ok")"
 git config -f trellis.config trellis.upstream trellis-org/other
 tl_eq 'of another destination' '1' "$(propose --approved "$ok")"
+tl_has '  saying it' 'is not the digest of this lesson' "$(out)"
+git config -f trellis.config trellis.upstream https://github.acme.test/trellis-org/trellis
+tl_eq 'of another host' '1' "$(propose --approved "$ok")"
+tl_has '  saying it' 'is not the digest of this lesson' "$(out)"
 git config -f trellis.config trellis.upstream trellis-org/trellis
 tl_eq 'and the one of a case without --reopen' '1' "$(one="$(digest --issue 8)"; propose --issue 8 --reopen --approved "$one")"
 tl_eq 'or of another issue' '1' "$(one="$(digest --issue 8)"; propose --issue 7 --approved "$one")"
