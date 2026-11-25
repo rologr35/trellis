@@ -23,6 +23,8 @@
 # A commit: `type(scope): message (#n)` on the first line when tracker.kind = github, the same
 # without (#n) otherwise; on an issue branch <n>-..., the #n is that issue. Merge, revert, fixup!
 # and squash! messages that git writes are not judged.
+# After it, also when it fails, the check of the project (lib/project-check.sh): command.pullRequestCheck
+# on a body, command.commitCheck on a commit whose shape is judged, with the message as git will write it.
 #
 # Read-only. On failure every miss is printed and the exit is 1.
 
@@ -31,6 +33,8 @@ set -uo pipefail
 TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/project-check.sh
+. "$TRELLIS_ROOT/lib/project-check.sh"
 
 usage='usage: trellis pr-check --body <file> | --commit <file> | --has-setback --body <file>'
 mode=''
@@ -64,4 +68,14 @@ if [ "$(tc_get tracker.kind)" = 'github' ] && [ "$base" = "$integration" ] && [ 
   cycle="$head"
 fi
 
-exec node "$TRELLIS_ROOT/scripts/pr-check.mjs" "$mode" "$file" "$setback" "${branch:--}" "${loosened:-false}" "$cycle"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/trellis-pr-check.XXXXXX")" || exit 1
+trap 'rm -rf "$tmp"' EXIT
+status=0
+node "$TRELLIS_ROOT/scripts/pr-check.mjs" "$mode" "$file" "$setback" "${branch:--}" "${loosened:-false}" "$cycle" "$tmp/message" || status=$?
+[ "$setback" = false ] || exit "$status"
+if [ "$mode" = 'body' ]; then
+  project_check pullRequestCheck pr-check "$file" || status=1
+elif [ -f "$tmp/message" ]; then
+  project_check commitCheck pr-check "$tmp/message" || status=1
+fi
+exit "$status"

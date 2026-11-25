@@ -47,6 +47,9 @@ toolchain.envFile|multi|
 command.check|multi|
 command.secretScan|single|
 command.install|single|
+command.pullRequestCheck|single|
+command.issueCheck|single|
+command.commitCheck|single|
 command.*.run|single|
 command.*.description|single|
 command.*.ci|single|

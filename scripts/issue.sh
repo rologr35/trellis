@@ -76,6 +76,9 @@
 #
 # GitHub is asked through REST, as the account of the repository's owner (lib/gh.sh).
 #
+# After the check of a body, and of the plan in force at pick-up as --print gives it, also when it
+# fails, runs the check of the project, command.issueCheck (lib/project-check.sh).
+#
 # With tracker.kind = none the module is off and every form exits 2. Otherwise 0 when the check
 # passes, 1 when it does not, with every miss printed, and 2 on a wrong use.
 
@@ -84,6 +87,8 @@ set -uo pipefail
 TRELLIS_ROOT="${TRELLIS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=../lib/config.sh
 . "$TRELLIS_ROOT/lib/config.sh"
+# shellcheck source=../lib/project-check.sh
+. "$TRELLIS_ROOT/lib/project-check.sh"
 # shellcheck source=../lib/gh.sh
 . "$TRELLIS_ROOT/lib/gh.sh"
 
@@ -119,6 +124,14 @@ fetch_integration() {
   fetch_now || printf 'issue: origin/%s could not be fetched, so the paths are judged by the last fetch\n' "$(tc_get git.integrationBranch)" >&2
 }
 
+# A body, by trellis and by the check of the project.
+judge_body() {
+  local status=0
+  judge body "$1" || status=1
+  project_check issueCheck 'issue check' "$1" || status=1
+  return "$status"
+}
+
 check_body() {
   [ $# -eq 1 ] && [ -f "$1" ] || usage
   # A body is judged against the paths and branches of its project: outside of it every miss would be false.
@@ -127,7 +140,7 @@ check_body() {
     exit 2
   fi
   fetch_integration
-  judge body "$1" || return 1
+  judge_body "$1" || return 1
   if [ "$(tc_get issue.class)" = 'label' ]; then
     printf 'issue check: ok (the class is the label of the issue, which a body does not have)\n'
   else
@@ -190,6 +203,8 @@ check_plan() {
   local kind a b status=0 unread=false
   fetch_integration
   judge issue "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" || status=1
+  judge print "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/plan.md" 2>/dev/null || return 1
+  project_check issueCheck 'issue check' "$ISSUE_TMP/plan.md" || status=1
   judge deps "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/deps" || return 1
   while IFS=$'\t' read -r kind a b <&4; do
     case "$kind" in
@@ -407,7 +422,7 @@ create_issue() {
   fi
   case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
   fetch_integration
-  judge body "$file" || return 1
+  judge_body "$file" >&2 || return 1
   [ -n "$class" ] || class="$(judge class "$file")"
   case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
   ensure_label "$class" "$colour" "Complexity $class" && post_issue "$title" "$file" "$class"

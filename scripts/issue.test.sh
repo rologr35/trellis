@@ -329,6 +329,8 @@ tl_eq 'in another case too' '0' "$(labelled l)"
 tl_has '  as GitHub reads it' 'issue check: ok (L)' "$(out)"
 tl_eq 'with two fails' '1' "$(labelled S L)"
 tl_has '  naming them' 'the issue has the labels S and L, and its class is one' "$(out)"
+status_of check 40 --print > /dev/null
+tl_lacks '  and --print gives no class' 'Complexity:' "$(out)"
 printf '## Amendment (2026-11-25)\n\n### Verification\n\nRun it.\n\nComplexity: L\n' > "$TL_TMP/class-amended.md"
 tl_eq 'an amendment with a class' '0' "$(AMENDED="$TL_TMP/class-amended.md" labelled S)"
 tl_has '  does not change it' 'issue check: ok (S)' "$(out)"
@@ -481,6 +483,46 @@ tl_eq 'without Depends on' '0' "$(status_of check 2)"
 tl_eq 'an issue gh cannot read fails' '1' "$(status_of check 404)"
 tl_has '  with the error of gh' 'Not Found (HTTP 404)' "$(out)"
 tl_eq '#n is the number too' '0' "$(status_of check '#2')"
+
+printf '\nthe check of the project\n'
+unset CI
+cat > own-check.sh <<'SH'
+printf 'own: %s of %s on %s\n' "$(sed -n 1p "$TRELLIS_FILE")" "$(tail -n 1 "$TRELLIS_FILE")" "$TRELLIS_BRANCH"
+[ "$(grep -c nope "$TRELLIS_FILE")" -eq 0 ] || exit 7
+SH
+git config -f trellis.config command.issueCheck mine
+git config -f trellis.config command.mine.run 'bash own-check.sh'
+tl_eq 'a body both checks pass' '0' "$(status_of check --body "$TL_TMP/good.md")"
+tl_has '  the one of the project reads the text and the branch' 'own: ## Context of Complexity: M on main' "$(out)"
+tl_has '  and the class is said after it' 'issue check: ok (M)' "$(out)"
+tl_eq 'a body only the one of the project refuses fails' '1' "$(case_of 's/^A thing is broken/nope, a thing/')"
+tl_has '  which it says' 'issue check: the check of the project (mine) failed' "$(out)"
+tl_lacks '  and it is not said to pass' 'issue check: ok' "$(out)"
+tl_eq 'a body only the one of trellis refuses fails' '1' "$(case_of '/^Complexity/d')"
+tl_has '  and the one of the project runs too' 'own: ## Context of ' "$(out)"
+{ printf '## Amendment (2026-11-24)\n\n### Risks\n\nGates: none. nope\n'; } > "$TL_TMP/nope.md"
+issue_json 41 "$TL_TMP/classless.md" OWNER "$TL_TMP/nope.md"
+facts_of_label() { node -e 'const fs = require("fs"); const [f, name] = process.argv.slice(1); const i = JSON.parse(fs.readFileSync(f)); i.labels = [{name}]; fs.writeFileSync(f, JSON.stringify(i));' "$here/issue-$1.json" "$2"; }
+git config -f trellis.config issue.class label
+facts_of_label 41 M
+tl_eq 'at pick-up the plan in force is what it reads' '1' "$(status_of check 41)"
+tl_has '  as --print gives it' 'own: ## Context of Complexity: M on main' "$(out)"
+tl_has '  and its failure is said' 'issue check: the check of the project (mine) failed' "$(out)"
+tl_eq '--print does not run it' '0' "$(status_of check 41 --print)"
+tl_lacks '  at all' 'own:' "$(out)"
+issue_json 41 "$TL_TMP/classless.md"
+facts_of_label 41 M
+tl_eq 'an issue both pass' '0' "$(status_of check 41)"
+git config -f trellis.config --remove-section issue
+git config -f trellis.config command.mine.ci 'echo the ci form; exit 3'
+tl_eq 'in CI the ci form is run' '1' "$(CI=true "$TRELLIS" issue check --body "$TL_TMP/good.md" >"$TL_TMP/out.txt" 2>&1; echo $?)"
+tl_has '  in place of the run' 'the ci form' "$(out)"
+git config -f trellis.config --unset command.mine.ci
+git config -f trellis.config --unset command.mine.run
+tl_eq 'a name without a command fails' '1' "$(status_of check --body "$TL_TMP/good.md")"
+tl_has '  which it says' 'issue check: [command "mine"] has no run' "$(out)"
+git config -f trellis.config --unset command.issueCheck
+rm -f own-check.sh
 
 printf '\nthe amendments of an issue\n'
 printf 'It is slow since #3.\n\n## Verification\n\nNo idea.\n\n## Context\n\nWho knows.\n' > "$TL_TMP/symptom.md"
@@ -971,6 +1013,15 @@ tl_eq 'the line of a body is not its class' '0' "$(create_of --title x --body-fi
 tl_has '  which is the one of the flag' 'labels=S' "$(tail -n 1 "$GH_FIXTURES/writes.log")"
 git config -f trellis.config --remove-section issue
 printf 'bug\n' > "$GH_FIXTURES/labels"
+git config -f trellis.config command.issueCheck mine
+git config -f trellis.config command.mine.run 'echo seen; grep -q broken "$TRELLIS_FILE"'
+tl_eq 'a body the check of the project passes is created' '0' "$(create_of --title x --body-file "$TL_TMP/good.md")"
+tl_eq '  with only its URL on stdout' 'https://github.com/rologr35/fixture/issues/12' "$("$TRELLIS" issue create --title x --body-file "$TL_TMP/good.md" 2>/dev/null)"
+sed 's/broken/whole/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+tl_eq 'one it refuses is not' '1' "$(create_of --title x --body-file "$TL_TMP/case.md")"
+tl_eq '  and makes no gh call' '' "$(calls)"
+git config -f trellis.config --unset command.issueCheck
+git config -f trellis.config --remove-section command.mine
 (cd "$TL_TMP" && cp good.md "$repo/relative.md")
 tl_eq 'a relative body file, the flags with = and in another order' '0' "$(create_of --body-file=relative.md --title='With = sign')"
 tl_has '  keep the title' 'title=With = sign ' "$(writes)"

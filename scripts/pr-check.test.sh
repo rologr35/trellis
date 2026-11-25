@@ -216,4 +216,92 @@ commit 'chore(ci): tidy'
 tl_eq 'without a tracker no (#n)' '0' "$(status_of --commit msg.txt)"
 rm trellis.config
 
+printf '\nthe checks of the project\n'
+unset CI
+cat > own-check.sh <<'SH'
+printf 'own: %s in %s on %s\n' "$(head -n 1 "$TRELLIS_FILE")" "$(basename "$PWD")" "$TRELLIS_BRANCH"
+[ "$(grep -c nope "$TRELLIS_FILE")" -eq 0 ] || exit 7
+SH
+here="$(basename "$repo")"
+# own <key> <run> [<ci>]: that check of the project.
+own() {
+  rm -f trellis.config
+  git config -f trellis.config "command.$1" mine
+  [ -z "$2" ] || git config -f trellis.config command.mine.run "$2"
+  [ -z "${3:-}" ] || git config -f trellis.config command.mine.ci "$3"
+}
+own pullRequestCheck 'bash own-check.sh'
+body 'Closes #12' "${GOOD[@]}" "${EN[@]}"
+tl_eq 'a body both checks pass' '0' "$(status_of --body body.md)"
+tl_has '  the one of the project reads the text and the branch, from the top level' "own: Closes #12 in $here on 12-thing" "$(cat out.txt)"
+mkdir -p sub
+tl_eq 'from a folder, with a relative file' '0' "$(cd sub && "$TRELLIS" pr-check --body ../body.md >../out.txt 2>&1; echo $?)"
+tl_has '  the same' "own: Closes #12 in $here on 12-thing" "$(cat out.txt)"
+body 'Closes #12' "${GOOD[@]}" 'nope' "${EN[@]}"
+tl_eq 'a body only the one of the project refuses fails' '1' "$(status_of --body body.md)"
+tl_has '  which it says' 'pr-check: the check of the project (mine) failed' "$(cat out.txt)"
+body 'Closes #12' "${EN[@]}"
+tl_eq 'a body only the one of trellis refuses fails' '1' "$(status_of --body body.md)"
+tl_has '  and the one of the project runs too' 'own: Closes #12' "$(cat out.txt)"
+tl_lacks '  and is not said to fail' 'check of the project' "$(cat out.txt)"
+tl_eq '--has-setback does not run it' '' "$("$TRELLIS" pr-check --has-setback --body body.md 2>&1)"
+body 'Closes #12' "${GOOD[@]}" 'nope' "${EN[@]}"
+commit 'feat: a thing (#12)' '' 'nope'
+tl_eq 'a commit is not of the check of a body' '0' "$(status_of --commit msg.txt)"
+tl_eq 'in CI the branch is the one of the event' '1' "$(GITHUB_HEAD_REF=12-other GITHUB_BASE_REF=develop "$TRELLIS" pr-check --body body.md >out.txt 2>&1; echo $?)"
+tl_has '  and not the one of the checkout' 'on 12-other' "$(cat out.txt)"
+own pullRequestCheck 'bash own-check.sh' 'echo the ci form; exit 3'
+body 'Closes #12' "${GOOD[@]}" "${EN[@]}"
+tl_eq 'out of CI the ci form is not run' '0' "$(status_of --body body.md)"
+tl_eq 'in CI it is' '1' "$(CI=true "$TRELLIS" pr-check --body body.md >out.txt 2>&1; echo $?)"
+tl_has '  in place of the run' 'the ci form' "$(cat out.txt)"
+tl_lacks '  and not beside it' 'own:' "$(cat out.txt)"
+tl_eq 'CI=false is out of CI' '0' "$(CI=false "$TRELLIS" pr-check --body body.md >out.txt 2>&1; echo $?)"
+own pullRequestCheck 'bash own-check.sh'
+tl_eq 'in CI, without a ci form, the run' '0' "$(CI=true "$TRELLIS" pr-check --body body.md >out.txt 2>&1; echo $?)"
+own pullRequestCheck ''
+tl_eq 'a name without a command fails' '1' "$(status_of --body body.md)"
+tl_has '  which it says' 'pr-check: [command "mine"] has no run' "$(cat out.txt)"
+own pullRequestCheck 'printf "%s\n" "$TRELLIS_FILE|$TRELLIS_BRANCH" > seen.txt; echo "{branch}"'
+git switch -q -c '12-$(touch${IFS}pwned)'
+body '$(touch pwned) Closes #12' "${GOOD[@]}" "${EN[@]}"
+tl_eq 'nothing is interpolated in the run' '0' "$(status_of --body body.md)"
+tl_has '  as it is written' '{branch}' "$(cat out.txt)"
+tl_has '  the branch is an environment variable' '|12-$(touch${IFS}pwned)' "$(cat seen.txt)"
+tl_eq '  and the text is not run' 'no' "$([ -e pwned ] && echo yes || echo no)"
+git switch -q 12-thing
+git branch -q -D '12-$(touch${IFS}pwned)'
+own commitCheck 'bash own-check.sh'
+commit 'feat: a thing (#12)' '' 'Body.' '# nope, which git strips'
+tl_eq 'a commit both checks pass' '0' "$(status_of --commit msg.txt)"
+tl_has '  as git will write it' 'own: feat: a thing (#12)' "$(cat out.txt)"
+commit 'feat: a thing (#12)' '' 'Body.' '# ------------------------ >8 ------------------------' 'nope'
+tl_eq '  without what is under the scissors' '0' "$(status_of --commit msg.txt)"
+commit 'feat: a thing (#12)' '' 'nope'
+tl_eq 'one only the project refuses fails' '1' "$(status_of --commit msg.txt)"
+commit 'a thing'
+tl_eq 'one only trellis refuses fails' '1' "$(status_of --commit msg.txt)"
+tl_has '  and the one of the project runs' 'own: a thing' "$(cat out.txt)"
+for message in "Merge branch 'nope' into 12-thing" 'fixup! nope' 'Revert "nope"'; do
+  commit "$message"
+  tl_eq "a message whose shape is not judged: $message" '0' "$(status_of --commit msg.txt)"
+done
+body 'Closes #12' "${GOOD[@]}" 'nope' "${EN[@]}"
+tl_eq 'a body is not of the check of a commit' '0' "$(status_of --body body.md)"
+rm -f trellis.config own-check.sh seen.txt
+
+printf '\nthe workflow of the check\n'
+# The job that runs the check of a project, up to the next one.
+job="$(awk '/^  check:/{on=1; print; next} on && /^  [a-z]/{exit} on' "$TRELLIS_ROOT/.github/workflows/consumer-check.yml" | grep -v '^ *#')"
+tl_has 'the job check only reads' '    permissions:
+      contents: read
+    ' "$job"
+tl_lacks '  and writes nothing' 'write' "$job"
+tl_has '  nor keeps the token of the checkout' 'persist-credentials: false' "$job"
+tl_has 'the job of the protected head keeps the write of the workflow' 'permissions:
+  contents: read
+  pull-requests: write
+' "$(cat "$TRELLIS_ROOT/.github/workflows/consumer-check.yml")"
+tl_eq '  and no other job has permissions of its own' '1' "$(grep -c '^    permissions:' "$TRELLIS_ROOT/.github/workflows/consumer-check.yml")"
+
 tl_done

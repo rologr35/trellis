@@ -1,13 +1,14 @@
 // The judgment of `trellis pr-check` (scripts/pr-check.sh holds the contract).
-//   node pr-check.mjs <body|commit> <file> <has-setback:true|false> <branch|-> <loosened:true|false> <cycle head|->
+//   node pr-check.mjs <body|commit> <file> <has-setback:true|false> <branch|-> <loosened:true|false> <cycle head|-> <message file>
+// The message file is written when the shape of a commit is judged: the message as git will write it.
 
-import {readFileSync} from 'node:fs';
+import {readFileSync, writeFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
 import {PR_SECTIONS, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
 import {closedIssues, itemsOf, kindOf, readBody, sectionOf} from './issue-close.mjs';
 
-const [, , mode, file, hasSetback, branchArg, loosened, cycleArg = '-'] = process.argv;
+const [, , mode, file, hasSetback, branchArg, loosened, cycleArg = '-', messageFile] = process.argv;
 const branch = branchArg === '-' ? '' : branchArg;
 const config = loadConfig();
 const tracker = config.get('tracker.kind');
@@ -30,6 +31,7 @@ if (mode === 'commit') {
     .trim();
   const subject = message.split('\n')[0] ?? '';
   if (/^(Merge |Revert "|fixup! |squash! |amend! )/.test(subject)) process.exit(0);
+  writeFileSync(messageFile, `${message}\n`);
   const types = 'feat|fix|chore|docs|refactor|test|ci|perf|build|style|revert';
   const withIssue = tracker === 'github';
   const shape = new RegExp(`^(?:${types})(?:\\([\\w./-]+(?:,[\\w./-]+)*\\))?!?: .+${withIssue ? ' \\(#(\\d+)\\)' : ''}$`).exec(subject);
