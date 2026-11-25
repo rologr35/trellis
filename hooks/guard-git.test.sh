@@ -422,6 +422,299 @@ tl_eq 'a repository that does not parse is not read as the one of origin' 'deny'
 tl_eq 'nor is a variable the shell would fill in' 'deny' "$(verdict 'gh pr merge 12 -R "$OTHER/thing"')"
 tl_eq 'from a cloud session' 'deny' "$(CLAUDE_CODE_REMOTE=1 verdict 'gh pr merge 12')"
 
+printf '\nwrites by gh api (#41)\n'
+# Judged from a repository whose config protects main, develop and staging. R/ is a REST path.
+R='repos/o/r'
+api_deny=(
+  'graphql: mergePullRequest::gh api graphql -f query="mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}"'
+  'graphql: enablePullRequestAutoMerge::gh api graphql -f query="mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }"'
+  'graphql: enqueuePullRequest::gh api graphql -f query="mutation { enqueuePullRequest(input: {}) { clientMutationId } }"'
+  'graphql: mergeBranch::gh api graphql -f query="mutation { mergeBranch(input: {}) { clientMutationId } }"'
+  'graphql: createCommitOnBranch::gh api graphql -f query="mutation { createCommitOnBranch(input: {}) { clientMutationId } }"'
+  'graphql: createRef::gh api graphql -f query="mutation { createRef(input: {}) { clientMutationId } }"'
+  'graphql: updateRef::gh api graphql -f query="mutation { updateRef(input: {}) { clientMutationId } }"'
+  'graphql: updateRefs::gh api graphql -f query="mutation { updateRefs(input: {}) { clientMutationId } }"'
+  'graphql: deleteRef::gh api graphql -f query="mutation { deleteRef(input: {}) { clientMutationId } }"'
+  'graphql: an aliased mutation on a line of its own::gh api graphql -f query='"'"'mutation($id: ID!) {
+  x: mergePullRequest(input: {pullRequestId: $id}) { clientMutationId }
+}'"'"' -F id=1'
+  'graphql: --raw-field::gh api graphql --raw-field query="mutation{mergePullRequest}"'
+  'graphql: --raw-field=::gh api graphql --raw-field=query="mutation{mergePullRequest}"'
+  'graphql: --field::gh api graphql --field query="mutation{mergePullRequest}"'
+  'graphql: -F::gh api graphql -F query="mutation{mergePullRequest}"'
+  'graphql: a glued -f::gh api graphql -fquery="mutation{mergePullRequest}"'
+  'graphql: -f= ::gh api graphql -f=query="mutation{mergePullRequest}"'
+  'graphql: the field before the endpoint::gh api -f query="mutation{mergePullRequest}" graphql'
+  'graphql: a group of short flags::gh api -if query="mutation{mergePullRequest}" graphql'
+  'graphql: -X POST::gh api -X POST graphql -f query="mutation{mergePullRequest}"'
+  'graphql: a leading slash::gh api /graphql -f query="mutation{mergePullRequest}"'
+  'graphql: a URL::gh api https://api.github.com/graphql -f query="mutation{mergePullRequest}"'
+  'graphql: the URL of another host::gh api https://ghe.example.com/api/graphql -f query="mutation{mergePullRequest}"'
+  'graphql: after a pipe::echo x | gh api graphql -f query="mutation{mergePullRequest}"'
+  'graphql: after an assignment::GH_TOKEN=x gh api graphql -f query="mutation{mergePullRequest}"'
+  'graphql: in a substitution::echo "$(gh api graphql -f query="mutation{mergePullRequest}")"'
+  'graphql: --input::gh api graphql --input q.json'
+  'graphql: --input=::gh api graphql --input=q.json'
+  'graphql: standard input::gh api graphql --input - <<EOF
+{"query": "query { viewer { login } }"}
+EOF'
+  'graphql: a query of a file::gh api graphql -F query=@q.graphql'
+  'graphql: a query of standard input::gh api graphql -F query=@- < q.graphql'
+  'graphql: a query of a substitution::gh api graphql -f query="$(cat q.graphql)"'
+  'graphql: a query of backticks::gh api graphql -f query="`cat q.graphql`"'
+  'graphql: a query of a variable::gh api graphql -f query="$QUERY"'
+  'graphql: a query of a variable in braces::gh api graphql -f query=${QUERY}'
+  'graphql: a query of a variable the command assigned::Q="query{viewer{login}}"; gh api graphql -f query="$Q"'
+  'graphql: part of the query of a variable::gh api graphql -f query='"'"'mutation { '"'"'"$M"'"'"' { id } }'"'"''
+  'graphql: a query of a positional parameter::gh api graphql -f query="$1"'
+  'graphql: a field only the shell can read::gh api graphql -f "$FIELD"'
+  'merges: the form of the Context::gh api -X POST R/merges -f base=main -f head=x'
+  'merges: the method by default::gh api R/merges -f base=main -f head=x'
+  'merges: -F::gh api R/merges -F base=main -F head=x'
+  'merges: a ref as base::gh api R/merges -f base=refs/heads/main -f head=x'
+  'merges: no base::gh api R/merges -f head=x'
+  'merges: a base of a variable::gh api R/merges -f base="$B" -f head=x'
+  'merges: a base of a variable the command assigned::B=main; gh api R/merges -f base="$B" -f head=x'
+  'merges: a base of a file::gh api R/merges -F base=@base.txt -f head=x'
+  'merges: the branch gh fills in::gh api R/merges -F base={branch} -f head=x'
+  'merges: the body of a file::gh api R/merges --input body.json'
+  'merges: the body of a file, with a base field::gh api R/merges --input body.json -f base=41-x'
+  'merges: a base in the query string::gh api -X POST "R/merges?base=main&head=x"'
+  'merges: a placeholder repository::gh api repos/{owner}/{repo}/merges -f base=main -f head=x'
+  'merges: the old placeholder::gh api repos/:owner/:repo/merges -f base=main -f head=x'
+  'merges: the repository of a variable::gh api repos/$REPO/merges -f base=main -f head=x'
+  'merges: owner and name of variables::gh api "repos/$O/$N/merges" -f base=main -f head=x'
+  'merges: a method of a variable::gh api -X "$METHOD" R/merges -f base=main -f head=x'
+  'merges: a numeric repository::gh api repositories/12/merges -f base=main -f head=x'
+  'refs: the form of the Context::gh api -X PATCH R/git/refs/heads/main -f sha=abc'
+  'refs: -XPATCH::gh api -XPATCH R/git/refs/heads/main -f sha=abc'
+  'refs: -X=PATCH::gh api -X=PATCH R/git/refs/heads/main -f sha=abc'
+  'refs: --method::gh api --method PATCH R/git/refs/heads/main -f sha=abc'
+  'refs: --method=::gh api --method=PATCH R/git/refs/heads/main -f sha=abc'
+  'refs: a lower-case method::gh api -X patch R/git/refs/heads/main -f sha=abc'
+  'refs: a method glued to another short flag::gh api -iXPATCH R/git/refs/heads/main -f sha=abc'
+  'refs: the last method counts::gh api -X GET -X PATCH R/git/refs/heads/main -f sha=abc'
+  'refs: POST by default::gh api R/git/refs/heads/main -f sha=abc'
+  'refs: a delete::gh api -X DELETE R/git/refs/heads/main'
+  'refs: the flags after the endpoint::gh api R/git/refs/heads/main --silent -f sha=abc --jq .ref -X PATCH'
+  'refs: a flag before api::gh -X PATCH api R/git/refs/heads/main -f sha=abc'
+  'refs: after --::gh api -X DELETE -- R/git/refs/heads/main'
+  'refs: a leading slash::gh api -X DELETE /R/git/refs/heads/main'
+  'refs: a URL::gh api -X DELETE https://api.github.com/R/git/refs/heads/main'
+  'refs: the URL of another host::gh api -X DELETE https://ghe.example.com/api/v3/R/git/refs/heads/main'
+  'refs: quotes inside the path::gh api -X DELETE R/git/refs/heads/"ma"in'
+  'refs: percent-encoded::gh api -X DELETE R/git/refs/heads%2Fmain'
+  'refs: a percent-encoded letter::gh api -X DELETE R/git/%72efs/heads/main'
+  'refs: an empty and a dot segment::gh api -X DELETE R//git/./refs/heads/main'
+  'refs: a dot-dot segment::gh api -X DELETE R/issues/../git/refs/heads/main'
+  'refs: another protected branch::gh api -X DELETE R/git/refs/heads/develop'
+  'refs: the ref field::gh api R/git/refs -f ref=refs/heads/main -f sha=abc'
+  'refs: the ref field of --input::gh api R/git/refs --input body.json'
+  'refs: no ref field::gh api R/git/refs -f sha=abc'
+  'refs: a ref of a variable::gh api R/git/refs -f ref=refs/heads/$B -f sha=abc'
+  'refs: a path of a variable::gh api -X DELETE R/git/refs/heads/$b'
+  'refs: a path of a substitution::gh api -X DELETE "R/git/refs/$(cat ref)"'
+  'refs: the branch gh fills in::gh api -X DELETE R/git/refs/heads/{branch}'
+  'refs: a variable in braces with a default::gh api -X DELETE R/git/refs/heads/${B:-main}'
+  'refs: a variable the command assigned::B=main; gh api -X DELETE R/git/refs/heads/$B'
+  'refs: an endpoint of a variable the command assigned::E=R/git/refs/heads/main; gh api -X DELETE "$E"'
+  'refs: a brace list::gh api -X DELETE R/git/refs/heads/{main,x}'
+  'refs: flags of a variable::gh api R/git/refs/heads/main $FLAGS'
+  'contents: the form of the Context::gh api -X PUT R/contents/a.txt -f branch=main -f message=m -f content=eA=='
+  'contents: no branch::gh api -X PUT R/contents/a.txt -f message=m -f content=eA=='
+  'contents: a delete::gh api -X DELETE R/contents/a.txt -f branch=main -f message=m -f sha=abc'
+  'contents: a delete with no branch::gh api --method=DELETE R/contents/a.txt -f message=m -f sha=abc'
+  'contents: a branch in the query string::gh api -X DELETE "R/contents/a.txt?branch=main&sha=abc&message=m"'
+  'contents: a branch of a variable::gh api -X PUT R/contents/a.txt -f branch=$B -f message=m'
+  'contents: the body of a file::gh api -X PUT R/contents/a.txt --input body.json'
+  'contents: a path of a variable::gh api -X PUT "R/contents/$f" -f branch=main'
+  'contents: a placeholder repository::gh api -X PUT repos/{owner}/{repo}/contents/a.txt -f branch=develop'
+  'contents: in a loop::for f in a b; do gh api -X PUT R/contents/$f -f message=m; done'
+  'graphql: an escape of ANSI-C quoting::gh api graphql -f query=$'"'"'mutation{mergePull\x52equest}'"'"''
+  'refs: words of a variable the command assigned::A="-X DELETE R/git/refs/heads/main"; gh api $A'
+  'refs: words of an array::gh api "${ARGS[@]}" -X DELETE'
+  'refs: the arguments of a script after the endpoint::gh api R/git/refs/heads/main "$@"'
+  'refs: api in a variable::S=api; gh $S -X DELETE R/git/refs/heads/main'
+  'refs: gh in a variable::GH=gh; $GH api -X DELETE R/git/refs/heads/main'
+  'refs: an empty ref::gh api R/git/refs -f ref= -f sha=abc'
+  'contents: an empty branch::gh api -X PUT R/contents/a.txt -f branch= -f message=m'
+  'contents: a method in a header::gh api -H "X-HTTP-Method-Override: PUT" R/contents/a.txt -f message=m'
+  'a write in a host of a variable::gh api -X PUT "https://api.github.com$P/x"'
+  'a merge whose end is a variable::gh api -X PUT "R/pulls/$P"'
+  'a wrapper: timeout::timeout 10 gh api graphql -F query=@x'
+  'a wrapper: find -exec::find . -name x -exec gh api -X DELETE R/git/refs/heads/main \;'
+  'a write in an endpoint of a variable::gh api -X PUT "$ENDPOINT" -f message=m'
+  'a write in the owner of a variable::gh api -X PUT "repos/$O/r/contents/a.txt" -f message=m'
+  'a write in an endpoint whose kind is a variable::gh api -X PUT "R/$KIND/a.txt" -f message=m'
+  'pulls/<n>/merge::gh api -X PUT R/pulls/13/merge'
+  'pulls/<n>/merge, percent-encoded::gh api -X PUT R/pulls/13/m%65rge'
+  'a wrapper: env::env gh api -X DELETE R/git/refs/heads/main'
+  'a wrapper: command::command gh api graphql -f query="mutation{mergePullRequest}"'
+  'a wrapper: an absolute path::/usr/bin/gh api -X PUT R/contents/a.txt -f branch=main'
+  'a wrapper: sh -c::sh -c "gh api -X PATCH R/git/refs/heads/main -f sha=abc"'
+  'a wrapper: sh -c of graphql::sh -c "gh api graphql -f query=\"mutation{mergePullRequest}\""'
+  'a wrapper: sh -c of a query of a file::bash -lc "gh api graphql -F query=@q.graphql"'
+  'a wrapper: eval::eval "gh api R/merges -f base=main -f head=x"'
+  'a wrapper: a command held in a variable::C="gh api R/merges -f base=main -f head=x"; $C'
+  'a wrapper: a piped script::echo "gh api R/merges -f base=main -f head=x" | sh'
+  'a wrapper: a here-document::bash <<EOF
+gh api -X DELETE R/git/refs/heads/main
+EOF'
+  'a wrapper: xargs::echo main | xargs -I{} gh api -X DELETE R/git/refs/heads/{}'
+  'a wrapper: xargs of the endpoint::echo R/contents/a.txt | xargs gh api -X PUT -f message=m'
+  'a flag of a variable, glued::M=-XDELETE; gh api $M R/git/refs/heads/main'
+  'a flag of a variable, long::M=--method=DELETE; gh api $M R/git/refs/heads/main'
+  'a flag of a variable and its value::F=-X; gh api $F PUT R/contents/a.txt -f message=m'
+  'a merge with a flag of a variable::M=-XPUT; gh api $M R/pulls/13/merge'
+  'words of a variable the command does not assign::gh api $ARGS'
+  'words of a substitution::gh api $(cat args)'
+  'a variable that may hold the end of the path::gh api -X DELETE "repos/$X"'
+  'a variable that may hold the end of the path, after the owner::gh api -X PUT "repos/o/$X" -f message=m'
+  'a variable that may hold the end of the path, by id::gh api -X DELETE "repositories/$X"'
+  'a field of a variable next to an issue branch::gh api R/merges -f base=41-x -f "$FIELD" -f head=x'
+  'a field of a variable next to the branch of contents::gh api -X PUT R/contents/a.txt -f branch=41-x -f "$FIELD"'
+  'a field whose name is a variable::gh api R/git/refs -f ref=refs/heads/41-x -f "$K=refs/heads/main" -f sha=abc'
+  'graphql: an inline query next to --input::gh api graphql -f query="query{viewer{login}}" --input m.json'
+  'graphql: an inline query next to flags of a variable::gh api graphql -f query="query{viewer{login}}" $FLAGS'
+  'a wrapper: env, the endpoint of a variable::E=R/git/refs/heads/main; env gh api -X DELETE $E'
+  'a wrapper: env, an endpoint that cannot be read::env gh api -X DELETE "$E"'
+  'a wrapper: xargs, the endpoint of a file::xargs gh api -X DELETE < refs.txt'
+  'a wrapper: the field before graphql::sh -c "gh api -F query=@q.graphql graphql"'
+  'a wrapper: --input before graphql::sh -c "gh api --input q.json graphql"'
+)
+for entry in "${api_deny[@]}"; do
+  label="${entry%%::*}"
+  cmd="${entry#*::}"
+  cmd="${cmd//R\//$R/}"
+  tl_eq "$label" 'deny' "$(verdict "$cmd")"
+done
+# A read, or a write that touches no protected branch.
+api_allow=(
+  'a read::gh api R/pulls/13'
+  'a read with a filter::gh api "R/pulls?state=all&per_page=100" --paginate --jq ".[] | {number, title}"'
+  'a read of an unquoted query string::gh api R/pulls?state=all'
+  'a read of the refs::gh api R/git/refs/heads/main --jq .object.sha'
+  'a read of the contents::gh api R/contents/a.txt -H "Accept: application/vnd.github.raw+json"'
+  'a read of the contents of main::gh api "R/contents/a.txt?ref=main"'
+  'a read with fields::gh api -X GET R/contents/a.txt -f ref=main'
+  'a read with fields, --method=get::gh api --method=get R/git/refs -f per_page=1'
+  'a read of an endpoint of a variable::gh api "$URL" --jq .sha'
+  'a search::gh api -X GET search/issues -f q="repo:o/r merges"'
+  'a query::gh api graphql -f query="query { viewer { login } }"'
+  'a query with variables::gh api graphql -F owner="$OWNER" -f query='"'"'query($owner: String!) { repository(owner: $owner, name: "r") { id } }'"'"''
+  'a query in double quotes with its variables escaped::gh api graphql -F n=1 -f query="query(\$n: Int!) { repository(owner: \"o\", name: \"r\") { issue(number: \$n) { id } } }"'
+  'a query of the state of a pull request::gh api graphql -f query="query { node(id: 1) { ... on PullRequest { mergeable mergeStateStatus autoMergeRequest { enabledAt } } } }"'
+  'a mutation that touches no branch::gh api graphql -f query="mutation { addComment(input: {subjectId: 1, body: \"x\"}) { clientMutationId } }"'
+  'a comment::gh api R/issues/4/comments -f body=hello'
+  'a comment of a file::gh api R/issues/4/comments -F body=@c.md'
+  'a comment by --input::gh api R/issues/4/comments --input c.json'
+  'a comment about main::gh api R/issues/4/comments -f body="the branch main and git/refs/heads/main"'
+  'a comment in the issue of a variable::gh api "repos/$REPO/issues/$n/comments" -f body="$BODY"'
+  'a label in the issue of a variable::gh api -X DELETE "repos/$REPO/issues/$n/labels/$LABEL"'
+  'flags of a variable::gh api R/issues/4/comments $FLAGS'
+  'a body of a variable with spaces::B="hello world"; gh api R/issues/4/comments -f body="$B"'
+  'a body of a here-document with the words::gh api R/issues/4/comments -f body="$(cat <<'"'"'EOF'"'"'
+gh api -X DELETE R/git/refs/heads/main
+EOF
+)"'
+  'a label::gh api R/issues/4/labels -f "labels[]=stopped"'
+  'a label taken off::gh api -X DELETE R/issues/4/labels/stopped'
+  'an assignee::gh api R/issues/4/assignees -f "assignees[]=o"'
+  'a state::gh api -X PATCH R/issues/4 -f state=closed'
+  'a pull request::gh api R/pulls -f head=41-x -f base=main -F title=@t -F body=@b -F draft=true'
+  'the body of a pull request::gh api -X PATCH R/pulls/13 -F body=@b'
+  'a dispatch of a workflow::gh api R/actions/workflows/ci.yml/dispatches -f ref=main'
+  'a release of main::gh api R/releases -f tag_name=v1 -f target_commitish=main'
+  'a blob::gh api R/git/blobs -f content=x'
+  'a commit object::gh api R/git/commits -f message=m -f tree=abc'
+  'the ref of an issue branch::gh api R/git/refs -f ref=refs/heads/41-x -f sha=abc'
+  'the ref of an issue branch with a variable in it::gh api R/git/refs -f ref="refs/heads/41-$SLUG" -f sha="$SHA"'
+  'a delete of an issue branch::gh api -X DELETE R/git/refs/heads/41-x'
+  'a delete of an issue branch of a variable the command assigned::B=41-x; gh api -X DELETE R/git/refs/heads/$B'
+  'a move of an issue branch by --input::gh api -X PATCH R/git/refs/heads/41-x --input body.json'
+  'a branch whose name holds a protected one::gh api -X DELETE R/git/refs/heads/41-main'
+  'a tag::gh api R/git/refs -f ref=refs/tags/v1 -f sha=abc'
+  'a tag of a variable::gh api R/git/refs -f ref="refs/tags/$T" -f sha=abc'
+  'a tag named as a protected branch::gh api -X DELETE R/git/refs/tags/main'
+  'a merge into an issue branch::gh api R/merges -f base=41-x -f head=main'
+  'a file of an issue branch::gh api -X PUT R/contents/a.txt -f branch=41-x -f message=m -f content=eA=='
+  'a file of an issue branch, deleted::gh api -X DELETE R/contents/a.txt -f branch=41-x -f message=m -f sha=abc'
+  'a file of an issue branch, in a substitution::SHA=$(gh api -X PUT R/contents/a.txt -f branch=41-x -f message=m --jq .content.sha)'
+  'a repository named contents::gh api -X PATCH repos/o/contents -f description=x'
+  'the words in another command::git commit -m "gh api graphql with mergePullRequest, and gh api -X PUT of R/contents/a.txt"'
+  'the words printed::echo "gh api -X DELETE R/git/refs/heads/main"'
+  'the words searched::grep -rn "gh api -X PUT repos/.*/contents/" hooks | head'
+  'the words in the body of an issue::gh issue comment 4 --body "gh api -X DELETE R/git/refs/heads/main"'
+  'a wrapper of a comment::env gh api R/issues/4/comments -f body=x'
+  'a wrapper of a label in the issue of a variable::env gh api -X DELETE "R/issues/$n/labels/x"'
+  'an environment in the repository of a variable::gh api -X PUT "repos/$REPO/environments/$ENV"'
+  'a ruleset in the repository of a variable::gh api -X PATCH "repos/$REPO/rulesets/$ID" -f name=x'
+  'a call of a library, its flags in the arguments::gh api "repos/$GH_REPO_PATH/$endpoint" "$@"'
+  'a flag of a variable that reads::M=--paginate; gh api $M R/git/refs'
+  'a flag of a variable and an issue branch::M=-XDELETE; gh api $M R/git/refs/heads/41-x'
+  'a wrapper of a read::sh -c "gh api R/git/refs/heads/main"'
+)
+for entry in "${api_allow[@]}"; do
+  label="${entry%%::*}"
+  cmd="${entry#*::}"
+  cmd="${cmd//R\//$R/}"
+  tl_eq "$label" 'allow' "$(verdict "$cmd")"
+done
+tl_eq 'a read of pulls/<n>/merge (whether it is merged)' 'allow' "$(verdict "gh api $R/pulls/13/merge")"
+tl_eq 'from a directory without config the session config judges it' 'deny' "$(verdict "cd $plain && gh api -X DELETE $R/git/refs/heads/main" "$repo")"
+tl_eq '  and an issue branch passes' 'allow' "$(verdict "cd $plain && gh api -X DELETE $R/git/refs/heads/41-x" "$repo")"
+api_other="$(tl_repo)"
+printf '[git]\n\tprotected = release\n' > "$api_other/trellis.config"
+tl_eq 'the config of the directory decides what is protected' 'allow' "$(verdict "gh api -X DELETE $R/git/refs/heads/main" "$api_other")"
+tl_eq '  and its own branch is refused' 'deny' "$(verdict "gh api -X DELETE $R/git/refs/heads/release" "$api_other")"
+tl_eq 'with no config anywhere, a write in a repository named in the endpoint' 'deny' "$(verdict "gh api -X DELETE $R/git/refs/heads/41-x" "$plain")"
+tl_eq '  a mutation' 'deny' "$(verdict 'gh api graphql -f query="mutation{mergePullRequest}"' "$plain")"
+tl_eq '  one by GH_REPO' 'deny' "$(verdict 'GH_REPO=o/r gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/main' "$plain")"
+tl_eq '  a write in the repository of the directory has no opinion' 'allow' "$(verdict 'gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/main' "$plain")"
+tl_eq '  nor a tag' 'allow' "$(verdict "gh api -X DELETE $R/git/refs/tags/v1" "$plain")"
+tl_eq '  nor a comment' 'allow' "$(verdict "gh api $R/issues/4/comments -f body=x" "$plain")"
+tl_eq '  nor a read' 'allow' "$(verdict "gh api $R/git/refs/heads/main" "$plain")"
+
+# A hook that times out runs the command unjudged, and bash 3.2 takes quadratic time over a long text in
+# a UTF-8 locale: the time of a long word the shell expands is that of a long word it does not.
+api_long="$(node -e 'process.stdout.write("some words of a long body\n".repeat(1200))')"
+api_time() {
+  local began=$SECONDS
+  LC_ALL=en_US.UTF-8 verdict "$1" > /dev/null
+  if [ $((SECONDS - began)) -lt 5 ]; then echo short; else echo "$((SECONDS - began)) seconds"; fi
+}
+tl_eq 'a long message with a substitution is judged in a short time' 'short' "$(api_time "git commit -m \"\$(cat <<'EOF'
+$api_long
+EOF
+)\"")"
+tl_eq '  a long body of gh api' 'short' "$(api_time "gh api $R/issues/4/comments -f body=\"\$X $api_long\"")"
+tl_eq '  and many variables' 'short' "$(api_time "gh api $R/issues/4/comments -f body=\"$(node -e 'process.stdout.write("$A b\n".repeat(4000))')\"")"
+
+printf '\nwhat the refusal of gh api says (#41)\n'
+api_says() {
+  node -e 'console.log(JSON.stringify({tool_input: {command: process.argv[1]}, cwd: process.argv[2]}))' "${1//R\//$R/}" "$repo" | bash "$HOOK" |
+    node -e 'let s = ""; process.stdin.on("data", d => s += d).on("end", () => { try { console.log(JSON.parse(s).hookSpecificOutput.permissionDecisionReason); } catch { console.log("no refusal"); } })'
+}
+says="$(api_says 'gh api -X DELETE R/git/refs/heads/main')"
+tl_has 'a branch: what it is' 'A write in main by gh api' "$says"
+tl_has '  that it is protected' 'it is a protected branch' "$says"
+tl_has '  and the way' 'open a pull request' "$says"
+says="$(api_says 'gh api -X PUT R/contents/a.txt -f message=m')"
+tl_has 'no branch: the default one' 'default branch' "$says"
+tl_has '  and the way' 'open a pull request' "$says"
+says="$(api_says 'gh api -X DELETE R/git/refs/heads/$B')"
+tl_has 'a branch of a variable: it cannot be read' 'cannot read' "$says"
+tl_has '  and the way' 'pull request' "$says"
+says="$(api_says 'gh api graphql -F query=@q.graphql')"
+tl_has 'a query of a file: it cannot be read' 'cannot read this query' "$says"
+tl_has '  and the way' 'Write the query inline' "$says"
+says="$(api_says 'gh api graphql -f query="mutation{mergePullRequest}"')"
+tl_has 'a mutation: its name' 'mergePullRequest' "$says"
+tl_has '  and the way' 'gh pr merge <n>' "$says"
+says="$(api_says 'sh -c "gh api -X DELETE R/git/refs/heads/main"')"
+tl_has 'a wrapper: that it could not be judged' 'could not judge it' "$says"
+tl_has '  and the way' 'one invocation per command' "$says"
+
 printf '\na config that does not parse\n'
 cp trellis.config "$TL_TMP/good.config"
 printf '[git\n' > trellis.config
@@ -429,6 +722,8 @@ out="$(node -e 'console.log(JSON.stringify({tool_input: {command: "git push orig
 tl_has 'refuses any push' '"deny"' "$out"
 tl_has 'naming the parse error' 'does not parse' "$out"
 tl_eq 'refuses a merge' 'deny' "$(verdict 'gh pr merge 12')"
+tl_eq 'refuses a write in a branch by gh api' 'deny' "$(verdict "gh api -X DELETE $R/git/refs/heads/41-x")"
+tl_eq 'a comment by gh api has no opinion' 'allow' "$(verdict "gh api $R/issues/4/comments -f body=x")"
 tl_eq 'has no opinion on the rest' 'allow' "$(verdict 'git status')"
 cp "$TL_TMP/good.config" trellis.config
 
