@@ -48,7 +48,7 @@ for (let i = 1; i < args.length; i++) {
 method ||= Object.keys(fields).length ? 'POST' : 'GET';
 const refused = (code, text) => { console.log(JSON.stringify({message: text, status: String(code)})); stop(`gh: ${text} (HTTP ${code})`); };
 const answer = value => {
-  const filter = {'': v => [v], '.state': v => [v.state], '.html_url': v => [v.html_url], '.[]': v => v, '.[].name': v => v.map(x => x.name), '.login': v => [v.login]}[jq];
+  const filter = {'': v => [v], '.state': v => [v.state], '.html_url': v => [v.html_url], '.[]': v => v, '.[].name': v => v.map(x => x.name), '.[].ref': v => v.map(x => x.ref), '.login': v => [v.login]}[jq];
   if (!filter) stop(`unexpected filter: ${jq}`);
   for (const v of filter(value)) console.log(typeof v === 'string' ? v : JSON.stringify(v));
   process.exit(0);
@@ -76,6 +76,9 @@ if (method === 'GET') {
   if (path === 'user') answer({login: 'rologr35'});
   if ((m = is(/^issues\/(\d+)$/))) answer(load(at(`issue-${m[1]}.json`)));
   if ((m = is(/^issues\/(\d+)\/comments$/))) answer(load(at(`comments-${m[1]}.json`)));
+  if ((m = is(/^git\/matching-refs\/tags\/(.+)$/))) {
+    answer(load(at('tags.json')).filter(t => t.startsWith(m[1])).map(t => ({ref: `refs/tags/${t}`})));
+  }
   if ((m = is(/^pulls\/(\d+)$/))) answer(load(at(`pr-${m[1]}.json`)));
   if (is(/^labels$/)) {
     const labels = read('labels');
@@ -477,6 +480,24 @@ tl_has '  and is named' 'depends on rologr35/x#9, which is open' "$(out)"
 sed 's/^Depends on: .*/Depends on: the tag v2 and a decision/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 2 "$TL_TMP/case.md"
 tl_eq 'only a free-text dependency passes' '0' "$(status_of check 2)"
+printf '["v2.0.0", "v2.1.0-rc1", "app/v3"]' > "$GH_FIXTURES/rologr35_x/tags.json"
+tag_of() {
+  sed "s|^Depends on: .*|Depends on: $1|" "$TL_TMP/good.md" > "$TL_TMP/case.md"
+  issue_json 2 "$TL_TMP/case.md"
+  status_of check 2
+}
+tl_eq 'a tag that exists is met' '0' "$(tag_of 'rologr35/x@v2.0.0')"
+tl_lacks '  and no person confirms it' 'a person confirms' "$(out)"
+tl_eq '  in backticks, beside another, at the end of a sentence' '0' "$(tag_of '`rologr35/x@v2.0.0` and rologr35/x@app/v3.')"
+tl_lacks '  too' 'a person confirms' "$(out)"
+tl_eq 'a tag that does not exist fails' '1' "$(tag_of 'rologr35/x@v3.0.0')"
+tl_has '  and is named' 'depends on rologr35/x@v3.0.0, a tag that does not exist' "$(out)"
+tl_eq 'one that only starts another fails' '1' "$(tag_of 'rologr35/x@v2.1.0')"
+tl_eq 'a tag that could not be read fails' '1' "$(tag_of 'rologr35/nowhere@v2.0.0')"
+tl_has '  with the error of gh' "depends on rologr35/nowhere@v2.0.0, which could not be read as the owner's account (rologr35): gh: Not Found (HTTP 404)" "$(out)"
+tl_eq 'a tag and an open issue fail' '1' "$(tag_of 'rologr35/x@v2.0.0, rologr35/x#9')"
+tl_eq 'a tag that is none of a repository is text' '0' "$(tag_of 'the tag @v2.0.0 of rologr35')"
+tl_has '  which a person confirms' 'a person confirms: the tag @v2.0.0' "$(out)"
 sed 's/^Depends on: .*//' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 2 "$TL_TMP/case.md"
 tl_eq 'without Depends on' '0' "$(status_of check 2)"
@@ -852,6 +873,10 @@ sed 's/^Depends on:.*$/Depends on: #404/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 34 "$TL_TMP/case.md"
 tl_eq '--unattended, with a dependency that cannot be read' '1' "$(claim_of 34 --unattended)"
 tl_has '  is refused' 'its plan could not be checked' "$(out)"
+tl_eq '  and writes nothing' '' "$(writes)"
+sed 's/^Depends on:.*$/Depends on: rologr35\/nowhere@v1/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 34 "$TL_TMP/case.md"
+tl_eq '  a tag that cannot be read too' '1' "$(claim_of 34 --unattended)"
 tl_eq '  and writes nothing' '' "$(writes)"
 sed 's/^Depends on:.*$/Depends on: #404, #8/' "$TL_TMP/good.md" > "$TL_TMP/case.md"
 issue_json 34 "$TL_TMP/case.md"

@@ -148,18 +148,20 @@ function render(plan) {
 /** The issues the plan depends on, and the lines a person reads. */
 function dependencies(plan) {
   const refs = new Map();
+  const tags = new Map();
   const texts = [];
   for (const section of plan.sections.filter(s => s.name === L.sections[0])) {
     for (const group of labelled(section.lines, L.dependsOn)) {
       const lines = group.inline === '' ? group.lines.map(l => l.text) : [group.inline];
       for (const line of lines) {
         for (const [whole, repo, n] of line.matchAll(REFERENCE)) refs.set(whole, {repo: repo ?? '-', n});
-        const rest = line.replace(REFERENCE, '').replace(/(?<!\p{L})(?:and|y|e)(?!\p{L})/gu, '');
+        for (const [whole, repo, tag] of line.matchAll(TAG)) tags.set(whole, {repo, tag});
+        const rest = line.replace(TAG, '').replace(REFERENCE, '').replace(/(?<!\p{L})(?:and|y|e)(?!\p{L})/gu, '');
         if (/[\p{L}\p{N}]/u.test(rest)) texts.push(line.trim().replace(/\t/g, ' '));
       }
     }
   }
-  return {refs: [...refs.values()], texts};
+  return {refs: [...refs.values()], tags: [...tags.values()], texts};
 }
 
 /** The text without what the mould leaves for the person to fill, and without comments. */
@@ -414,6 +416,9 @@ function integrationTree(ref) {
 /** The issues a `Depends on` line names, which are references and not bare numbers. */
 const REFERENCE = /(?<![\w./&-])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g;
 
+/** The tags of a repository it names. */
+const TAG = /(?<![\w./@&-])([\w.-]+\/[\w.-]+)@([\w+](?:[\w./+-]*[\w+])?)/g;
+
 /** The text whose style is judged: the `Depends on` lines without their references. */
 function withoutReferences(lines) {
   const out = lines.map(l => l.text);
@@ -532,8 +537,9 @@ if (!['body', 'class', 'stop', 'refusal', 'follow-up'].includes(mode)) {
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));
   if (mode === 'deps') {
-    const {refs, texts} = dependencies(plan);
+    const {refs, tags, texts} = dependencies(plan);
     for (const {repo, n} of refs) console.log(`ref\t${repo}\t${n}`);
+    for (const {repo, tag} of tags) console.log(`tag\t${repo}\t${tag}`);
     for (const line of texts) console.log(`text\t${line}`);
   }
 }

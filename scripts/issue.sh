@@ -35,7 +35,7 @@
 # headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only what an owner, a member
 # or a collaborator wrote counts, the body too: with the body of someone else, which the check says, the
 # plan is what the amendments carry. At pick-up, also: every #n and owner/repo#n of the Depends on line
-# of Context is closed. Other text there is printed for a person.
+# of Context is closed, and every owner/repo@<tag> exists. Other text there is printed for a person.
 # Each path of Layers and files that changed on the integration branch since the plan, or its last
 # amendment, was written is printed, and fails nothing.
 #
@@ -168,6 +168,18 @@ check_dependency() {
   return 1
 }
 
+# The same for a tag, which is met when it exists. The answer has the ones it starts too.
+check_tag() {
+  local repo="$1" tag="$2"
+  if ! gh_api . "$repo" "git/matching-refs/tags/$tag" --paginate --jq '.[].ref'; then
+    printf 'issue check: depends on %s@%s, which could not be read as %s: %s\n' "$repo" "$tag" "$GH_AS_ACCOUNT" "${GH_AS_ERR:-gh failed}" >&2
+    return 2
+  fi
+  printf '%s\n' "$GH_AS_OUT" | grep -Fxq -- "refs/tags/$tag" && return 0
+  printf 'issue check: depends on %s@%s, a tag that does not exist\n' "$repo" "$tag" >&2
+  return 1
+}
+
 make_tmp() {
   [ -z "${ISSUE_TMP:-}" ] || return 0
   ISSUE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/trellis-issue.XXXXXX")" || return 1
@@ -212,8 +224,8 @@ check_plan() {
   judge deps "$ISSUE_TMP/issue.json" "$ISSUE_TMP/comments.json" > "$ISSUE_TMP/deps" || return 1
   while IFS=$'\t' read -r kind a b <&4; do
     case "$kind" in
-      ref)
-        check_dependency "$a" "$b"
+      ref | tag)
+        if [ "$kind" = ref ]; then check_dependency "$a" "$b"; else check_tag "$a" "$b"; fi
         case $? in 0) ;; 2) unread=true ;; *) status=1 ;; esac
         ;;
       text) printf 'issue: the plan depends on this, which a person confirms: %s\n' "$a" ;;
