@@ -168,6 +168,8 @@ elif [ "$copy" = true ]; then
   ' "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json)" = true ]; then
     warn 'the plugin trellis is enabled too: every hook runs twice; turn it off here (claude plugin disable trellis@trellis) or take it out of the settings that enable it'
   fi
+elif [ -f "$top/lib/find-trellis.sh" ] && [ -f "$top/.claude-plugin/plugin.json" ] && ! command -v node >/dev/null 2>&1; then
+  info 'the repository of trellis was not recognized (node not found)'
 elif is_trellis "$top"; then
   if [ "$top" -ef "$TRELLIS_ROOT" ]; then
     ok 'trellis runs from its tree'
