@@ -43,7 +43,7 @@ tl_eq 'bin/trellis can be executed' 'yes' "$([ -x .trellis/bin/trellis ] && echo
 tl_eq 'no test is copied' '' "$(find .trellis -name '*.test.*' -o -name 'testlib.sh')"
 tl_eq 'nor hooks.json' '' "$(find .trellis -name hooks.json)"
 tl_eq 'nor what is not runtime' 'LICENSE MANIFEST VERSION bin hooks hygiene lib method scripts templates' "$(ls .trellis | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
-tl_eq 'the skills, all but init' 'trellis-debugging trellis-merge trellis-own trellis-retro trellis-scaffold' "$(ls .claude/skills | tr '\n' ' ' | sed 's/ $//')"
+tl_eq 'the skills, all but init' 'trellis-debugging trellis-merge trellis-own trellis-retro trellis-scaffold trellis-work' "$(ls .claude/skills | tr '\n' ' ' | sed 's/ $//')"
 tl_eq 'the agents' 'trellis-plan-check.md trellis-plan-reviewer.md' "$(ls .claude/agents | tr '\n' ' ' | sed 's/ $//')"
 tl_eq 'a skill carries the name of its folder' 'name: trellis-retro' "$(sed -n 2p .claude/skills/trellis-retro/SKILL.md)"
 tl_eq 'and the rest of the source' "$(sed -n '3,$p' "$upstream/skills/retro/SKILL.md")" "$(sed -n '3,$p' .claude/skills/trellis-retro/SKILL.md)"
@@ -111,7 +111,7 @@ tl_eq 'and that file is not removed' 'yes' "$([ -f CLAUDE.md ] && echo yes)"
 restore
 
 printf '\nwhat is in the way\n'
-git rm -rq .trellis .claude/skills/trellis-merge .claude/skills/trellis-retro .claude/skills/trellis-scaffold .claude/agents && git commit -q -m 'chore: no copy (#1)'
+git rm -rq .trellis .claude/skills/trellis-merge .claude/skills/trellis-retro .claude/skills/trellis-scaffold .claude/skills/trellis-work .claude/agents && git commit -q -m 'chore: no copy (#1)'
 mkdir -p .claude/skills/trellis-merge && printf '# Mine\n' > .claude/skills/trellis-merge/SKILL.md
 tl_eq 'a file of the project with the name of a copied one stops it' '1' "$(update v2)"
 tl_has 'naming it' '.claude/skills/trellis-merge/SKILL.md' "$(out)"

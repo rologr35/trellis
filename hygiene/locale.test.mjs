@@ -9,7 +9,7 @@ import path from 'node:path';
 import {after, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TRELLIS_ROOT} from '../lib/config.mjs';
-import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS} from '../lib/locale.mjs';
+import {CYCLE, ISSUE, LOCALES, PLAN_CHECK, PRINCIPLE_ID, PR_SECTIONS, STOP} from '../lib/locale.mjs';
 
 const TRELLIS = path.join(TRELLIS_ROOT, 'bin', 'trellis');
 const TEMPLATES = path.join(TRELLIS_ROOT, 'templates');
@@ -167,6 +167,24 @@ test('what a project reads names the skills and agents of the copy', () => {
     assert.doesNotMatch(text, /`plan-(?:check|reviewer)`/, `${name} names an agent of the plugin`);
   }
   for (const locale of LOCALES) assert.ok(methodOf(locale).includes('`trellis-plan-reviewer`'), locale);
+});
+
+test('the skill work holds one procedure, with and without a person', () => {
+  const skill = readFileSync(path.join(TRELLIS_ROOT, 'skills', 'work', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^---\nname: work\n/);
+  for (const text of ['trellis issue claim <n>', '--unattended', '--resume', 'trellis worktree add <n> <slug>', 'trellis issue check <n> --print', 'trellis issue gates <n>', 'trellis issue stop <n> --body-file', 'trellis issue follow-up', 'CLAUDE_CODE_REMOTE', 'gh pr create --draft', "gh api 'repos/{owner}/{repo}/pulls'", '/code-review high', '`trellis-plan-check`', 'gh pr ready', '<!-- trellis:stopped -->', 'git merge origin/<integration>']) {
+    assert.ok(skill.includes(text), `the skill names ${text}`);
+  }
+  for (const locale of LOCALES) for (const name of STOP[locale].sections) assert.ok(skill.includes(`**${name}**`), `${locale}: ${name}`);
+  assert.doesNotMatch(skill, /gh pr merge/, 'it never merges');
+});
+
+test('every locale defines the same words of a stop', () => {
+  const [first, ...rest] = LOCALES;
+  for (const locale of rest) {
+    assert.deepEqual(Object.keys(STOP[locale]), Object.keys(STOP[first]));
+    assert.equal(STOP[locale].sections.length, STOP[first].sections.length);
+  }
 });
 
 test('the settings of a project install no plugin, and its workflow pins one sha', () => {

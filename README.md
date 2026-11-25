@@ -2,7 +2,7 @@
 
 A replicable agentic harness for Claude Code: the always-loaded working method, git guards, hygiene of the instruction files, ratchets and project templates. A project commits a copy of a version of it, so the same files answer in every session, local or in the cloud. This repository is also a plugin and its marketplace, which only `/trellis:init` needs.
 
-Base, the module of this repository, needs only git and node. The Cycle (issues, labels, review against the plan) and Autonomy (cloud routines, dispatcher, budget) modules are built on top of it. Of Cycle, this repository holds the mould of an issue's plan and its check, the check of the branch against that plan, and the close of the issue when its pull request is merged; `tracker.kind = none` leaves them off.
+Base, the module of this repository, needs only git and node. The Cycle (issues, labels, review against the plan) and Autonomy (cloud routines, dispatcher, budget) modules are built on top of it. Of Cycle, this repository holds the mould of an issue's plan and its check, the check of the branch against that plan, the claim and the stop of an issue, the skill that works one until its pull request is ready, the follow-up of what it leaves, and the close of the issue when its pull request is merged; `tracker.kind = none` leaves them off.
 
 ## Install in a project
 
@@ -31,7 +31,7 @@ The project's own linters and formatters must leave `.trellis/` out, in their ow
 | `.trellis/` | The runtime (`bin`, `hooks`, `lib`, `scripts`, `hygiene`, `method`, `templates`, `LICENSE`), without its tests. |
 | `.trellis/VERSION` | The version and the full sha. |
 | `.trellis/MANIFEST` | The sha256 of every file written, as `shasum -a 256 -c` reads it. |
-| `.claude/skills/trellis-<name>/SKILL.md` | Every skill but `init`: `/trellis-retro`, `/trellis-merge` and the rest. |
+| `.claude/skills/trellis-<name>/SKILL.md` | Every skill but `init`: `/trellis-work`, `/trellis-merge` and the rest. |
 | `.claude/agents/trellis-<name>.md` | The agents: `trellis-plan-reviewer` and `trellis-plan-check`. |
 
 What the previous copy had and the new one does not is removed. Nothing is written when the copy was edited by hand, when a file of the project has the name of a copied one, or when git ignores one: the files are named. A branch is refused, because what it names changes. It ends with `trellis sync` run from the new copy, which writes in `.claude/settings.json` the `PreToolUse` hook of `guard-git`, the `SessionStart` hook of `trellis setup` and the deny `Edit(/.trellis/**)`; other hooks of the project are left as they are.
@@ -74,12 +74,12 @@ Each prose template is a file per locale rather than one file with per-locale st
 | Guards | `hooks/guard-git.sh` | Pushes to protected branches, branch switches in the main checkout, issues without a prior search, merges outside the allowed bases. `gh issue new` and `trellis issue create` are issue creations like `gh issue create`. |
 | Git hooks | `templates/githooks/` | The copy, ratchet, hygiene, commit message and branch name, in the clone. |
 | Consumer CI | `.github/workflows/consumer-check.yml` | The copy, hygiene, ratchet, `pr-check` and the secret scanner on every open pull request. `consumer-closed.yml` is the second workflow, run when one is merged. Neither runs a rung: a rung with `pr = true` is run by the project's own CI. |
-| Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`, `merge`. |
+| Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`, `work`, `merge`. `/trellis-work <n>` takes an issue from its claim to a pull request ready, in a person's session or in a run without one; it never merges. |
 | Agents | `agents/plan-reviewer.md`, `agents/plan-check.md` | `trellis-plan-reviewer` and `trellis-plan-check` in a project, each in a clean context: the first checks a plan against the repository before the work, the second checks the branch of an issue against its approved plan while the pull request is a draft. |
 
 ## Where each thing runs
 
-- The copy is in the repository, so it is in every clone and in a session hosted in the cloud, which does not add the marketplaces of `extraKnownMarketplaces`. Its hooks run from `.claude/settings.json` through `$CLAUDE_PROJECT_DIR`, the project the session started in.
+- The copy is in the repository, so it is in every clone and in a session hosted in the cloud, which does not add the marketplaces of `extraKnownMarketplaces`. `trellis issue`, the guards and `worktree prune` ask GitHub through REST, the interface such a session has; the whole path of `/trellis-work` there is not proven until the first real run of rologr35/trellis#3. Its hooks run from `.claude/settings.json` through `$CLAUDE_PROJECT_DIR`, the project the session started in.
 - `trellis setup`, which the `SessionStart` hook runs, adds `.trellis/bin` to the PATH of the session's Bash tool through `CLAUDE_ENV_FILE`. It is not on the PATH of a person's shell nor of the git hooks: these look for trellis with `lib/find-trellis.sh`, first at `.trellis/bin/trellis` of the repository, then on the PATH, then in the `installPath` of `~/.claude/plugins/installed_plugins.json`.
 - The hooks need node. Without node, `guard-git` has no opinion and `trellis doctor` gives a FAIL. The native `claude` binary does not bring node.
 - The `deny` lives in the project's `settings.json`, and `trellis sync` generates it. The push `deny` is there as well as in `guard-git`, for a session where the hooks do not run.
