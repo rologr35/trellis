@@ -313,7 +313,7 @@ tl_eq 'and none of it is written' '' "$(writes)"
 
 printf '\na new issue\n'
 tl_eq 'its digest publishes' '0' "$(propose --approved "$ok")"
-tl_has 'and prints its URL' 'https://github.com/trellis-org/trellis/issues/12' "$(out)"
+tl_eq 'and prints its URL' 'https://github.com/trellis-org/trellis/issues/12' "$(out)"
 tl_eq 'the label is created, and the issue' "POST labels name=lesson color=BFD4F2 description=What a project learned
 POST issues title=$title body labels[]=lesson" "$(writes)"
 tl_eq 'with the text as it was' "$(cat "$body")" "$(cat "$GH_FIXTURES/body")"
@@ -323,7 +323,7 @@ tl_lacks '  and says nothing of it' 'without the label' "$(out)"
 touch "$GH_FIXTURES/drops-labels"
 tl_eq 'an account that cannot label publishes' '0' "$(propose --approved "$ok")"
 tl_has '  saying that the label is missing' "lesson: published without the label lesson, which the owner's account (trellis-org) cannot put on an issue of trellis-org/trellis" "$(out)"
-tl_has '  and prints its URL' 'https://github.com/trellis-org/trellis/issues/12' "$(out)"
+tl_eq '  and prints its URL' 'https://github.com/trellis-org/trellis/issues/12' "$(out | tail -1)"
 rm "$GH_FIXTURES/drops-labels"; writes > /dev/null
 touch "$GH_FIXTURES/create-fails"
 tl_eq 'a failure is one' '1' "$(propose --approved "$ok")"
