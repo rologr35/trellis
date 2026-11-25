@@ -72,9 +72,9 @@ Un conflicto en un `CLAUDE.md`, una rule o un skill se resuelve desde la versió
 
 - El plan aprobado vive en la issue, escrito desde el molde (`.trellis/templates/es/issue.md`) y creada con `trellis issue create --title <t> --body-file <fichero>`, que lo comprueba y le pone la etiqueta de su complejidad. <!-- p:plan-in-issue -->
 - El cuerpo de una issue no se edita. Un cambio del plan es un comentario encabezado `## Enmienda (<fecha>)`, con las secciones que sustituye, enteras, como títulos `###`. <!-- p:issue-amendment -->
-- Antes de empezar una issue, `trellis issue check <n>` pasa: el plan está completo, sus rutas existen y aquello de lo que depende está cerrado. `trellis issue check <n> --print` es el plan vigente. <!-- p:issue-check -->
+- Una issue se trabaja con `/trellis-work <n>`: al tomarla `trellis issue check <n>` pasa (con `--print`, el plan vigente), y antes de escribir el cuerpo se trae la rama de integración: lo que se afirma de ella se comprueba ahí. <!-- p:work-skill -->
 - Una issue sin plan (un síntoma, una lección) es legítima. Se crea con `gh issue create` o `gh issue new`, que una guarda quiere tras buscar en el backlog, sin clase, y recibe su plan después, como una enmienda con las cinco secciones y la línea de complejidad. <!-- p:planless-issue -->
-- Antes de escribir el cuerpo del pull request se trae la rama de integración: lo que se afirma de ella se comprueba ahí. <!-- p:pr-facts -->
+- Lo que un trabajo deja para otra issue pasa por `trellis issue follow-up`. <!-- p:follow-up -->
 - El pull request se abre como borrador. Se corre `trellis-plan-check` y después `gh pr ready`; una S que solo toca Markdown se lo salta. <!-- p:plan-check -->
 - Su cuerpo lleva `Closes #<n>`, **Antes de mezclar** y **Después de mezclar**, cada una `nada` o una lista. <!-- p:pr-before-after -->
 - Se mezcla con `/trellis-merge <pr>`. <!-- p:merge-skill -->

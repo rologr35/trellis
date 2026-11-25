@@ -149,9 +149,9 @@ test('the Cycle section of every method is marked once, takes at most 1.5 KB and
     const [, section] = found[0];
     assert.ok(section.startsWith(`${CYCLE_HEADING[locale]}\n`));
     assert.ok(Buffer.byteLength(section.replace(PRINCIPLE_ID, '')) <= 1536, `${locale}: ${Buffer.byteLength(section.replace(PRINCIPLE_ID, ''))} bytes`);
-    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'issue-check', 'planless-issue', 'pr-facts', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
+    assert.deepEqual(idsOf(section), ['plan-in-issue', 'issue-amendment', 'work-skill', 'planless-issue', 'follow-up', 'plan-check', 'pr-before-after', 'merge-skill', 'pending-actions']);
     const {beforeMerging, afterMerging, noneWord} = PR_SECTIONS[locale];
-    for (const text of [`## ${ISSUE[locale].amendment} (`, 'trellis issue check <n>', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
+    for (const text of [`## ${ISSUE[locale].amendment} (`, '/trellis-work <n>', 'trellis issue check <n>', 'trellis issue follow-up', 'trellis issue create', 'gh issue create', 'gh issue new', `.trellis/templates/${locale}/issue.md`, '`trellis-plan-check`', 'gh pr ready', 'Closes #<n>', `**${beforeMerging}**`, `**${afterMerging}**`, `\`${noneWord}\``, '/trellis-merge', 'gh issue list --state closed --label pending-actions']) {
       assert.ok(section.includes(text), `${locale}: the Cycle section names ${text}`);
     }
   }
