@@ -12,8 +12,8 @@
 # key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), workspace.kind =
 # other without [hygiene] namedExt, or a command name that names no [command]; a tool of
 # [toolchain] require missing or older than its minimum; core.hooksPath other than git.hooksPath;
-# a copy of trellis that is not whole, as `trellis verify` says, or, without a copy, the plugin not
-# installed; Claude Code older than the minimum; node missing while hooks are active;
+# a copy of trellis that is not whole, as `trellis verify` says, or, without a copy and out of the
+# repository of trellis, which runs from its own tree, the plugin not installed; Claude Code older than the minimum; node missing while hooks are active;
 # ANTHROPIC_API_KEY exported (the subscription stops being used and every token is billed as API
 # usage, silently, so it is a FAIL and not a warning); a branch that is neither the integration
 # branch, the release branch nor an issue branch; a [command] secretScan configured and missing;
@@ -23,7 +23,7 @@
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
 # parser); .github/workflows/trellis.yml that does not name consumer-closed.yml, with tracker.kind =
 # github; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
-# sha the project pins; no secret scanner configured; uncommitted changes, unpushed
+# sha the project pins; the repository of trellis judged by another checkout; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
 set -uo pipefail

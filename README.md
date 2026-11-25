@@ -1,6 +1,6 @@
 # trellis
 
-A replicable agentic harness for Claude Code: the always-loaded working method, git guards, hygiene of the instruction files, ratchets and project templates. A project commits a copy of a version of it, so the same files answer in every session, local or in the cloud. This repository is also a plugin and its marketplace, which only `/trellis:init` needs.
+A replicable agentic harness for Claude Code: the always-loaded working method, git guards, hygiene of the instruction files, ratchets and project templates. A project commits a copy of a version of it, so the same files answer in every session, local or in the cloud. This repository follows the same rules, from its own tree, and is also a plugin and its marketplace, which only `/trellis:init` needs.
 
 Base, the module of this repository, needs only git and node. The Cycle (issues, labels, review against the plan) and Autonomy (cloud routines, dispatcher, budget) modules are built on top of it. Of Cycle, this repository holds the mould of an issue's plan and its check, the check of the branch against that plan, the claim and the stop of an issue, the skill that works one until its pull request is ready, the follow-up of what it leaves, and the close of the issue when its pull request is merged; `tracker.kind = none` leaves them off.
 
@@ -46,6 +46,18 @@ A project of 0.5.0 or earlier consumes the plugin. Its pull request with the fir
 - takes `.githooks/` and `.github/workflows/trellis.yml` again from `templates/`, with the sha of `.trellis/VERSION`. From 0.5.0 on the workflow has the type `closed` and the job `closed`, without which `trellis doctor` warns that a merge made on GitHub closes no issue, and `pr-check` wants `Closes #<n>`, **Before merging** and **After merging** in the body of every pull request of an issue into the integration branch, the ones already open too;
 - has as an item of **After merging** that each machine uninstalls the plugin: `claude plugin uninstall trellis@trellis --scope project`.
 
+## Packages
+
+Each package of a project has its `CLAUDE.md`, and `trellis hygiene` names the ones that lack it. `/trellis-scaffold` drafts them. `[workspace]` of `trellis.config` says which the packages are:
+
+| Key | What it says |
+|---|---|
+| `manifest` | The files that make a folder below the root a package; `package.json` and `pubspec.yaml` by default. Written, they are the only ones. A manifest at the root, in `.trellis/` or in what git ignores asks for nothing. |
+| `package` | One line per package without a manifest. |
+| `notPackage` | `<glob> \| <reason>`: a folder that is no package, an example or a fixture, whatever lists it. |
+
+The hygiene also resolves the files a rule names against the packages, and fails without a root `CLAUDE.md`. The ratchet stops an entry more in `notPackage` and one less in `manifest`. A project that moves from 0.7.1 or earlier gets one finding for each package without its file: it writes the `CLAUDE.md`, or a line of `notPackage` with its reason, which the ratchet of the pull request of the update stops until a person confirms it.
+
 ## Language
 
 trellis is written in English. What it writes into a project follows `project.locale`, `en` (the default) or `es`, the first question of `init`:
@@ -72,6 +84,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 | Close of a merge | `scripts/issue.sh`, `.github/workflows/consumer-closed.yml`, `skills/merge/` | `trellis issue close <pr>` closes the issues of a pull request merged into the integration branch and, with actions in **After merging**, leaves them in one comment with the label `pending-actions`, which `--done` takes off. The workflow runs it for a merge made on GitHub; `/trellis-merge <pr>` is the whole path. |
 | Configuration | the project's `trellis.config` | git-config format, read with `git config -f`; `lib/schema` holds the keys and their defaults. |
 | Guards | `hooks/guard-git.sh` | Pushes to protected branches, branch switches in the main checkout, issues without a prior search, merges outside the allowed bases. `gh issue new` and `trellis issue create` are issue creations like `gh issue create`. |
+| Packages | `lib/packages.mjs` | Which the packages of a project are: see Packages. |
 | Git hooks | `templates/githooks/` | The copy, ratchet, hygiene, commit message and branch name, in the clone. |
 | Consumer CI | `.github/workflows/consumer-check.yml` | The copy, hygiene, ratchet, `pr-check` and the secret scanner on every open pull request. `consumer-closed.yml` is the second workflow, run when one is merged. Neither runs a rung: a rung with `pr = true` is run by the project's own CI. |
 | Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`, `work`, `merge`. `/trellis-work <n>` takes an issue from its claim to a pull request ready, in a person's session or in a run without one; it never merges. |
@@ -80,7 +93,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 ## Where each thing runs
 
 - The copy is in the repository, so it is in every clone and in a session hosted in the cloud, which does not add the marketplaces of `extraKnownMarketplaces`. `trellis issue`, the guards and `worktree prune` ask GitHub through REST, the interface such a session has; the whole path of `/trellis-work` there is not proven until the first real run of rologr35/trellis#3. Its hooks run from `.claude/settings.json` through `$CLAUDE_PROJECT_DIR`, the project the session started in.
-- `trellis setup`, which the `SessionStart` hook runs, adds `.trellis/bin` to the PATH of the session's Bash tool through `CLAUDE_ENV_FILE`. It is not on the PATH of a person's shell nor of the git hooks: these look for trellis with `lib/find-trellis.sh`, first at `.trellis/bin/trellis` of the repository, then on the PATH, then in the `installPath` of `~/.claude/plugins/installed_plugins.json`.
+- `trellis setup`, which the `SessionStart` hook runs, adds `.trellis/bin` to the PATH of the session's Bash tool through `CLAUDE_ENV_FILE`. It is not on the PATH of a person's shell nor of the git hooks: these look for trellis with `lib/find-trellis.sh`, first at `.trellis/bin/trellis` of the repository (`bin/trellis` in the one of trellis), then on the PATH, then in the `installPath` of `~/.claude/plugins/installed_plugins.json`.
 - The hooks need node. Without node, `guard-git` has no opinion and `trellis doctor` gives a FAIL. The native `claude` binary does not bring node.
 - The `deny` lives in the project's `settings.json`, and `trellis sync` generates it. The push `deny` is there as well as in `guard-git`, for a session where the hooks do not run.
 - `git.hooksPath` of `trellis.config` (default `.githooks`) names the folder of the git hooks of a project that keeps them elsewhere: `setup` sets `core.hooksPath` to it and `doctor` checks it.
@@ -106,8 +119,8 @@ Each prose template is a file per locale rather than one file with per-locale st
 
 Read-only: it never writes or fetches. It exits 1 when there is any FAIL.
 
-- **FAIL**: a `trellis.config` key outside the schema, a value outside the accepted ones of an enum key of `lib/schema` (`project.locale`, `autonomy.level`, `tracker.kind`, `workspace.kind`, `rung.*.agent`, `rung.*.pr`), `workspace.kind = other` without `[hygiene] namedExt` (the extensions to declare for a stack beyond flutter, dart and node), a command name without `[command "<name>"] run`, or a `trellis.config` that does not parse (the doctor reports it and goes on diagnosing; the other subcommands stop on it); a tool of `[toolchain] require` missing or older than its minimum; `core.hooksPath` unset or other than `git.hooksPath`; a copy that `trellis verify` does not pass or, without a copy, the plugin not installed; Claude Code below 2.1.330; node missing with hooks active; `ANTHROPIC_API_KEY` exported (the subscription stops being used and every token is billed as API usage, silently); a branch that is not the integration branch, the release branch or an issue branch; a configured `[command] secretScan` whose scanner is missing; a file of `[toolchain] envFile` missing (presence only, it is never read).
-- **Warning**: a rung with `pr = true` that no file under `.github/workflows/` runs (it must contain the command's `run` text, or its `ci` text when set, as a plain substring search: a folded `run: >-`, a YAML comment or a commented-out step is misjudged and `npm test` is found inside `pnpm test`, so it is a hint and not a YAML parser: `pr = true` means the project's own CI runs the rung on every pull request, because the consumer workflow never runs rungs and does not install a stack's toolchain), a `.github/workflows/trellis.yml` that does not name `consumer-closed.yml` with `tracker.kind = github`, the plugin enabled in a project with a copy, no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
+- **FAIL**: a `trellis.config` key outside the schema, a value outside the accepted ones of an enum key of `lib/schema` (`project.locale`, `autonomy.level`, `tracker.kind`, `workspace.kind`, `rung.*.agent`, `rung.*.pr`), `workspace.kind = other` without `[hygiene] namedExt` (the extensions to declare for a stack beyond flutter, dart and node), a command name without `[command "<name>"] run`, or a `trellis.config` that does not parse (the doctor reports it and goes on diagnosing; the other subcommands stop on it); a tool of `[toolchain] require` missing or older than its minimum; `core.hooksPath` unset or other than `git.hooksPath`; a copy that `trellis verify` does not pass or, without a copy and out of the repository of trellis, the plugin not installed; Claude Code below 2.1.330; node missing with hooks active; `ANTHROPIC_API_KEY` exported (the subscription stops being used and every token is billed as API usage, silently); a branch that is not the integration branch, the release branch or an issue branch; a configured `[command] secretScan` whose scanner is missing; a file of `[toolchain] envFile` missing (presence only, it is never read).
+- **Warning**: a rung with `pr = true` that no file under `.github/workflows/` runs (it must contain the command's `run` text, or its `ci` text when set, as a plain substring search: a folded `run: >-`, a YAML comment or a commented-out step is misjudged and `npm test` is found inside `pnpm test`, so it is a hint and not a YAML parser: `pr = true` means the project's own CI runs the rung on every pull request, because the consumer workflow never runs rungs and does not install a stack's toolchain), a `.github/workflows/trellis.yml` that does not name `consumer-closed.yml` with `tracker.kind = github`, the plugin enabled in a project with a copy, the repository of trellis judged by the code of another checkout, no secret scanner configured, uncommitted changes, unpushed commits, worktrees of branches that are not on origin.
 - **Info**: what the release is waiting for.
 
 ## What the framework does not do, and why
@@ -117,11 +130,21 @@ Read-only: it never writes or fetches. It exits 1 when there is any FAIL.
 - **Reconciliation at session start.** Rereading all the state at startup pays in every session for what few of them need. State is reread from its source when it is used.
 - **Closing rituals.** A fixed step at the end gets skipped when it adds nothing. `retro` proposes a lesson only when there is one, and a person applies it.
 
+## This repository
+
+It has no copy: it runs from its own tree, in each of its worktrees. It is recognized by `.claude-plugin/plugin.json` with the name `trellis` and `lib/find-trellis.sh` at the top level.
+
+- `bin/trellis sync` writes there its own skills and agents, `.claude/skills/trellis-<name>/SKILL.md` and `.claude/agents/trellis-<name>.md`, with the names and the bytes a copy has them with, and removes the ones with no source. The hygiene fails when one is missing, differs or is left over.
+- `sync` and `hygiene` of another checkout (the one of the main checkout, on the PATH of a session that moved to a worktree) refuse: they would write and judge the worktree by other code. The command is `bin/trellis`.
+- The git hooks look for `bin/trellis` of their top level, so the ones of a worktree run its code, and `trellis setup` puts that `bin/` on the PATH of the session.
+- `trellis doctor` says it runs from its tree, and asks for no plugin.
+- `.github/workflows/trellis.yml` runs the hygiene, `pr-check`, the ratchet and the secret scan of the branch on its pull requests, with read permission, and closes the issue of a merged one.
+
 ## Development
 
 ```sh
-for t in lib/*.test.sh scripts/*.test.sh hooks/*.test.sh; do /bin/bash "$t" || break; done
-node --test hygiene/*.test.mjs
+./test.sh          # every suite; `./test.sh shell` or `./test.sh node` for one kind
+bin/trellis check  # the same, as the pull request needs it
 ```
 
 The scripts run with bash 3.2 (the macOS one): no `mapfile`, no associative arrays, and empty arrays under `set -u` are expanded with care. CI runs on ubuntu and macos, and on macos with `/bin/bash`.
