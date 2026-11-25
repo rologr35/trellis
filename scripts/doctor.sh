@@ -23,7 +23,7 @@
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
 # parser); .github/workflows/trellis.yml that does not name consumer-closed.yml, with tracker.kind =
 # github; in a public project, no list of private names, or git hooks that do not call `trellis
-# private-names`; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
+# private-names`; a version newer than the one of the copy, as the last session asked; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
 # sha the project pins; the repository of trellis judged by another checkout; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
@@ -148,6 +148,10 @@ fi
 plugin_installed=false
 copy=false
 if [ -e .trellis ] || grep -qF '.trellis/' .claude/settings.json 2>/dev/null; then copy=true; fi
+if [ "$copy" = true ]; then
+  newer="$(CLAUDE_PROJECT_DIR="$top" bash "$TRELLIS_ROOT/scripts/setup.sh" --newer 2>/dev/null)"
+  [ -z "$newer" ] || warn "$newer"
+fi
 if [ "$copy" = true ] && ! command -v node >/dev/null 2>&1; then
   info 'the copy was not verified (node not found)'
 elif [ "$copy" = true ]; then
