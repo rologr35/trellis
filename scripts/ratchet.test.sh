@@ -198,6 +198,7 @@ git switch -q -c 8-other
 printf 'x\n' > other.txt && git add -A && git commit -q -m 'feat: other (#8)'
 git merge -q --no-commit --no-ff 7-work >/dev/null 2>&1
 tl_eq 'a merge in progress is not judged' '0' "$(judge)"
+tl_eq '  and says so in one line' 'ratchet: a merge in progress is not judged' "$(cat "$OUT")"
 git merge --abort
 git switch -q 7-work
 "$TRELLIS" ratchet --base main >"$OUT" 2>&1
@@ -209,5 +210,84 @@ git config -f trellis.config --add ratchets.suppression 'nothing' && git add -A
 git commit -q --no-verify -m 'chore: own list (#7)'
 git config -f trellis.config --unset-all ratchets.suppression && git add -A
 tl_eq 'a shortened ratchet list is refused' '1' "$(judge)"
+reset
+
+printf '\nthe line of a pass\n'
+judge > /dev/null
+tl_eq 'a pass says so in one line' 'ratchet: ok' "$(cat "$OUT")"
+"$TRELLIS" ratchet --base HEAD >"$OUT" 2>&1
+tl_eq 'against a base too' 'ratchet: ok' "$(cat "$OUT")"
+git config branch.7-work.ratchet-loosened true
+judge > /dev/null
+tl_eq 'and with the escape of a change that loosens nothing' 'ratchet: ok' "$(cat "$OUT")"
+git config --unset branch.7-work.ratchet-loosened
+
+printf '\nthe keys of a project with its own way of writing\n'
+# from <key> <value>...: what is in force, committed. to <value>...: what the change leaves, judged.
+from() {
+  key="$1"; shift
+  git config -f trellis.config --unset-all "$key"
+  for value in "$@"; do git config -f trellis.config --add "$key" "$value"; done
+  git add -A && git commit -q --allow-empty --no-verify -m 'chore: before (#7)'
+}
+to() {
+  local result
+  git config -f trellis.config --unset-all "$key"
+  for value in "$@"; do git config -f trellis.config --add "$key" "$value"; done
+  git add -A
+  result="$(judge)"
+  reset
+  printf '%s\n' "$result"
+}
+from pr.section
+tl_eq 'sections that drop one of the locale are refused' '1' "$(to Changes Summary)"
+tl_has '  naming it' 'trellis.config: pr.section drops Verification' "$(cat "$OUT")"
+tl_eq 'sections that keep the ones of the locale pass' '0' "$(to Changes Summary Verification)"
+tl_eq 'an empty one is none' '0' "$(to '')"
+from pr.section Changes Summary Verification
+tl_eq 'one less of the set ones is refused' '1' "$(to Changes Summary)"
+tl_eq 'none set, which drops one, is refused' '1' "$(to)"
+tl_has '  naming it' 'pr.section drops Changes' "$(cat "$OUT")"
+tl_eq 'one more passes' '0' "$(to Changes Summary Verification Risk)"
+from pr.section Summary
+tl_eq 'none set, which adds the ones of the locale, passes' '0' "$(to)"
+from pr.section
+git config -f trellis.config project.locale es && git add -A
+tl_eq 'another language alone passes' '0' "$(judge)"
+reset
+from pr.action
+tl_eq 'a first action passes' '0' "$(to npm)"
+from pr.action npm psql
+tl_eq 'an action less passes' '0' "$(to npm)"
+tl_eq 'no action left is refused' '1' "$(to)"
+tl_eq 'nor one that is empty' '1' "$(to '')"
+from pr.action
+from style.bareReference
+tl_eq 'style.bareReference to allow is refused' '1' "$(to allow)"
+tl_eq 'its default written passes' '0' "$(to refuse)"
+from style.bareReference allow
+tl_eq '  and back passes' '0' "$(to)"
+from style.bareReference
+from issue.class
+tl_eq 'issue.class to label is refused' '1' "$(to label)"
+tl_eq 'its default written passes' '0' "$(to line)"
+from issue.class label
+tl_eq '  and back passes' '0' "$(to line)"
+from issue.class
+for name in pullRequestCheck issueCheck commitCheck; do
+  from "command.$name"
+  tl_eq "a first command.$name passes" '0' "$(to own)"
+  from "command.$name" own
+  tl_eq "without command.$name is refused" '1' "$(to)"
+  tl_has '  naming it' "command.$name" "$(cat "$OUT")"
+  tl_eq "with an empty command.$name too" '1' "$(to '')"
+  tl_eq "another command.$name passes" '0' "$(to other)"
+  from "command.$name"
+done
+from project.public
+tl_eq 'project.public to true passes' '0' "$(to true)"
+from project.public true
+tl_eq 'project.public to false is refused' '1' "$(to false)"
+tl_eq '  and taken out too' '1' "$(to)"
 
 tl_done

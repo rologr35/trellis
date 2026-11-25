@@ -17,13 +17,16 @@
 # path, an ESLint rule off or ignored path), the default model of .claude/settings.json raised or
 # a hook dropped, a limit or a frozen size of [hygiene] raised (a size frozen for the first time is
 # not a rise; lowering is free), keepRef, namedElsewhere or mustNotLoad grown, a glob more in
-# [workspace] notPackage, autonomy.level raised, a [ratchets] list or [workspace] manifest shortened.
+# [workspace] notPackage, autonomy.level raised, a [ratchets] list or [workspace] manifest shortened,
+# a section in force dropped by [pr] section (the ones of the language when none is set), the last [pr] action
+# taken out, style.bareReference set to allow, issue.class to label, a check of the project taken out
+# (command.pullRequestCheck, issueCheck or commitCheck) and project.public from true to false.
 #
 # The local escape, set only after the person confirmed knowing the cost:
 #   git config branch.<branch>.ratchet-loosened true
 # It turns the findings into a warning, and `trellis pr-check` then asks the pull request for a
 # **Setback** section (**Retroceso** in es). A merge in progress is not judged: what it brings was
-# judged on its branch. The files of the copy of trellis, by .trellis/MANIFEST, are not judged.
+# judged on its branch. A pass prints one line. The files of the copy of trellis, by .trellis/MANIFEST, are not judged.
 
 set -uo pipefail
 
@@ -39,9 +42,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-git rev-parse -q --verify HEAD >/dev/null || exit 0
-if [ -z "$base" ]; then
-  git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
+if ! git rev-parse -q --verify HEAD >/dev/null; then
+  echo 'ratchet: no commit yet, nothing to judge'
+  exit 0
+fi
+if [ -z "$base" ] && git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  echo 'ratchet: a merge in progress is not judged'
+  exit 0
 fi
 
 branch="$(git branch --show-current 2>/dev/null)"

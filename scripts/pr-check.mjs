@@ -4,7 +4,7 @@
 
 import {readFileSync, writeFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
-import {LESSON, PR_SECTIONS, localeOf} from '../lib/locale.mjs';
+import {LESSON, PR_SECTIONS, localeOf, requiredSections} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
 import {closedIssues, itemsOf, kindOf, lessonsOf, readBody, sectionOf} from './issue-close.mjs';
 
@@ -13,8 +13,7 @@ const branch = branchArg === '-' ? '' : branchArg;
 const config = loadConfig();
 const tracker = config.get('tracker.kind');
 const SECTIONS = PR_SECTIONS[localeOf(config)];
-const sections = config.all('pr.section').filter(Boolean);
-const required = sections.length > 0 ? sections : SECTIONS.required;
+const required = requiredSections(config);
 const actions = config.all('pr.action').filter(Boolean);
 
 const misses = [];
