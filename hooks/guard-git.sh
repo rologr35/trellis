@@ -178,7 +178,7 @@ session_searched_backlog() {
   node -e '
     const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
     const current = process.argv[2];
-    const search = /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\ssearch\/issues\b/;
+    const search = /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\s\\?["\x27]?\/?search\/issues\b/;
     let parsed = 0;
     for (const line of lines) {
       let entry;

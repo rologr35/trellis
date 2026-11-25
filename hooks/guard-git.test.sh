@@ -372,9 +372,15 @@ tl_eq 'the words of its title are data, as those of gh issue create are' 'allow'
 tl_eq 'a push in a substitution of its title is judged' 'deny' "$(verdict 'trellis issue create --title "$(git push origin main)" --body-file b.md' "$repo" "$transcript")"
 tl_eq 'another trellis subcommand with those words is not judged' 'deny' "$(verdict "trellis other 'push main'" "$repo" "$transcript")"
 tl_eq 'a wrapper in front of it is not judged either' 'deny' "$(verdict "env trellis issue create --title 'never push to main'" "$repo" "$transcript")"
-for search in "gh api search/issues -X GET -f q='repo:a/b login'" "GH_TOKEN=x gh api -X GET search/issues -f q=login"; do
+for search in "gh api search/issues -X GET -f q='repo:a/b login'" "GH_TOKEN=x gh api -X GET search/issues -f q=login" \
+  "gh api 'search/issues?q=login'" 'gh api "/search/issues?q=login"' 'gh api /search/issues?q=login' \
+  'bash -c "gh api \"search/issues?q=login\""'; do
   node -e 'console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command: process.argv[1]}}]}}))' "$search" > "$transcript"
   tl_eq "after $search" 'allow' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
+done
+for other in "gh api 'search/issuesx?q=login'" "gh api 'repos/a/search/issues'" "gh api 'search/code?q=login'"; do
+  node -e 'console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command: process.argv[1]}}]}}))' "$other" > "$transcript"
+  tl_eq "after $other" 'deny' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
 done
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "gh api repos/a/b/issues"}}]}}\n' > "$transcript"
 tl_eq 'a read of the issues is not a search' 'deny' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
