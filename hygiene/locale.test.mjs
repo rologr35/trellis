@@ -295,6 +295,9 @@ test('plan-check takes the words of its report from one table, the one of lib/lo
   for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent']) assert.match(front, new RegExp(`^disallowedTools: .*\\b${tool}\\b`, 'm'));
   assert.match(agent, /At most 300 words/);
   assert.match(agent, /trellis issue check <n> --print/);
+  assert.match(front, /`trellis-work`/, 'the skill that runs it');
+  assert.doesNotMatch(agent, /gh (?:issue|pr|api) /, 'the body and an issue without a plan are the text it receives');
+  assert.match(agent, /Without it, the claims are not established/);
   assert.ok(Buffer.byteLength(agent) <= 4096, `${Buffer.byteLength(agent)} bytes`);
 });
 
