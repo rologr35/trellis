@@ -368,11 +368,11 @@ API_MUTATIONS='mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|me
 # whitespace splits the rest of the segment into, which fails closed.
 # One record per line: "w" and the word (a newline in it is \001), "c" (the segment follows && or ||),
 # "x" (the segment does not last: it is on a side of a pipe or in the background), "(" and ")" around a
-# subshell, "v" before a word the shell expands and the word with each expansion between \002 and \003
-# (\006 first when it is out of quotes; the word after \004 when it is a brace list), "f" and the flags of the segment's tokens (g git, h gh, k push, m
-# merge, e a variable or option that redirects git or gh, a gh with api, w with a flag that writes, q a
-# mutation or a query not inline, r an endpoint that writes in a branch), "e" at the end of a segment, and
-# "n" and a name at the end for every name a word could be a branch by. In node because bash 3.2 takes
+# subshell, "v" before a word the shell expands and its parts in JSON (see `read_api`), "d" and a variable
+# of such a word, "f" and the flags of the segment's tokens (g git, h gh, k push, m merge, e a variable or
+# option that redirects git or gh, a gh with api, w with a flag that writes, q a mutation or a query not
+# inline, r an endpoint that writes in a branch, u one that cannot be read), "e" at the end of a segment,
+# and "n" and a name at the end for every name a word could be a branch by. In node because bash 3.2 takes
 # quadratic time over a long line.
 split_segments() {
   node -e '
@@ -383,8 +383,25 @@ split_segments() {
     const API = (text) => follows(text, /\bgh\b/, /\bapi\b/) || /(^|\s)\x02 api\b/.test(text);
     const API_WRITE = /(^|[\s"\x27])(-[A-Za-z]*[XfF]|--(method|field|raw-field|input)\b)/;
     const API_MUTATION = /\b('"$API_MUTATIONS"')\b/;
-    const API_QUERY = (text) => API_MUTATION.test(text) || follows(text, /\bgraphql\b/, /--input\b|\bquery=["\x27\\]*[@$`\x02]/);
+    const API_QUERY = (text) => API_MUTATION.test(text) || (/\bgraphql\b/.test(text) && /--input\b|\bquery=["\x27\\]*[@$`\x02]/.test(text));
+    // An endpoint written out: its resource, after the repository, holds no expansion.
+    const API_READ = /(^|[\s"\x27])(https?:\/\/[^\s\/$\x02{]+\/(api\/(v3\/)?)?|\/)?(repos\/[^\s\/]+\/[^\s\/]+\/(?![$\x02{])|repositories\/[^\s\/]+\/(?![$\x02{])|graphql\b|(search|user|users|orgs|gists|notifications|markdown|rate_limit)\b)/;
+    const API_SHELL = /^(.*\/)?((ba|z|da|k)?sh|eval)$/;
+    // The words of a gh api given to a wrapper or to a shell, or held in a variable.
+    const runsApi = (words) => words.some(w => API_SHELL.test(w) || /^(.*\/)?gh$/.test(w)) || words.every(w => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(w));
     const API_REST = /\/(merges|git\/refs|contents|pulls\/[^\s\/]+\/merge)(?![\w-])/;
+    // The parts of a marked word: a text, or an expansion with its `name` when it is the one of a variable.
+    const markParts = (bare) => {
+      const list = bare.startsWith("\x04");
+      const parts = list ? [{several: true}] : [];
+      for (const m of bare.replace("\x04", "").matchAll(/\x02([^\x03]*)\x03|[^\x02]+/g)) {
+        if (m[1] === undefined) { parts.push(m[0]); continue; }
+        const open = m[1].startsWith("\x06"), source = open ? m[1].slice(1) : m[1];
+        const v = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(source);
+        parts.push({open, name: v ? v[1] || v[2] : "", several: /^\$(\{?[@*]|\{[^}]*\[[@*]\])/.test(source)});
+      }
+      return parts;
+    };
     const names = new Set();
     const norm = (t) => {
       const found = [t];
@@ -557,7 +574,7 @@ split_segments() {
         }
         for (const w of seg.words) if (ENV.test(w)) flags += "e";
         const text = seg.bare.join(" ").replace(/\x02[^\x03]*\x03/g, "\x02");
-        if (API(text)) flags += API_WRITE.test(text) ? "aw" : "a";
+        if (API(text)) flags += API_WRITE.test(text) ? (runsApi(seg.words) && !API_READ.test(text) ? "awu" : "aw") : "a";
         if (API_QUERY(text)) flags += "q";
         if (API_REST.test(text)) flags += "r";
         if (seg.deep) flags += "e";
@@ -568,11 +585,17 @@ split_segments() {
         }
         if (seg.c) out.push("c");
         if (seg.x) out.push("x");
+        const variables = new Set();
         for (let k = 0; k < seg.words.length; k++) {
           if (seg.globs && seg.globs.has(k)) out.push("g");
-          if (seg.marks.has(k)) out.push("v" + seg.marks.get(k).replace(/\n/g, "\x01"));
+          if (seg.marks.has(k)) {
+            const parts = markParts(seg.marks.get(k));
+            for (const part of parts) if (part.name) variables.add(part.name);
+            out.push("v" + JSON.stringify(parts));
+          }
           out.push("w" + seg.words[k].replace(/\n/g, "\x01"));
         }
+        for (const name of variables) out.push("d" + name);
         out.push("f" + [...new Set(flags)].join(""));
         out.push("e");
       };
@@ -657,14 +680,15 @@ split_segments() {
   ' <<< "$COMMAND"
 }
 
-# The next record of fd 3: SEG_KIND is "seg" (its words are in `words`, those the shell expands in MARKS
-# by the same index, with MAY_NOT_RUN: it follows
+# The next record of fd 3: SEG_KIND is "seg" (its words are in `words`, the record of those the shell
+# expands in MARKS by the same index and their variables in VARIABLES, with MAY_NOT_RUN: it follows
 # && or ||; PIPED: it does not last, on a side of a pipe or in the background; FLAGS), "open" or
 # "close" for a subshell's parenthesis. The names at the end go to NAMES. Status 1 at the end.
 next_segment() {
   local record
   words=()
   MARKS=()
+  VARIABLES=()
   MAY_NOT_RUN=false
   PIPED=false
   FLAGS=''
@@ -675,10 +699,8 @@ next_segment() {
     case "$record" in
       e) return 0 ;;
       g) glob=true ;;
-      v*)
-        record="${record#v}"
-        MARKS[${#words[@]}]="${record//$'\001'/$'\n'}"
-        ;;
+      v*) MARKS[${#words[@]}]="$record" ;;
+      d*) VARIABLES+=("${record#d}") ;;
       c) MAY_NOT_RUN=true ;;
       x) PIPED=true ;;
       f*) FLAGS="${record#f}" ;;
@@ -792,7 +814,7 @@ UNJUDGED=false      # a git or gh invocation the hook did not judge
 ENV_SEEN=false      # GIT_DIR, GH_REPO and kin, --git-dir, --work-tree
 ANY_PUSH=false
 ANY_MERGE=false
-API_HIDDEN=''       # the flags a, w, q and r of the segments that may run a gh api the hook did not judge
+API_HIDDEN=''       # the flags a, w, q, r and u of the segments that may run a gh api the hook did not judge
 API_SEEN=''         # and of those and the ones that print text
 API_PIPED=''        # of those that print text into a pipe, which an interpreter may run
 NAMES=''
@@ -1000,34 +1022,6 @@ judge_git() {
   return 0
 }
 
-# The word $1 of the segment as an argument of gh api, in API_WORD: each expansion the hook resolves as
-# \005 and its value, and each one it does not as \002, which stands for any text. \004 comes first when
-# the shell may make several words of it.
-api_word() {
-  local rest="${MARKS[$1]:-}" out='' chunk several='' split
-  if [ -z "$rest" ]; then
-    API_WORD="${words[$1]}"
-    return 0
-  fi
-  while [[ "$rest" == *$'\002'* ]]; do
-    out="$out${rest%%$'\002'*}"
-    rest="${rest#*$'\002'}"
-    chunk="${rest%%$'\003'*}"
-    rest="${rest#*$'\003'}"
-    split=false
-    case "$chunk" in $'\006'*) split=true; chunk="${chunk#?}" ;; esac
-    case "$chunk" in '$@' | '$*' | '${@'* | '${*'* | *'[@]'* | *'[*]'*) several=$'\004' ;; esac
-    if expand_word "$chunk"; then
-      out="$out"$'\005'"$EXPANDED"
-      case "$split$EXPANDED" in true*[[:space:]]*) several=$'\004' ;; esac
-    else
-      out="$out"$'\002'
-    fi
-  done
-  case "$out$rest" in $'\004'*) several='' ;; esac
-  API_WORD="$several$out$rest"
-}
-
 # What the gh api in `words` does, words[ci] being `gh`. API_KIND is empty when it is not gh api, `read`
 # for a GET or a HEAD, `other` for a write that touches no branch, and for the rest:
 #   mutation   a GraphQL mutation that merges or writes in a branch, whose name is API_NAME
@@ -1039,12 +1033,14 @@ api_word() {
 # API_NAMED is true when the call says its repository, so it reaches it from any directory.
 # The flags of gh come before api too, with their value in the next word: gh -X PUT api <endpoint>.
 read_api() {
-  local k=$((ci + 1)) at='' needed=false out args
+  local k=$((ci + 1)) at='' needed=false out args name
   API_KIND=''
   API_NAME=''
   API_NAMED=false
   API_TARGETS=''
   while [ "$k" -lt "$count" ]; do
+    # What the shell expands before api may be it, or a flag.
+    if [ -n "${MARKS[k]:-}" ]; then needed=true; k=$((k + 1)); continue; fi
     case "${words[k]}" in
       --help | -h | --*=* | -[!-]?*) ;;
       -?*) k=$((k + 1)) ;;
@@ -1052,23 +1048,20 @@ read_api() {
     esac
     k=$((k + 1))
   done
-  [ -n "$at" ] || return 0
-  api_word "$at"
-  [ "${API_WORD#$'\005'}" = 'api' ] || return 0
-  API_KIND='read'
-  args=()
+  if [ -n "$at" ] && [ "${words[at]}" = 'api' ]; then API_KIND='read'; elif [ "$needed" = false ]; then return 0; fi
+  args=("${#VARIABLES[@]}")
+  for name in ${VARIABLES[@]+"${VARIABLES[@]}"}; do
+    if expand_word "\$$name"; then args+=("$name=$EXPANDED"); else args+=("$name"); fi
+  done
   for ((k = ci + 1; k < count; k++)); do
-    [ "$k" -eq "$at" ] && continue
     case "${words[k]}" in --method* | --field* | --raw-field* | --input*) needed=true ;; --*) ;; -*[XfF]*) needed=true ;; esac
-    [ -n "${MARKS[k]:-}" ] && needed=true
-    api_word "$k"
-    args+=("$API_WORD")
+    if [ -n "${MARKS[k]:-}" ]; then needed=true; args+=("${MARKS[k]}"); else args+=("w${words[k]}"); fi
   done
   # With no flag that writes, and no word only the shell can read, it is a GET.
   [ "$needed" = true ] || return 0
   out="$(printf '%s\0' "${args[@]}" | node -e '
-    const ANY = "\x02";
-    const words = require("fs").readFileSync(0, "utf8").split("\0").slice(0, -1);
+    const ANY = "\x02", SEVERAL = "\x04", OPEN = "\x06";
+    const input0 = require("fs").readFileSync(0, "utf8").split("\0").slice(0, -1);
     const say = (kind, name, named, targets) => {
       const lines = [kind, name, String(named)].concat(targets || []);
       process.stdout.write(lines.map(l => l.replace(/\n/g, " ")).join("\n") + "\n");
@@ -1076,10 +1069,42 @@ read_api() {
     };
     const has = t => t.includes(ANY);
     const plain = t => t.replace(/\x05/g, "");
+    // The words as gh may receive them: ANY is an expansion the hook does not resolve, and stands for any
+    // text; one it resolves is \x05 and its value. SEVERAL is a word that may become several, and OPEN + ANY
+    // one that is only an expansion out of quotes, which may hold flags.
+    const total = Number(input0[0]);
+    const known = new Map();
+    for (const entry of input0.slice(1, total + 1)) {
+      const eq = entry.indexOf("=");
+      if (eq >= 0) known.set(entry.slice(0, eq), entry.slice(eq + 1));
+    }
+    const expand = (parts) => {
+      let text = "", several = false;
+      for (const part of parts) {
+        if (typeof part === "string") { text += part; continue; }
+        if (part.several) several = true;
+        const value = part.name ? known.get(part.name) : undefined;
+        if (value !== undefined && part.open && /\s/.test(value)) several = true;
+        text += value !== undefined ? "\x05" + value : "open" in part ? ANY : "";
+      }
+      if (several) return SEVERAL;
+      return parts.length === 1 && parts[0].open && text === ANY ? OPEN + ANY : text;
+    };
+    const all = input0.slice(total + 1).map(w => (w[0] === "v" ? expand(JSON.parse(w.slice(1))) : w.slice(1).replace(/[\x02-\x06]/g, "?")));
+    // gh reads a flag before the subcommand with the next word as its value, unless it is glued.
+    let at = -1;
+    for (let i = 0; i < all.length; i++) {
+      const w = plain(all[i]);
+      if (w[0] === ANY || w === SEVERAL || w[0] === OPEN) continue;
+      if (w[0] !== "-") { if (w === "api") at = i; break; }
+      if (/^(-h|--help|--.*=.*|-[^-].+)$/s.test(w)) continue;
+      i++;
+    }
+    if (at < 0) say("none", "", false);
+    const words = all.filter((w, i) => i !== at);
     // The flags of gh api, as gh reads them. `loose`: a word only the shell can read may hold any flag.
     const LONG = {method: "X", field: "F", "raw-field": "f", input: "I", header: "H"};
     const VALUED = /^(method|field|raw-field|input|header|jq|preview|template|cache|hostname)$/;
-    const SEVERAL = "\x04";
     let method = null, input = false, loose = false, ended = false;
     const fields = [], positional = [];
     const take = (flag, value) => {
@@ -1090,19 +1115,18 @@ read_api() {
     };
     const next = (i) => {
       const w = words[i] ?? "";
-      if (!w.startsWith(SEVERAL)) return w;
-      loose = true;
-      return ANY;
+      if (w === SEVERAL) { loose = true; return ANY; }
+      return w.replace(OPEN, "");
     };
     for (let i = 0; i < words.length; i++) {
-      const w = words[i];
-      // The first of the words it becomes may be the value of a flag, and the rest may be flags.
-      if (w.startsWith(SEVERAL)) { loose = true; positional.push(ANY); continue; }
-      if (ended || w === "-" || !w.startsWith("-")) { positional.push(w); continue; }
+      const raw = words[i];
+      const w = raw.replace(/^\x05/, "");
+      if (w === SEVERAL || w[0] === OPEN) { loose = true; positional.push(ANY); continue; }
+      if (ended || w === "-" || !w.startsWith("-")) { positional.push(plain(w)); continue; }
       if (w === "--") { ended = true; continue; }
       if (w.startsWith("--")) {
         const eq = w.indexOf("=");
-        const name = eq < 0 ? w.slice(2) : w.slice(2, eq);
+        const name = plain(eq < 0 ? w.slice(2) : w.slice(2, eq));
         if (has(name)) { loose = true; continue; }
         if (!VALUED.test(name)) continue;
         take(LONG[name], eq < 0 ? next(++i) : w.slice(eq + 1));
@@ -1111,7 +1135,7 @@ read_api() {
       for (let j = 1; j < w.length; j++) {
         if (w[j] === ANY) { loose = true; break; }
         if (!"FHqXpft".includes(w[j])) continue;
-        const glued = w.slice(j + 1).replace(/^=/, "");
+        const glued = w.slice(j + 1).replace(/^\x05?=/, "");
         take(w[j], w.length > j + 1 ? glued : next(++i));
         break;
       }
@@ -1148,6 +1172,8 @@ read_api() {
       const found = params.filter(p => p.name === key).map(p => p.value);
       for (const field of fields) {
         const text = plain(field.text), eq = text.indexOf("=");
+        // A field whose name only the shell can read may be this one.
+        if (has(eq < 0 ? text : text.slice(0, eq))) { found.push(ANY); continue; }
         if (eq < 0 || text.slice(0, eq) !== key) continue;
         const value = text.slice(eq + 1);
         found.push(field.typed && value.startsWith("@") ? ANY : field.typed ? filled(value) : value);
@@ -1158,7 +1184,14 @@ read_api() {
     // Patterns of the branches of `list`, where `none` stands for an empty name and for no name at all.
     const branches = (list, none) =>
       (list.length ? list : [""]).map(t => t.trim()).filter(t => !/^(refs\/)?tags\//.test(t)).map(t => (t ? glob(t) : none));
-    const RESOURCES = /^(issues|pulls|labels|milestones|comments|commits|actions|releases|collaborators|assignees|statuses|check-runs|deployments|hooks|keys|dispatches|git)$/i;
+    const RESOURCES = new RegExp("^(" + [
+      "actions activity assignees attestations autolinks automated-security-fixes branches check-runs check-suites code-scanning",
+      "codeowners codespaces collaborators comments commits community compare contributors dependabot dependency-graph deployments",
+      "dispatches environments events forks generate git hooks immutable-releases import interaction-limits invitations issues keys",
+      "labels languages license merge-upstream milestones notifications pages private-vulnerability-reporting projects properties pulls",
+      "readme releases rules rulesets secret-scanning security-advisories stargazers stats statuses subscribers subscription",
+      "tags tarball teams topics traffic transfer vulnerability-alerts zipball",
+    ].join(" ").replace(/ /g, "|") + ")$", "i");
     const is = (seg, name) => seg !== undefined && seg.toLowerCase() === name;
 
     // What one endpoint is: the kinds above, or null for one that touches no branch.
@@ -1182,6 +1215,8 @@ read_api() {
       else return null;
       const named = !/^(\{owner\}|:owner)$/.test(segs[1] ?? "") || !/^(\{repo\}|:repo)$/.test(segs[2] ?? "");
       for (const rest of rests) {
+        // The end of the path may hold the resource: repos/$X.
+        if (rest.length === 0 && has(segs[segs.length - 1]) && verb !== "GET" && verb !== "HEAD") return ["endpoint", "", named];
         if (rest.length === 0) continue;
         // In repos/$REPO/issues/$n, `issues` is the resource and not the name of a repository.
         if (has(rest[0]) && rest === rests[1] && RESOURCES.test(segs[2])) continue;
@@ -1215,7 +1250,8 @@ read_api() {
   ' 2>/dev/null)" || out=''
   API_KIND="${out%%$'\n'*}"
   # What node could not say is not read.
-  if [ -z "$API_KIND" ]; then API_KIND=endpoint; return 0; fi
+  if [ -z "$API_KIND" ]; then API_KIND='endpoint'; return 0; fi
+  if [ "$API_KIND" = 'none' ]; then API_KIND=''; return 0; fi
   { IFS= read -r _; IFS= read -r API_NAME; IFS= read -r API_NAMED; } <<< "$out"
   API_TARGETS="$(printf '%s\n' "$out" | tail -n +4)"
 }
@@ -1232,7 +1268,7 @@ api_check() {
       deny "The guard cannot read this query of gh api graphql (it comes from a file, standard input, a substitution or a variable), and one it cannot read may merge. Write the query inline, gh api graphql -f query='...', with its values as GraphQL variables: -F name=value."
       ;;
     endpoint)
-      deny "A write by gh api in an endpoint the guard cannot read may be one in a protected branch. Write the endpoint out: gh api -X <method> repos/<owner>/<repo>/... A change of a protected branch is a pull request."
+      deny "A write by gh api in an endpoint the guard cannot read may be one in a protected branch. Write the endpoint out, with its variables in quotes: gh api -X <method> repos/<owner>/<repo>/... A change of a protected branch is a pull request."
       ;;
     pull)
       deny "A merge by gh api is refused, because its base is not judged. Merge with gh pr merge <n>."
@@ -1323,7 +1359,7 @@ INTERPRETERS=' sh bash zsh dash ksh eval source . '
 api_hidden() {
   [[ "$API_HIDDEN" == *a* ]] || return 1
   [[ "$API_SEEN" == *q* ]] && return 0
-  [[ "$API_HIDDEN" == *w* && "$API_SEEN" == *r* ]]
+  [[ "$API_HIDDEN" == *w* && "$API_SEEN$API_HIDDEN" == *[ru]* ]]
 }
 
 # A command that names branches and pushes, or merges, is refused unless every git and gh invocation
@@ -1435,6 +1471,7 @@ while next_segment; do
   fi
   if [ "$i" -ge "$count" ]; then
     # Only assignments: a command string kept in a variable is not judged.
+    API_SEEN="$API_SEEN$FLAGS"
     if [[ "$FLAGS" == *[ghkm]* ]]; then
       unjudged 'a command held in a variable'
       hides_api

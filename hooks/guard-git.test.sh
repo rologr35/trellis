@@ -562,6 +562,23 @@ gh api -X DELETE R/git/refs/heads/main
 EOF'
   'a wrapper: xargs::echo main | xargs -I{} gh api -X DELETE R/git/refs/heads/{}'
   'a wrapper: xargs of the endpoint::echo R/contents/a.txt | xargs gh api -X PUT -f message=m'
+  'a flag of a variable, glued::M=-XDELETE; gh api $M R/git/refs/heads/main'
+  'a flag of a variable, long::M=--method=DELETE; gh api $M R/git/refs/heads/main'
+  'a flag of a variable and its value::F=-X; gh api $F PUT R/contents/a.txt -f message=m'
+  'a merge with a flag of a variable::M=-XPUT; gh api $M R/pulls/13/merge'
+  'words of a variable the command does not assign::gh api $ARGS'
+  'words of a substitution::gh api $(cat args)'
+  'a variable that may hold the end of the path::gh api -X DELETE "repos/$X"'
+  'a variable that may hold the end of the path, after the owner::gh api -X PUT "repos/o/$X" -f message=m'
+  'a variable that may hold the end of the path, by id::gh api -X DELETE "repositories/$X"'
+  'a field of a variable next to an issue branch::gh api R/merges -f base=41-x -f "$FIELD" -f head=x'
+  'a field of a variable next to the branch of contents::gh api -X PUT R/contents/a.txt -f branch=41-x -f "$FIELD"'
+  'a field whose name is a variable::gh api R/git/refs -f ref=refs/heads/41-x -f "$K=refs/heads/main" -f sha=abc'
+  'a wrapper: env, the endpoint of a variable::E=R/git/refs/heads/main; env gh api -X DELETE $E'
+  'a wrapper: env, an endpoint that cannot be read::env gh api -X DELETE "$E"'
+  'a wrapper: xargs, the endpoint of a file::xargs gh api -X DELETE < refs.txt'
+  'a wrapper: the field before graphql::sh -c "gh api -F query=@q.graphql graphql"'
+  'a wrapper: --input before graphql::sh -c "gh api --input q.json graphql"'
 )
 for entry in "${api_deny[@]}"; do
   label="${entry%%::*}"
@@ -627,6 +644,12 @@ EOF
   'the words searched::grep -rn "gh api -X PUT repos/.*/contents/" hooks | head'
   'the words in the body of an issue::gh issue comment 4 --body "gh api -X DELETE R/git/refs/heads/main"'
   'a wrapper of a comment::env gh api R/issues/4/comments -f body=x'
+  'a wrapper of a label in the issue of a variable::env gh api -X DELETE "R/issues/$n/labels/x"'
+  'an environment in the repository of a variable::gh api -X PUT "repos/$REPO/environments/$ENV"'
+  'a ruleset in the repository of a variable::gh api -X PATCH "repos/$REPO/rulesets/$ID" -f name=x'
+  'a call of a library, its flags in the arguments::gh api "repos/$GH_REPO_PATH/$endpoint" "$@"'
+  'a flag of a variable that reads::M=--paginate; gh api $M R/git/refs'
+  'a flag of a variable and an issue branch::M=-XDELETE; gh api $M R/git/refs/heads/41-x'
   'a wrapper of a read::sh -c "gh api R/git/refs/heads/main"'
 )
 for entry in "${api_allow[@]}"; do
@@ -649,6 +672,21 @@ tl_eq '  a write in the repository of the directory has no opinion' 'allow' "$(v
 tl_eq '  nor a tag' 'allow' "$(verdict "gh api -X DELETE $R/git/refs/tags/v1" "$plain")"
 tl_eq '  nor a comment' 'allow' "$(verdict "gh api $R/issues/4/comments -f body=x" "$plain")"
 tl_eq '  nor a read' 'allow' "$(verdict "gh api $R/git/refs/heads/main" "$plain")"
+
+# A hook that times out runs the command unjudged, and bash 3.2 takes quadratic time over a long text in
+# a UTF-8 locale: the time of a long word the shell expands is that of a long word it does not.
+api_long="$(node -e 'process.stdout.write("some words of a long body\n".repeat(1200))')"
+api_time() {
+  local began=$SECONDS
+  LC_ALL=en_US.UTF-8 verdict "$1" > /dev/null
+  if [ $((SECONDS - began)) -lt 5 ]; then echo short; else echo "$((SECONDS - began)) seconds"; fi
+}
+tl_eq 'a long message with a substitution is judged in a short time' 'short' "$(api_time "git commit -m \"\$(cat <<'EOF'
+$api_long
+EOF
+)\"")"
+tl_eq '  a long body of gh api' 'short' "$(api_time "gh api $R/issues/4/comments -f body=\"\$X $api_long\"")"
+tl_eq '  and many variables' 'short' "$(api_time "gh api $R/issues/4/comments -f body=\"$(node -e 'process.stdout.write("$A b\n".repeat(4000))')\"")"
 
 printf '\nwhat the refusal of gh api says (#41)\n'
 api_says() {
