@@ -16,7 +16,12 @@
 #      written without reading what was decided around it repeats a decision;
 #   5. a `gh pr merge` that names no pull request, whose base cannot be read, that runs in a cloud
 #      session (CLAUDE_CODE_REMOTE), or whose base is not in git.assistantMayMergeInto. Silence is not
-#      a neutral opinion on a merge, unlike on the other guards.
+#      a neutral opinion on a merge, unlike on the other guards;
+#   6. a `gh api` that writes in a protected branch or may: a `graphql` mutation that merges or writes in
+#      a branch, or a query the guard cannot read (a file, standard input, a substitution, a variable);
+#      `merges`, `git/refs` and a `PUT` or `DELETE` of `contents` with a protected branch, with none, or
+#      with one that cannot be read; `pulls/<n>/merge`; a write in an endpoint that cannot be read. A
+#      read (GET, HEAD) and any other write have no opinion.
 #
 # Guards 3 and 4 have no opinion with tracker.kind = none or without a working gh. A person pushes or
 # switches from their own terminal, or with `!` in the session, which does not go through this hook.
@@ -37,8 +42,8 @@
 # command, read, printf -v, for, export, declare, local, typeset, readonly, unset). A directory
 # with no config is judged by the config of every directory the command visited with `cd` and of the
 # session's. What the hook cannot parse it refuses: a command with `push` and a protected branch's
-# name, or with `gh` and `merge`, is denied unless every git and gh invocation in it was judged (see
-# `backstop`). Works with bash 3.2.
+# name, or with `gh` and `merge`, is denied unless every git and gh invocation in it was judged, and so
+# is one that holds such a write of gh api where it is not judged (see `backstop`). Works with bash 3.2.
 
 set -uo pipefail
 
@@ -350,6 +355,9 @@ guard_gh_merge() {
   fi
 }
 
+# The mutations of GraphQL that merge or write in a branch.
+API_MUTATIONS='mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch|createCommitOnBranch|createRef|updateRefs?|deleteRef'
+
 # The words of every segment of the command as the shell reads them, without running anything, in one
 # quote-aware pass over the whole command: single and double quotes group and are removed ("main" and
 # 'HEAD:main' are main), a backslash escapes the next character, $'...' is ANSI-C quoting (\xHH, \nnn,
@@ -360,13 +368,23 @@ guard_gh_merge() {
 # whitespace splits the rest of the segment into, which fails closed.
 # One record per line: "w" and the word (a newline in it is \001), "c" (the segment follows && or ||),
 # "x" (the segment does not last: it is on a side of a pipe or in the background), "(" and ")" around a
-# subshell, "f" and the flags of the segment's tokens (g git, h gh, k push, m merge, e a variable or
-# option that redirects git or gh), "e" at the end of a segment, and "n" and a name at the end for every
-# name a word could be a branch by. In node because bash 3.2 takes quadratic time over a long line.
+# subshell, "v" before a word the shell expands and the word with each expansion between \002 and \003
+# (\006 first when it is out of quotes; the word after \004 when it is a brace list), "f" and the flags of the segment's tokens (g git, h gh, k push, m
+# merge, e a variable or option that redirects git or gh, a gh with api, w with a flag that writes, q a
+# mutation or a query not inline, r an endpoint that writes in a branch), "e" at the end of a segment, and
+# "n" and a name at the end for every name a word could be a branch by. In node because bash 3.2 takes
+# quadratic time over a long line.
 split_segments() {
   node -e '
     const ESC = {a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "\\": "\\", "\x27": "\x27", "\"": "\"", "?": "?"};
     const ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|GIT_CONFIG[A-Z_0-9]*|GH_REPO)=|^--(git-dir|work-tree)(=|$)/;
+    // One after the other, in linear time.
+    const follows = (text, first, then) => { const m = first.exec(text); return m !== null && then.test(text.slice(m.index)); };
+    const API = (text) => follows(text, /\bgh\b/, /\bapi\b/) || /(^|\s)\x02 api\b/.test(text);
+    const API_WRITE = /(^|[\s"\x27])(-[A-Za-z]*[XfF]|--(method|field|raw-field|input)\b)/;
+    const API_MUTATION = /\b('"$API_MUTATIONS"')\b/;
+    const API_QUERY = (text) => API_MUTATION.test(text) || follows(text, /\bgraphql\b/, /--input\b|\bquery=["\x27\\]*[@$`\x02]/);
+    const API_REST = /\/(merges|git\/refs|contents|pulls\/[^\s\/]+\/merge)(?![\w-])/;
     const names = new Set();
     const norm = (t) => {
       const found = [t];
@@ -438,29 +456,44 @@ split_segments() {
         return n;
       };
       let pos = 0;
-      let seg = {words: [], atoms: [], c: false, x: false, pre: [], deep: false};
+      const segment = (c, x) => ({words: [], atoms: [], bare: [], marks: new Map(), c, x, pre: [], deep: false});
+      let seg = segment(false, false);
       // A substitution runs before its command, in a subshell: its segments are judged first, as a group.
       const substitute = (from, to) => {
         if (depth >= 12) { seg.deep = true; return; }
         seg.pre.push(tokenize(src.slice(from, to), depth + 1));
       };
-      // One shell word from pos: its text, whether any of it was quoted, whether it holds an unquoted glob or brace.
+      // Index just after the variable whose $ is at i, 0 when the $ is text.
+      const variableEnd = (i) => {
+        if (src[i + 1] === "{") { const j = src.indexOf("}", i + 2); return j < 0 ? n : j + 1; }
+        const m = /^\$([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?!$-])/.exec(src.slice(i, i + 200));
+        return m ? i + m[0].length : 0;
+      };
+      // One shell word from pos: its text, whether any of it was quoted, whether it holds an unquoted glob or
+      // brace, and in `bare` the text with what the shell expands between \x02 and \x03 (`live` when it has any).
       const readWord = () => {
-        let cur = "", quoted = false, glob = false;
+        let cur = "", quoted = false, glob = false, bare = "", live = false, skip = 0, braces = 0, list = false;
+        const put = (text) => { cur += text; if (pos >= skip) bare += text.replace(/[\x02-\x06]/g, "?"); };
+        const expands = (to, inQuotes) => {
+          if (pos < skip) return;
+          live = true; skip = to;
+          bare += "\x02" + (inQuotes ? "" : "\x06") + src.slice(pos, to).replace(/[\x02-\x06]/g, "?") + "\x03";
+        };
+        const done = () => ({text: cur, quoted, glob, live: live || list, bare: (list ? "\x04" : "") + bare});
         while (pos < n) {
           const c = src[pos];
           if (c === " " || c === "\t" || c === "\n" || c === ";" || c === "&" || c === "|" || c === "(" || c === ")" || c === "<" || c === ">") {
-            if ((c === "<" || c === ">") && src[pos + 1] === "(") { const j = skipSubst(pos + 2); substitute(pos + 2, unterminatedAt(j)); cur += src.slice(pos, j); pos = j; continue; }
+            if ((c === "<" || c === ">") && src[pos + 1] === "(") { const j = skipSubst(pos + 2); substitute(pos + 2, unterminatedAt(j)); expands(j); cur += src.slice(pos, j); pos = j; continue; }
             break;
           }
           if (c === "\\") {
             if (src[pos + 1] === "\n") { pos += 2; continue; }
-            cur += src[pos + 1] ?? ""; pos += 2; quoted = true; continue;
+            put(src[pos + 1] ?? ""); pos += 2; quoted = true; continue;
           }
           if (c === "\x27") {
             const j = src.indexOf("\x27", pos + 1);
             if (j < 0) { unterminated = true; pos = n; return {text: cur, quoted: true, glob}; }
-            cur += src.slice(pos + 1, j); pos = j + 1; quoted = true; continue;
+            put(src.slice(pos + 1, j)); pos = j + 1; quoted = true; continue;
           }
           if (c === "\"") {
             pos++; quoted = true;
@@ -468,10 +501,11 @@ split_segments() {
             while (pos < n) {
               const d = src[pos];
               if (d === "\"") { closed = true; pos++; break; }
-              if (d === "\\" && "$`\"\\\n".includes(src[pos + 1] ?? " ")) { if (src[pos + 1] !== "\n") cur += src[pos + 1]; pos += 2; continue; }
-              if (d === "$" && src[pos + 1] === "(") { const j = skipSubst(pos + 2); substitute(pos + 2, unterminatedAt(j)); cur += src.slice(pos, j); pos = j; continue; }
-              if (d === "`") { const j = src.indexOf("`", pos + 1); const e = j < 0 ? n : j + 1; substitute(pos + 1, j < 0 ? n : j); cur += src.slice(pos, e); pos = e; continue; }
-              cur += d; pos++;
+              if (d === "\\" && "$`\"\\\n".includes(src[pos + 1] ?? " ")) { if (src[pos + 1] !== "\n") put(src[pos + 1]); pos += 2; continue; }
+              if (d === "$" && src[pos + 1] === "(") { const j = skipSubst(pos + 2); substitute(pos + 2, unterminatedAt(j)); expands(j, true); cur += src.slice(pos, j); pos = j; continue; }
+              if (d === "`") { const j = src.indexOf("`", pos + 1); const e = j < 0 ? n : j + 1; substitute(pos + 1, j < 0 ? n : j); expands(e, true); cur += src.slice(pos, e); pos = e; continue; }
+              if (d === "$") { const e = variableEnd(pos); if (e) expands(e, true); }
+              put(d); pos++;
             }
             if (!closed) { unterminated = true; return {text: cur, quoted: true, glob}; }
             continue;
@@ -482,19 +516,24 @@ split_segments() {
             while (pos < n) {
               const d = src[pos];
               if (d === "\x27") { closed = true; pos++; break; }
-              if (d === "\\") { const [text, end] = ansi(pos); cur += text; pos = end + 1; continue; }
-              cur += d; pos++;
+              if (d === "\\") { const [text, end] = ansi(pos); put(text); pos = end + 1; continue; }
+              put(d); pos++;
             }
             if (!closed) { unterminated = true; return {text: cur, quoted: true, glob}; }
             continue;
           }
-          if (c === "$" && src[pos + 1] === "(") { const j = skipSubst(pos + 2); substitute(pos + 2, unterminatedAt(j)); cur += src.slice(pos, j); pos = j; continue; }
-          if (c === "$" && src[pos + 1] === "{") { const j = src.indexOf("}", pos + 2); const e = j < 0 ? n : j + 1; cur += src.slice(pos, e); pos = e; continue; }
-          if (c === "`") { const j = src.indexOf("`", pos + 1); const e = j < 0 ? n : j + 1; if (j < 0) unterminated = true; substitute(pos + 1, j < 0 ? n : j); cur += src.slice(pos, e); pos = e; continue; }
+          if (c === "$" && src[pos + 1] === "(") { const j = skipSubst(pos + 2); substitute(pos + 2, unterminatedAt(j)); expands(j); cur += src.slice(pos, j); pos = j; continue; }
+          if (c === "$" && src[pos + 1] === "{") { const e = variableEnd(pos); expands(e); cur += src.slice(pos, e); pos = e; continue; }
+          if (c === "`") { const j = src.indexOf("`", pos + 1); const e = j < 0 ? n : j + 1; if (j < 0) unterminated = true; substitute(pos + 1, j < 0 ? n : j); expands(e); cur += src.slice(pos, e); pos = e; continue; }
           if (c === "*" || c === "?" || c === "[" || c === "{") glob = true;
-          cur += c; pos++;
+          if (c === "{") braces++;
+          if (braces > 0 && (c === "," || (c === "." && src[pos + 1] === "."))) list = true;
+          if (c === "}" && braces > 0) braces--;
+          if (c === "$" && src[pos + 1] === "\"") { cur += c; pos++; continue; } // $"..." is the text in the quotes
+          if (c === "$") { const e = variableEnd(pos); if (e) expands(e); }
+          put(c); pos++;
         }
-        return {text: cur, quoted, glob};
+        return done();
       };
       // The end of a substitution body: the index before its closing parenthesis, or the end of the text.
       const unterminatedAt = (j) => (src[j - 1] === ")" ? j - 1 : j);
@@ -517,6 +556,10 @@ split_segments() {
           for (const m of atom.matchAll(/\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=+?]([^}]*)\}/g)) for (const name of norm(m[1])) names.add(name);
         }
         for (const w of seg.words) if (ENV.test(w)) flags += "e";
+        const text = seg.bare.join(" ").replace(/\x02[^\x03]*\x03/g, "\x02");
+        if (API(text)) flags += API_WRITE.test(text) ? "aw" : "a";
+        if (API_QUERY(text)) flags += "q";
+        if (API_REST.test(text)) flags += "r";
         if (seg.deep) flags += "e";
         if (seg.pre.length) {
           out.push("(");
@@ -527,6 +570,7 @@ split_segments() {
         if (seg.x) out.push("x");
         for (let k = 0; k < seg.words.length; k++) {
           if (seg.globs && seg.globs.has(k)) out.push("g");
+          if (seg.marks.has(k)) out.push("v" + seg.marks.get(k).replace(/\n/g, "\x01"));
           out.push("w" + seg.words[k].replace(/\n/g, "\x01"));
         }
         out.push("f" + [...new Set(flags)].join(""));
@@ -540,15 +584,18 @@ split_segments() {
           pendingC = op === "&&" || op === "||";
           pendingX = op === "|";
         } else if (op === "&&" || op === "||") { pendingC = true; } else if (op === "|") { pendingX = true; }
-        seg = {words: [], atoms: [], c: pendingC, x: pendingX, pre: [], deep: false};
+        seg = segment(pendingC, pendingX);
         segStart = pos;
       };
       const fallback = () => { // a quote left open: whitespace words of the rest of the segment, quote marks removed
         seg.words = [];
         for (const w of src.slice(segStart).split(/[ \t\n]+/)) if (w) seg.words.push(w.replace(/[\x27"\\]/g, ""));
         seg.atoms = seg.words.slice();
+        seg.bare = seg.words.slice();
+        seg.marks.clear();
         pos = n;
       };
+      const addAtom = (word) => { seg.atoms.push(word.text); seg.bare.push(word.bare ?? word.text); };
       while (pos < n && !unterminated) {
         const c = src[pos];
         if (c === " " || c === "\t") { pos++; continue; }
@@ -565,6 +612,7 @@ split_segments() {
               body += line + "\n";
             }
             seg.atoms.push(body);
+            seg.bare.push(body);
           }
           end("\n");
           continue;
@@ -572,7 +620,7 @@ split_segments() {
         if (c === "#") { while (pos < n && src[pos] !== "\n") pos++; continue; }
         if (c === ";") { pos++; if (src[pos] === ";" || src[pos] === "&") pos++; end(";"); continue; }
         if (c === "&" && src[pos + 1] === "&") { pos += 2; end("&&"); continue; }
-        if (c === "&" && src[pos + 1] === ">") { pos += 2; if (src[pos] === ">") pos++; while (src[pos] === " " || src[pos] === "\t") pos++; seg.atoms.push(readWord().text); continue; }
+        if (c === "&" && src[pos + 1] === ">") { pos += 2; if (src[pos] === ">") pos++; while (src[pos] === " " || src[pos] === "\t") pos++; addAtom(readWord()); continue; }
         if (c === "&") { pos++; end("&"); continue; }
         if (c === "|") { pos++; if (src[pos] === "|") { pos++; end("||"); } else { if (src[pos] === "&") pos++; end("|"); } continue; }
         if (c === "(") { pos++; end("("); out.push("("); continue; }
@@ -586,7 +634,7 @@ split_segments() {
           while (src[pos] === " " || src[pos] === "\t") pos++;
           const target = readWord();
           if (m[0] === "<<" || m[0] === "<<-") heredocs.push({delim: target.text, strip: m[0] === "<<-"});
-          seg.atoms.push(target.text);
+          addAtom(target);
           continue;
         }
         if (seg.words.length === 0 && seg.atoms.length === 0) segStart = pos;
@@ -595,8 +643,9 @@ split_segments() {
         if (!word.quoted && (word.text === "{" || word.text === "}")) { end("{"); continue; }
         if (word.text === "" && !word.quoted) { pos++; continue; }
         if (word.glob) { if (!seg.globs) seg.globs = new Set(); seg.globs.add(seg.words.length); }
+        if (word.live) seg.marks.set(seg.words.length, word.bare);
         seg.words.push(word.text);
-        seg.atoms.push(word.text);
+        addAtom(word);
       }
       if (unterminated) fallback();
       end("\n");
@@ -608,12 +657,14 @@ split_segments() {
   ' <<< "$COMMAND"
 }
 
-# The next record of fd 3: SEG_KIND is "seg" (its words are in `words`, with MAY_NOT_RUN: it follows
+# The next record of fd 3: SEG_KIND is "seg" (its words are in `words`, those the shell expands in MARKS
+# by the same index, with MAY_NOT_RUN: it follows
 # && or ||; PIPED: it does not last, on a side of a pipe or in the background; FLAGS), "open" or
 # "close" for a subshell's parenthesis. The names at the end go to NAMES. Status 1 at the end.
 next_segment() {
   local record
   words=()
+  MARKS=()
   MAY_NOT_RUN=false
   PIPED=false
   FLAGS=''
@@ -624,6 +675,10 @@ next_segment() {
     case "$record" in
       e) return 0 ;;
       g) glob=true ;;
+      v*)
+        record="${record#v}"
+        MARKS[${#words[@]}]="${record//$'\001'/$'\n'}"
+        ;;
       c) MAY_NOT_RUN=true ;;
       x) PIPED=true ;;
       f*) FLAGS="${record#f}" ;;
@@ -737,9 +792,18 @@ UNJUDGED=false      # a git or gh invocation the hook did not judge
 ENV_SEEN=false      # GIT_DIR, GH_REPO and kin, --git-dir, --work-tree
 ANY_PUSH=false
 ANY_MERGE=false
+API_HIDDEN=''       # the flags a, w, q and r of the segments that may run a gh api the hook did not judge
+API_SEEN=''         # and of those and the ones that print text
+API_PIPED=''        # of those that print text into a pipe, which an interpreter may run
 NAMES=''
 WHY=''
 MAX_DIRS=8
+
+# The segment runs text the hook does not judge.
+hides_api() {
+  API_HIDDEN="$API_HIDDEN$FLAGS"
+  API_SEEN="$API_SEEN$FLAGS"
+}
 
 # A directory is kept once, and only up to a cap: past it the command is not judged, so a chain of
 # cd cannot make the hook slow enough to time out (which runs the command unjudged).
@@ -936,9 +1000,290 @@ judge_git() {
   return 0
 }
 
+# The word $1 of the segment as an argument of gh api, in API_WORD: each expansion the hook resolves as
+# \005 and its value, and each one it does not as \002, which stands for any text. \004 comes first when
+# the shell may make several words of it.
+api_word() {
+  local rest="${MARKS[$1]:-}" out='' chunk several='' split
+  if [ -z "$rest" ]; then
+    API_WORD="${words[$1]}"
+    return 0
+  fi
+  while [[ "$rest" == *$'\002'* ]]; do
+    out="$out${rest%%$'\002'*}"
+    rest="${rest#*$'\002'}"
+    chunk="${rest%%$'\003'*}"
+    rest="${rest#*$'\003'}"
+    split=false
+    case "$chunk" in $'\006'*) split=true; chunk="${chunk#?}" ;; esac
+    case "$chunk" in '$@' | '$*' | '${@'* | '${*'* | *'[@]'* | *'[*]'*) several=$'\004' ;; esac
+    if expand_word "$chunk"; then
+      out="$out"$'\005'"$EXPANDED"
+      case "$split$EXPANDED" in true*[[:space:]]*) several=$'\004' ;; esac
+    else
+      out="$out"$'\002'
+    fi
+  done
+  case "$out$rest" in $'\004'*) several='' ;; esac
+  API_WORD="$several$out$rest"
+}
+
+# What the gh api in `words` does, words[ci] being `gh`. API_KIND is empty when it is not gh api, `read`
+# for a GET or a HEAD, `other` for a write that touches no branch, and for the rest:
+#   mutation   a GraphQL mutation that merges or writes in a branch, whose name is API_NAME
+#   query      a GraphQL query that cannot be read
+#   endpoint   a write in an endpoint that cannot be read
+#   pull       pulls/<n>/merge
+#   merges, refs, contents   a write in the branches API_TARGETS, one per line, as patterns of `[[ == ]]`;
+#              a line `?` is a branch that cannot be read, and `-` is the default branch
+# API_NAMED is true when the call says its repository, so it reaches it from any directory.
+# The flags of gh come before api too, with their value in the next word: gh -X PUT api <endpoint>.
+read_api() {
+  local k=$((ci + 1)) at='' needed=false out args
+  API_KIND=''
+  API_NAME=''
+  API_NAMED=false
+  API_TARGETS=''
+  while [ "$k" -lt "$count" ]; do
+    case "${words[k]}" in
+      --help | -h | --*=* | -[!-]?*) ;;
+      -?*) k=$((k + 1)) ;;
+      *) at="$k"; break ;;
+    esac
+    k=$((k + 1))
+  done
+  [ -n "$at" ] || return 0
+  api_word "$at"
+  [ "${API_WORD#$'\005'}" = 'api' ] || return 0
+  API_KIND='read'
+  args=()
+  for ((k = ci + 1; k < count; k++)); do
+    [ "$k" -eq "$at" ] && continue
+    case "${words[k]}" in --method* | --field* | --raw-field* | --input*) needed=true ;; --*) ;; -*[XfF]*) needed=true ;; esac
+    [ -n "${MARKS[k]:-}" ] && needed=true
+    api_word "$k"
+    args+=("$API_WORD")
+  done
+  # With no flag that writes, and no word only the shell can read, it is a GET.
+  [ "$needed" = true ] || return 0
+  out="$(printf '%s\0' "${args[@]}" | node -e '
+    const ANY = "\x02";
+    const words = require("fs").readFileSync(0, "utf8").split("\0").slice(0, -1);
+    const say = (kind, name, named, targets) => {
+      const lines = [kind, name, String(named)].concat(targets || []);
+      process.stdout.write(lines.map(l => l.replace(/\n/g, " ")).join("\n") + "\n");
+      process.exit(0);
+    };
+    const has = t => t.includes(ANY);
+    const plain = t => t.replace(/\x05/g, "");
+    // The flags of gh api, as gh reads them. `loose`: a word only the shell can read may hold any flag.
+    const LONG = {method: "X", field: "F", "raw-field": "f", input: "I", header: "H"};
+    const VALUED = /^(method|field|raw-field|input|header|jq|preview|template|cache|hostname)$/;
+    const SEVERAL = "\x04";
+    let method = null, input = false, loose = false, ended = false;
+    const fields = [], positional = [];
+    const take = (flag, value) => {
+      if (flag === "X") method = plain(value);
+      else if (flag === "I") input = true;
+      else if (flag === "f" || flag === "F") fields.push({typed: flag === "F", text: value});
+      else if (flag === "H" && /^\s*x-http-method-override\b/i.test(plain(value))) loose = true;
+    };
+    const next = (i) => {
+      const w = words[i] ?? "";
+      if (!w.startsWith(SEVERAL)) return w;
+      loose = true;
+      return ANY;
+    };
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      // The first of the words it becomes may be the value of a flag, and the rest may be flags.
+      if (w.startsWith(SEVERAL)) { loose = true; positional.push(ANY); continue; }
+      if (ended || w === "-" || !w.startsWith("-")) { positional.push(w); continue; }
+      if (w === "--") { ended = true; continue; }
+      if (w.startsWith("--")) {
+        const eq = w.indexOf("=");
+        const name = eq < 0 ? w.slice(2) : w.slice(2, eq);
+        if (has(name)) { loose = true; continue; }
+        if (!VALUED.test(name)) continue;
+        take(LONG[name], eq < 0 ? next(++i) : w.slice(eq + 1));
+        continue;
+      }
+      for (let j = 1; j < w.length; j++) {
+        if (w[j] === ANY) { loose = true; break; }
+        if (!"FHqXpft".includes(w[j])) continue;
+        const glued = w.slice(j + 1).replace(/^=/, "");
+        take(w[j], w.length > j + 1 ? glued : next(++i));
+        break;
+      }
+    }
+    // gh takes one endpoint, so with more words one of those that begin with an expansion holds flags.
+    if (positional.length > 1 && positional.some(w => w.startsWith(ANY))) loose = true;
+    if (method !== null && has(method)) loose = true;
+    const verb = method !== null ? method.toUpperCase() : fields.length || input ? "POST" : "GET";
+    if (!loose && (verb === "GET" || verb === "HEAD")) say("read", "", false);
+
+    const decode = t => t.replace(/(%[0-9a-fA-F]{2})+/g, m => { try { return decodeURIComponent(m); } catch { return m; } });
+    // gh fills in {owner}, {repo} and {branch}, and :owner, :repo and :branch, in the endpoint and in -F.
+    const filled = t => t.replace(/\{branch\}|:branch\b/g, ANY);
+    const parse = (endpoint) => {
+      let path = filled(plain(endpoint)).replace(/#.*$/s, ""), query = "", absolute = false;
+      const mark = path.indexOf("?");
+      if (mark >= 0) { query = path.slice(mark + 1); path = path.slice(0, mark); }
+      const url = /^[a-z][a-z0-9+.-]*:\/\/[^\/]*/i.exec(path);
+      if (url && has(url[0])) return {segs: [], params: []};
+      if (url) { path = path.slice(url[0].length); absolute = true; }
+      const segs = [];
+      for (const s of path.split("/").map(decode).join("/").split("/")) {
+        if (s === "..") segs.pop(); else if (s !== "" && s !== ".") segs.push(s);
+      }
+      if (absolute && segs[0] === "api") segs.splice(0, segs[1] === "v3" ? 2 : 1);
+      const params = query.split("&").filter(Boolean).map(p => {
+        const eq = p.indexOf("=");
+        const part = t => decode(t.replace(/\+/g, " "));
+        return {name: part(eq < 0 ? p : p.slice(0, eq)), value: eq < 0 ? "" : part(p.slice(eq + 1))};
+      });
+      return {segs, params};
+    };
+    const values = (params, key) => {
+      const found = params.filter(p => p.name === key).map(p => p.value);
+      for (const field of fields) {
+        const text = plain(field.text), eq = text.indexOf("=");
+        if (eq < 0 || text.slice(0, eq) !== key) continue;
+        const value = text.slice(eq + 1);
+        found.push(field.typed && value.startsWith("@") ? ANY : field.typed ? filled(value) : value);
+      }
+      return found;
+    };
+    const glob = t => [...t].map(c => (c === ANY ? "*" : /[A-Za-z0-9]/.test(c) ? c : "\\" + c)).join("");
+    // Patterns of the branches of `list`, where `none` stands for an empty name and for no name at all.
+    const branches = (list, none) =>
+      (list.length ? list : [""]).map(t => t.trim()).filter(t => !/^(refs\/)?tags\//.test(t)).map(t => (t ? glob(t) : none));
+    const RESOURCES = /^(issues|pulls|labels|milestones|comments|commits|actions|releases|collaborators|assignees|statuses|check-runs|deployments|hooks|keys|dispatches|git)$/i;
+    const is = (seg, name) => seg !== undefined && seg.toLowerCase() === name;
+
+    // What one endpoint is: the kinds above, or null for one that touches no branch.
+    const judge = (endpoint) => {
+      const {segs, params} = parse(endpoint);
+      if (segs.length === 0 || has(segs[0])) return ["endpoint", "", false];
+      if (is(segs[0], "graphql")) {
+        if (segs.length > 1) return null;
+        const queries = fields.filter(f => /^[^=]*\x02|^[^=]*$/.test(f.text) || plain(f.text).startsWith("query="));
+        for (const q of queries) {
+          const m = /\b('"$API_MUTATIONS"')\b/.exec(plain(q.text));
+          if (m) return ["mutation", m[0], true];
+        }
+        const shell = q => /[\x02\x05]/.test(q.text) || plain(q.text).startsWith("query=@") || !q.text.includes("=");
+        return input || loose || queries.length === 0 || queries.some(shell) ? ["query", "", false] : null;
+      }
+      // The variable in the place of the repository is <owner>/<repo>, or the owner when the name follows.
+      let rests;
+      if (is(segs[0], "repositories")) rests = [segs.slice(2)];
+      else if (is(segs[0], "repos")) rests = segs[1] === ANY && !has(segs[2] ?? "") ? [segs.slice(2), segs.slice(3)] : [segs.slice(3)];
+      else return null;
+      const named = !/^(\{owner\}|:owner)$/.test(segs[1] ?? "") || !/^(\{repo\}|:repo)$/.test(segs[2] ?? "");
+      for (const rest of rests) {
+        if (rest.length === 0) continue;
+        // In repos/$REPO/issues/$n, `issues` is the resource and not the name of a repository.
+        if (has(rest[0]) && rest === rests[1] && RESOURCES.test(segs[2])) continue;
+        if (has(rest[0])) return ["endpoint", "", named];
+        if (is(rest[0], "pulls") && rest.length === 3 && (is(rest[2], "merge") || has(rest[2]))) return ["pull", "", named];
+        if (is(rest[0], "pulls") && rest.length === 2 && has(rest[1]) && verb === "PUT") return ["pull", "", named];
+        if (is(rest[0], "merges") && rest.length === 1) {
+          const base = input || loose ? [ANY] : values(params, "base");
+          return ["merges", "", named, branches(base, "?")];
+        }
+        if (is(rest[0], "contents") && (loose || verb === "PUT" || verb === "DELETE")) {
+          const list = input || loose ? [ANY] : values(params, "branch");
+          return ["contents", "", named, branches(list, "-")];
+        }
+        if (is(rest[0], "git") && rest.length > 1 && (is(rest[1], "refs") || has(rest[1]))) {
+          const path = has(rest[1]) ? ANY : rest.slice(2).join("/");
+          const list = path ? [path] : [];
+          if (!path && (input || loose)) list.push(ANY);
+          list.push(...values(params, "ref"));
+          return ["refs", "", named, branches(list, "?")];
+        }
+      }
+      return null;
+    };
+    // gh takes one endpoint: a word written out, and one that begins with an expansion only without any.
+    const written = positional.filter(w => !w.startsWith(ANY));
+    let answer = null;
+    for (const endpoint of written.length ? written : positional) answer = answer || judge(endpoint);
+    if (answer && !(answer[3] && answer[3].length === 0)) say(...answer);
+    say("other", "", false);
+  ' 2>/dev/null)" || out=''
+  API_KIND="${out%%$'\n'*}"
+  # What node could not say is not read.
+  if [ -z "$API_KIND" ]; then API_KIND=endpoint; return 0; fi
+  { IFS= read -r _; IFS= read -r API_NAME; IFS= read -r API_NAMED; } <<< "$out"
+  API_TARGETS="$(printf '%s\n' "$out" | tail -n +4)"
+}
+
+# Judges the gh api in `words` against the config loaded for $1.
+api_check() {
+  local target branch
+  fail_closed
+  case "$API_KIND" in
+    mutation)
+      deny "A gh api graphql with $API_NAME merges or writes in a branch, and that is refused for the assistant in every permission mode. A merge is gh pr merge <n>, whose base is judged; a change of a branch is a push of an issue branch and a pull request."
+      ;;
+    query)
+      deny "The guard cannot read this query of gh api graphql (it comes from a file, standard input, a substitution or a variable), and one it cannot read may merge. Write the query inline, gh api graphql -f query='...', with its values as GraphQL variables: -F name=value."
+      ;;
+    endpoint)
+      deny "A write by gh api in an endpoint the guard cannot read may be one in a protected branch. Write the endpoint out: gh api -X <method> repos/<owner>/<repo>/... A change of a protected branch is a pull request."
+      ;;
+    pull)
+      deny "A merge by gh api is refused, because its base is not judged. Merge with gh pr merge <n>."
+      ;;
+  esac
+  while IFS= read -r target; do
+    case "$target" in
+      '') ;;
+      '-') deny "A write in the contents of a repository by gh api that names no branch writes in its default branch, and that is refused for the assistant in every permission mode. Name an issue branch (-f branch=<branch>) and open a pull request." ;;
+      '?') deny "A write by gh api in a branch the guard cannot read may be one in a protected branch. Name the branch in the call, as it is written: a change of a protected branch is a pull request." ;;
+      *)
+        while IFS= read -r branch; do
+          [ -n "$branch" ] || continue
+          # shellcheck disable=SC2053
+          if [[ "$branch" == $target || "heads/$branch" == $target || "refs/heads/$branch" == $target ]]; then
+            case "$target" in
+              *'*'*) deny "A write by gh api in a branch the guard cannot read (a variable, a substitution, a file or a name gh fills in) may be one in $branch, a protected branch. Name the branch in the call, as it is written: a change of a protected branch is a pull request." ;;
+              *) deny "A write in $branch by gh api is refused for the assistant in every permission mode: it is a protected branch. Push an issue branch and open a pull request; a person writes in $branch." ;;
+            esac
+          fi
+        done <<< "$PROTECTED"
+        ;;
+    esac
+  done <<< "$API_TARGETS"
+}
+
+# The gh api in `words`, in the directory $1 the shell may stand in. With no config here nor in the
+# session, one that says its repository is refused, as a merge is.
+judge_api() {
+  case "$API_KIND" in read | other) return 0 ;; esac
+  if load_config "$1"; then
+    api_check "$1"
+    return 0
+  fi
+  DENY_NOTE=" ($1 has no trellis.config, so the config of the session or of a directory the command visited judged it.)"
+  if ! candidates_do api_check; then
+    DENY_NOTE=''
+    if [ "$API_NAMED" = true ] || [ "$ENV_SEEN" = true ]; then
+      deny 'A write in a branch by gh api, with no trellis.config in the session or the directories it visited, cannot be judged. Run it from the repository, whose config says which branches are protected; a change of a protected branch is a pull request.'
+    fi
+  fi
+  DENY_NOTE=''
+}
+
 # One gh invocation, in the directory $1 the shell may stand in: words[ci] is `gh`.
 judge_gh() {
   DIR="$1"
+  if [ -n "$API_KIND" ]; then
+    judge_api "$1"
+    return 0
+  fi
   rest=("${words[@]:ci+1}")
   [ "${#rest[@]}" -gt 0 ] || return 0
   local word
@@ -973,6 +1318,14 @@ judge_trellis() {
 INERT=' echo printf cat tee grep egrep fgrep rg head tail wc ls cp mv rm mkdir touch diff cmp sort uniq tr cut basename dirname test [ true false : pwd realpath stat file tree date sleep which type '
 INTERPRETERS=' sh bash zsh dash ksh eval source . '
 
+# A segment the hook does not judge holds a gh api that may write in a branch, in what it runs (a
+# wrapper, a text given to an interpreter, a command held in a variable) or in the endpoint it is given.
+api_hidden() {
+  [[ "$API_HIDDEN" == *a* ]] || return 1
+  [[ "$API_SEEN" == *q* ]] && return 0
+  [[ "$API_HIDDEN" == *w* && "$API_SEEN" == *r* ]]
+}
+
 # A command that names branches and pushes, or merges, is refused unless every git and gh invocation
 # in it was judged. It runs after the segments are judged one by one.
 backstop() {
@@ -989,6 +1342,9 @@ backstop() {
     done <<< "$protected_union"
   fi
   [ "$ANY_MERGE" = true ] && hit=true
+  if [ "$hit" = false ] && api_hidden; then
+    deny "This command holds a gh api that may write in a protected branch, and the guard could not judge it: ${WHY:-a form it does not parse}. What it cannot judge it refuses. Write it plainly, one invocation per command: gh api <endpoint>, with a query of graphql inline. A change of a protected branch is a pull request."
+  fi
   [ "$hit" = true ] || return 0
   deny "This command names a protected branch next to push, or holds a gh merge, and the guard could not judge it: ${WHY:-a form it does not parse}. What it cannot judge it refuses. Write it plainly, one invocation per command: git push origin <branch>, gh pr merge <n>."
 }
@@ -1079,7 +1435,10 @@ while next_segment; do
   fi
   if [ "$i" -ge "$count" ]; then
     # Only assignments: a command string kept in a variable is not judged.
-    [[ "$FLAGS" == *[ghkm]* ]] && unjudged 'a command held in a variable'
+    if [[ "$FLAGS" == *[ghkm]* ]]; then
+      unjudged 'a command held in a variable'
+      hides_api
+    fi
     continue
   fi
   ci=$i
@@ -1130,8 +1489,9 @@ while next_segment; do
       [ "$UNRES" = true ] && unjudged 'a directory only the shell can resolve'
       ;;
     gh)
+      read_api
       for sd in "${SHELL_DIRS[@]}"; do judge_gh "$sd"; done
-      if [[ "$FLAGS" == *m* ]]; then
+      if [[ "$FLAGS" == *m* ]] && [ "$API_KIND" != 'read' ]; then
         case "${words[ci + 1]:-} ${words[ci + 2]:-}" in
           'pr merge') ;;
           'pr view' | 'pr list' | 'pr create' | 'pr edit' | 'pr comment' | 'pr diff' | 'pr checks' | 'pr close' | 'pr reopen' | 'pr ready' | 'pr review' | 'pr status' | 'pr checkout' | 'issue '*) ;;
@@ -1145,21 +1505,35 @@ while next_segment; do
       for sd in "${SHELL_DIRS[@]}"; do judge_trellis "$sd"; done
       if [[ "$FLAGS" == *[ghkm]* ]] && [ "$cmd ${words[ci + 1]:-}" != 'trellis issue' ]; then
         unjudged "a wrapper or a program ($cmd) that may run git or gh"
+        hides_api
       fi
       ;;
     *)
       if [[ "$INTERPRETERS" == *" $cmd "* ]]; then
         operands=0
         for ((k = ci + 1; k < count; k++)); do [[ "${words[k]}" == -* ]] || operands=$((operands + 1)); done
-        { [[ "$FLAGS" == *[ghkm]* ]] || [ "$operands" -eq 0 ]; } && unjudged "an interpreter ($cmd) that runs text"
+        if [[ "$FLAGS" == *[ghkm]* ]] || [ "$operands" -eq 0 ]; then
+          unjudged "an interpreter ($cmd) that runs text"
+          hides_api
+          if [ "$operands" -eq 0 ]; then API_HIDDEN="$API_HIDDEN$API_PIPED"; fi
+        fi
       elif [[ "$FLAGS" == *[ghkm]* ]]; then
         # A program that only prints text runs what a substitution in its words runs.
         runs=false
         for word in "${words[@]}"; do
           case "$word" in *'$('* | *'`'* | *'<('* | *'>('*) runs=true ;; esac
         done
-        { [ "$runs" = true ] || [[ "$INERT" != *" $cmd "* ]]; } && unjudged "a wrapper or a program ($cmd) that may run git or gh"
+        if [ "$runs" = true ] || [[ "$INERT" != *" $cmd "* ]]; then
+          unjudged "a wrapper or a program ($cmd) that may run git or gh"
+          [[ "$INERT" == *" $cmd "* ]] || hides_api
+        fi
+      elif [ -n "${MARKS[ci]:-}" ] && [[ "$FLAGS" == *a* ]]; then
+        # The shell decides the program: GH=gh; $GH api ...
+        unjudged "a program only the shell can resolve ($cmd)"
+        hides_api
       fi
+      API_SEEN="$API_SEEN$FLAGS"
+      if [ "$PIPED" = true ]; then API_PIPED="$API_PIPED$FLAGS"; fi
       ;;
   esac
 done 3< <(split_segments)
