@@ -193,7 +193,8 @@ check_plan() {
 }
 
 check_gates() {
-  local n="${1#\#}"
+  local n="${1:-}"
+  n="${n#\#}"
   case "$n" in '' | *[!0-9]*) usage ;; esac
   [ $# -eq 1 ] || usage
   want_issue "$n" || return 1
