@@ -75,7 +75,7 @@ Each prose template is a file per locale rather than one file with per-locale st
 | Git hooks | `templates/githooks/` | The copy, ratchet, hygiene, commit message and branch name, in the clone. |
 | Consumer CI | `.github/workflows/consumer-check.yml` | The copy, hygiene, ratchet, `pr-check` and the secret scanner on every open pull request. `consumer-closed.yml` is the second workflow, run when one is merged. Neither runs a rung: a rung with `pr = true` is run by the project's own CI. |
 | Skills | `skills/` | `init`, `scaffold`, `debugging`, `retro`, `work`, `merge`. `/trellis-work <n>` takes an issue from its claim to a pull request ready, in a person's session or in a run without one; it never merges. |
-| Agents | `agents/plan-reviewer.md`, `agents/plan-check.md` | `trellis-plan-reviewer` and `trellis-plan-check` in a project, each in a clean context: the first checks a plan against the repository before the work, the second checks the branch of an issue against its approved plan while the pull request is a draft. |
+| Agents | `agents/plan-reviewer.md`, `agents/plan-check.md` | `trellis-plan-reviewer` and `trellis-plan-check` in a project, each in a clean context: the first checks a plan against the repository, and its exclusions and steps against the request it answers, before the work (in opus), the second checks the branch of an issue against its approved plan while the pull request is a draft. |
 
 ## Where each thing runs
 

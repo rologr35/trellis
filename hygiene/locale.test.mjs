@@ -261,14 +261,19 @@ test('the plan-reviewer takes its report labels from one table, with a row per l
   const rows = agent.split('\n').filter(line => /^\| (en|es) \|/.test(line)).map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
   assert.deepEqual(rows.map(row => row[0]), LOCALES, 'one row per locale, in the order of LOCALES');
   const expected = {
-    en: ['Verdict', 'Errors', 'Omissions', 'Not established', 'correct', 'with errors'],
-    es: ['Veredicto', 'Errores', 'Omisiones', 'No establecido', 'correcto', 'con errores'],
+    en: ['Verdict', 'Errors', 'Omissions', 'Exclusions', 'Steps', 'Not established', 'correct', 'with errors', 'inside', 'consider', 'supported', 'not asked'],
+    es: ['Veredicto', 'Errores', 'Omisiones', 'Exclusiones', 'Pasos', 'No establecido', 'correcto', 'con errores', 'dentro', 'considerar', 'sustentada', 'no pedido'],
   };
   for (const row of rows) assert.deepEqual(row.slice(1), expected[row[0]], `labels of ${row[0]}`);
   const outside = agent.split('\n').filter(line => !line.startsWith('|')).join('\n');
   for (const word of ['Verdict', 'Errors', 'Omissions', 'Not established']) {
     assert.ok(!outside.includes(`**${word}**`), `the label ${word} is written only in the table`);
   }
+  const front = /^---\n([\s\S]*?)\n---/.exec(agent)[1];
+  assert.match(front, /^model: opus$/m);
+  for (const tool of ['Edit', 'Write', 'NotebookEdit', 'Agent']) assert.match(front, new RegExp(`^disallowedTools: .*\\b${tool}\\b`, 'm'));
+  assert.ok(Buffer.byteLength(agent) < 4096, `${Buffer.byteLength(agent)} bytes`);
+  for (const locale of LOCALES) assert.match(methodOf(locale), {en: /trellis-plan-reviewer`.*with the request.*corrected or rejected/, es: /trellis-plan-reviewer`.*con el pedido.*corregido o rechazado/}[locale]);
 });
 
 test('plan-check takes the words of its report from one table, the one of lib/locale.mjs', () => {

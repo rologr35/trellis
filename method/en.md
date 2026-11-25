@@ -63,7 +63,7 @@ A conflict in a `CLAUDE.md`, a rule or a skill is resolved from the branch's own
 
 ### Plans
 
-- Before proposing a plan, the `trellis-plan-reviewer` agent checks it in a clean context, and its verdict goes with the proposal. <!-- p:plan-reviewer -->
+- Before proposing a plan, the `trellis-plan-reviewer` agent checks it in a clean context, with the request it answers: its verdict goes with the proposal, and each of its points as corrected or rejected, with the reason. <!-- p:plan-reviewer -->
 - No plan lives in a folder git ignores. Business context goes to `docs/`. <!-- p:plan-tracked -->
 - What is learned from the code goes to the `CLAUDE.md` or the rule closest to that code, at the height of the concept. <!-- p:learned-near-code -->
 
