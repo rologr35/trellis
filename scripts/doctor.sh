@@ -9,8 +9,9 @@
 # and never read.
 #
 # FAIL: a key of trellis.config outside lib/schema, a value outside the accepted ones of an enum
-# key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), workspace.kind =
-# other without [hygiene] namedExt, or a command name that names no [command]; a tool of
+# key of lib/schema (project.locale, tracker.kind, workspace.kind and the rest), a value of
+# tracker.search that lib/search.mjs says is none (it does not compile, or matches the empty string, `ls`
+# or `git status`), workspace.kind = other without [hygiene] namedExt, or a command name that names no [command]; a tool of
 # [toolchain] require missing or older than its minimum; core.hooksPath other than git.hooksPath;
 # a copy of trellis that is not whole, as `trellis verify` says, or, without a copy and out of the
 # repository of trellis, which runs from its own tree, the plugin not installed; Claude Code older than the minimum; node missing while hooks are active;
@@ -88,6 +89,26 @@ else
     while IFS='|' read -r key value accepted; do
       fail "trellis.config: $key = $value is not one of ${accepted//,/, }"
     done <<< "$invalid"
+  fi
+  if tc_list | grep -q '^tracker\.search='; then
+    if ! command -v node >/dev/null 2>&1; then
+      info 'the values of tracker.search are not judged (node not found)'
+    elif bad_searches="$(tc_all tracker.search | node --input-type=module -e '
+      import {readFileSync} from "node:fs";
+      import {pathToFileURL} from "node:url";
+      const {searchOf} = await import(pathToFileURL(process.argv[1]).href);
+      for (const value of readFileSync(0, "utf8").replace(/\n$/, "").split("\n")) {
+        const {why} = searchOf(value);
+        if (why) console.log(`tracker.search = ${value} ${why}`);
+      }
+    ' "$TRELLIS_ROOT/lib/search.mjs" 2>/dev/null)"; then
+      while IFS= read -r line; do
+        [ -z "$line" ] || fail "trellis.config: $line"
+      done <<< "$bad_searches"
+      [ -n "$bad_searches" ] || ok 'every value of tracker.search is a search of the backlog'
+    else
+      fail 'the values of tracker.search could not be judged'
+    fi
   fi
   missing_commands=''
   for name in $(tc_all command.check) $(tc_get command.secretScan) $(tc_get command.install) \

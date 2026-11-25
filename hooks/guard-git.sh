@@ -12,8 +12,9 @@
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
 #   4. a `gh issue create`, its alias `gh issue new` or a `trellis issue create` when the session's
-#      transcript holds no earlier `gh issue list` with --search, nor a `gh api search/issues`: a plan
-#      written without reading what was decided around it repeats a decision;
+#      transcript holds no earlier `gh issue list` with --search, nor a `gh api search/issues`, nor a
+#      command that a value of tracker.search matches: a plan written without reading what was decided
+#      around it repeats a decision. A value that lib/search.mjs says is none does not count;
 #   5. a `gh pr merge` that names no pull request, whose base cannot be read, that runs in a cloud
 #      session (CLAUDE_CODE_REMOTE), or whose base is not in git.assistantMayMergeInto. Silence is not
 #      a neutral opinion on a merge, unlike on the other guards;
@@ -102,6 +103,7 @@ load_config() {
     ISSUE_REGEX="$(tc_get git.issueBranch)"
     INTEGRATION="$(tc_get git.integrationBranch)"
     TRACKER="$(tc_get tracker.kind)"
+    SEARCHES="$(tc_all tracker.search)"
   fi
   [ "$HAS_CONFIG" = true ]
 }
@@ -212,14 +214,21 @@ guard_branch_switch() {
   fi
 }
 
-# True when the transcript holds, before this call, a `gh issue list` with --search or -S, or a `gh api
-# search/issues`. A transcript that is missing or unreadable answers yes: no opinion.
+# True when the transcript holds, before this call, a `gh issue list` with --search or -S, a `gh api
+# search/issues`, or a command a value of tracker.search matches. A transcript that is missing or
+# unreadable answers yes: no opinion.
 session_searched_backlog() {
   [ -n "$TRANSCRIPT" ] && [ -r "$TRANSCRIPT" ] || return 0
-  node -e '
-    const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
-    const current = process.argv[2];
-    const search = /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\s\\?["\x27]?\/?search\/issues\b/;
+  node --input-type=module -e '
+    import {readFileSync} from "node:fs";
+    import {pathToFileURL} from "node:url";
+    const [transcript, current, searches, lib] = process.argv.slice(1);
+    const {searchOf} = await import(pathToFileURL(lib).href);
+    const lines = readFileSync(transcript, "utf8").split("\n");
+    const all = [
+      /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\s\\?["\x27]?\/?search\/issues\b/,
+      ...searches.split("\n").map(value => searchOf(value).expression).filter(Boolean),
+    ];
     let parsed = 0;
     for (const line of lines) {
       let entry;
@@ -229,11 +238,11 @@ session_searched_backlog() {
       if (!Array.isArray(content)) continue;
       for (const part of content) {
         const command = part && part.type === "tool_use" && part.input ? part.input.command : undefined;
-        if (typeof command === "string" && command !== current && search.test(command)) process.exit(0);
+        if (typeof command === "string" && command !== current && all.some(search => search.test(command))) process.exit(0);
       }
     }
     process.exit(parsed === 0 ? 2 : 1);
-  ' "$TRANSCRIPT" "$COMMAND" 2>/dev/null
+  ' "$TRANSCRIPT" "$COMMAND" "$SEARCHES" "$TRELLIS_ROOT/lib/search.mjs" 2>/dev/null
   [ $? -ne 1 ]
 }
 

@@ -26,6 +26,9 @@ git.assistantMayMergeInto|multi|develop
 git.hooksPath|single|.githooks
 
 tracker.kind|enum:github,none|github
+# Regular expressions of JavaScript: a command of the session one of them matches is a search of the
+# backlog, besides the two of the guard. lib/search.mjs says which value is none.
+tracker.search|multi|
 
 pr.section|multi|
 pr.action|multi|

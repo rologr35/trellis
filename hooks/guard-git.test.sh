@@ -437,6 +437,46 @@ printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "gh a
 tl_eq 'a read of the issues is not a search' 'deny' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
 tl_eq 'no transcript is no opinion' 'allow' "$(verdict 'gh issue create --title x')"
 
+printf '\nthe searches of a project: tracker.search (#48)\n'
+# said <command>: a transcript where the session ran that command, and the creation.
+said() {
+  node -e 'for (const command of process.argv.slice(1)) console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command}}]}}))' "$1" 'gh issue create --title x' > "$transcript"
+}
+# The verdict of a creation after it.
+created() { verdict 'gh issue create --title x' "$repo" "$transcript"; }
+cp trellis.config "$TL_TMP/config.keep"
+said 'bin/backlog find "login"'
+tl_eq 'a search of the project does not count without the key' 'deny' "$(created)"
+git config -f trellis.config tracker.search '(^|\s)bin/backlog (find|search) '
+tl_eq 'with the key it does' 'allow' "$(created)"
+tl_eq '  from the directory a cd names, whose config it is' 'allow' "$(verdict "cd '$repo' && gh issue create --title x" "$zephyr" "$transcript")"
+tl_eq '  and not in a project without the key' 'deny' "$(verdict "cd '$zephyr' && gh issue create --title x" "$repo" "$transcript")"
+tl_eq '  nor after a command in the one that has it' 'deny' "$(verdict "git push origin 5-x && cd '$zephyr' && gh issue create --title x" "$repo" "$transcript")"
+said 'bin/backlog list'
+tl_eq 'a command it does not match is no search' 'deny' "$(created)"
+node -e 'console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command: process.argv[1]}}]}}))' 'gh issue create --title "a bin/backlog find x"' > "$transcript"
+tl_eq 'nor is the creation itself' 'deny' "$(verdict 'gh issue create --title "a bin/backlog find x"' "$repo" "$transcript")"
+git config -f trellis.config --add tracker.search 'issues-db\b'
+said 'issues-db login'
+tl_eq 'the second value counts' 'allow' "$(created)"
+said 'cd x && bin/backlog find login'
+tl_eq '  and the first still does' 'allow' "$(created)"
+said 'gh issue list --state all --search login'
+tl_eq 'a search by gh issue list counts with the key' 'allow' "$(created)"
+said "gh api -X GET search/issues -f q='repo:a/b login'"
+tl_eq '  and one by gh api' 'allow' "$(created)"
+said 'ls'
+tl_eq 'and what is neither does not' 'deny' "$(created)"
+# A value that is none, for what the session says and for a command it would match.
+for value in '(' 'x*' '' '^$|find' '^ls|find' 'git +st|find' '.'; do
+  git config -f trellis.config --replace-all tracker.search "$value"
+  said 'bin/backlog find ( x git status'
+  tl_eq "a value that is none: '$value'" 'deny' "$(created)"
+  git config -f trellis.config --add tracker.search 'backlog find'
+  tl_eq '  and a good one beside it counts' 'allow' "$(created)"
+done
+cp "$TL_TMP/config.keep" trellis.config
+
 printf '\nmerge\n'
 printf 'develop\n' > "$GH_FIXTURES/pr-12"
 printf 'main\n' > "$GH_FIXTURES/pr-13"
