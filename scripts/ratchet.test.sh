@@ -266,12 +266,14 @@ from style.bareReference
 tl_eq 'style.bareReference to allow is refused' '1' "$(to allow)"
 tl_eq 'its default written passes' '0' "$(to refuse)"
 from style.bareReference allow
+tl_eq 'a change that leaves it passes' '0' "$(to allow)"
 tl_eq '  and back passes' '0' "$(to)"
 from style.bareReference
 from issue.class
 tl_eq 'issue.class to label is refused' '1' "$(to label)"
 tl_eq 'its default written passes' '0' "$(to line)"
 from issue.class label
+tl_eq 'a change that leaves it passes' '0' "$(to label)"
 tl_eq '  and back passes' '0' "$(to line)"
 from issue.class
 for name in pullRequestCheck issueCheck commitCheck; do

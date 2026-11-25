@@ -105,6 +105,7 @@ tl_eq 'an equal one is not said' '' "$(session)"
 heard
 version 0.11.0
 tl_eq 'nor an older one' '' "$(session)"
+tl_eq '  which is not counted as said' 'no' "$([ -e "$common/trellis-version-said" ] && echo yes || echo no)"
 heard
 version 1.0.0
 tl_eq 'nor one older in its first number' '' "$(session)"
@@ -126,23 +127,33 @@ version 0.9.0
 printf '\nwhat asks\n'
 rm -f "$common"/trellis-version*
 session > /dev/null && asked v0.10.1 > /dev/null
-git -C "$up" tag v0.12.0
+git -C "$up" tag v0.12.10
+git -C "$up" tag v0.12.2
 session > /dev/null
 sleep 1
 tl_eq 'the same day nothing is asked again' 'v0.10.1' "$(asked v0.10.1)"
 printf '2001-01-01\n' > "$common/trellis-version-asked"
 session > /dev/null
-tl_eq 'another day it is' 'v0.12.0' "$(asked v0.12.0)"
+tl_eq 'another day it is' 'v0.12.10' "$(asked v0.12.10)"
 git worktree add -q "$TL_TMP/wt3" -b 3-wt
 mkdir "$TL_TMP/wt3/.trellis" && cp .trellis/VERSION "$TL_TMP/wt3/.trellis/" && cp trellis.config "$TL_TMP/wt3/"
 heard
-tl_has 'a worktree reads the file of the clone' 'trellis 0.12.0 is out' "$(cd "$TL_TMP/wt3" && session)"
+tl_has 'a worktree reads the file of the clone' 'trellis 0.12.10 is out' "$(cd "$TL_TMP/wt3" && session)"
 tl_eq '  and what it said is said' '' "$(session)"
 tomorrow
 git config -f trellis.config trellis.upstream "$TL_TMP/nowhere"
 session > /dev/null
 sleep 1
-tl_eq 'without a network the file stays' 'v0.12.0' "$(cat "$common/trellis-version")"
+tl_eq 'without a network the file stays' 'v0.12.10' "$(cat "$common/trellis-version")"
+git config -f trellis.config trellis.upstream "$project"
+tomorrow
+session > /dev/null
+sleep 1
+tl_eq 'an upstream without a version leaves it too' 'v0.12.10' "$(cat "$common/trellis-version")"
+tomorrow
+tl_has 'setup --newer says it' 'trellis 0.12.10 is out' "$("$TRELLIS" setup --newer)"
+tl_eq '  and writes nothing' 'trellis-version' "$(ls "$common" | grep trellis)"
+tl_eq '  nor says anything else' "$(session)" "$("$TRELLIS" setup --newer)"
 tl_eq '  and no session fails' '0' "$(tomorrow; session > /dev/null; echo $?)"
 mkdir "$TL_TMP/slow"
 cat > "$TL_TMP/slow/git" <<SLOW
@@ -156,7 +167,7 @@ tomorrow
 from=$SECONDS
 said="$(PATH="$TL_TMP/slow:$PATH" "$TRELLIS" setup --quiet 2>&1)"
 took=$((SECONDS - from))
-tl_has 'with an upstream that hangs it says what the file had' 'trellis 0.12.0 is out' "$said"
+tl_has 'with an upstream that hangs it says what the file had' 'trellis 0.12.10 is out' "$said"
 tl_eq '  and returns in under two seconds' 'yes' "$([ "$took" -lt 2 ] && echo yes || echo "$took")"
 i=0; while [ $i -lt 50 ] && [ ! -e "$TL_TMP/hanging" ]; do sleep 0.1; i=$((i + 1)); done
 tl_eq '  while it is asked' 'yes' "$([ -e "$TL_TMP/hanging" ] && echo yes)"
