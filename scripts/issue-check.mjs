@@ -12,6 +12,7 @@
 import {execFileSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
+import {globToRegExp} from '../lib/glob.mjs';
 import {ISSUE, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
 import {commentsOf, mayWrite} from './issue-close.mjs';
@@ -103,11 +104,11 @@ function amendmentOf(comment) {
 }
 
 /**
- * The plan of an issue: the body, with each section and the class of the last amendment that has it. The
+ * The plan of an issue, with when it was last written (`since`): the body, with each section and the class of the last amendment that has it. The
  * body of someone who may not write in the repository is none: `note` says so.
  */
 function resolve(issue, comments) {
-  const plan = parse(mayWrite(issue) ? issue.body : '');
+  const plan = {...parse(mayWrite(issue) ? issue.body : ''), since: issue.created_at};
   if (!mayWrite(issue)) {
     plan.note = `the body is not a plan: its author (${issue.user?.login ?? 'unknown'}) is not an owner, a member or a collaborator of the repository, so the plan is what the amendments carry`;
   }
@@ -116,6 +117,7 @@ function resolve(issue, comments) {
     if (!amendment) continue;
     plan.sections = [...plan.sections.filter(s => !amendment.sections.has(s.name)), ...amendment.sections.values()];
     plan.complexity = amendment.complexity ?? plan.complexity;
+    plan.since = comment.created_at;
   }
   return plan;
 }
@@ -226,13 +228,85 @@ function pathsOf(lines, tree) {
       // A command, a glob, a placeholder, a URL and a path outside the repository are not judged.
       if (!/^[\p{L}\p{N}_.@+()[\]/-]+$/u.test(name) || /^[-/]|\/\//.test(name)) continue;
       // A name without a folder is a file when some file has its extension: README.md is one, and a
-      // key such as tracker.kind is not.
+      // key such as tracker.kind is not. One that ends in / is a folder, when it is there.
       const extension = /[^.]\.([^.]+)$/.exec(name)?.[1];
-      if (!name.includes('/') && !/^\.[\p{L}]/u.test(name) && !(extension && tree?.extensions.has(extension))) continue;
+      if (!name.includes('/') && !/^\.[\p{L}]/u.test(name) && !(extension && tree?.extensions.has(extension)) && !(/\/\s*$/.test(token) && tree?.entries.has(name))) continue;
       paths.push(name);
     }
   }
   return [...new Set(paths)];
+}
+
+const sectionOf = (plan, name) => plan.sections.find(s => s.name === name)?.lines ?? [];
+
+/** The gates the Risks of a plan open with: their names, [] for none, null without the line. */
+function gatesOf(plan) {
+  const first = written(textOf(sectionOf(plan, L.sections[3]))).split('\n').find(line => line.trim() !== '') ?? '';
+  const value = new RegExp(`^\\s*(?:[-*+]\\s+)?(?:\\*\\*|__)?${escape(L.gates)}(?:(?:\\*\\*|__)\\s*:|\\s*:(?:\\*\\*|__)?)(.*)$`).exec(first)?.[1];
+  if (value === undefined) return null;
+  const names = value.split(/\.(?:\s|$)/)[0].split(/,|\s(?:and|y|e)\s/).map(s => s.trim().replace(/^`(.*)`$/, '$1')).filter(Boolean);
+  if (names.length === 0) return null;
+  return names.length === 1 && names[0].toLowerCase() === L.noGates ? [] : names;
+}
+
+/** The patterns of a gate, or the misses of the ones that are not plain globs. */
+function patternsOf(gate) {
+  const patterns = [];
+  const misses = [];
+  for (const glob of config.all(`gate.${gate}.paths`)) {
+    try {
+      patterns.push(globToRegExp(glob));
+    } catch (error) {
+      misses.push(`gate.${gate}.paths: ${error.message}`);
+    }
+  }
+  return {patterns, misses};
+}
+
+/** What the Gates line of a plan lacks, given the paths of its Layers and files. */
+function judgeGates(plan, paths, tree) {
+  const named = gatesOf(plan);
+  if (named === null) return [`${L.sections[3]} does not open with \`${L.gates}: ${L.noGates}\`, or the names of the gates the plan touches`];
+  const known = config.subsections('gate');
+  const misses = named.filter(name => !known.includes(name)).map(name => `${L.gates}: there is no [gate "${name}"] in trellis.config`);
+  for (const gate of known.filter(name => !named.includes(name))) {
+    const {patterns, misses: bad} = patternsOf(gate);
+    misses.push(...bad);
+    for (const name of paths) {
+      // A folder stands for its files.
+      const files = [name, `${name}/`, ...[...(tree?.entries ?? [])].filter(entry => entry.startsWith(`${name}/`))];
+      if (patterns.some(re => files.some(file => re.test(file)))) misses.push(`${L.gates}: \`${name}\` is of the gate ${gate}, which ${L.sections[3]} does not name`);
+    }
+  }
+  return misses;
+}
+
+const git = (...args) => execFileSync('git', args, {encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'ignore']}).trim();
+
+/** Prints each path of a plan that changed on the integration branch since the plan was written. */
+function printChanged(plan) {
+  const branch = `origin/${config.get('git.integrationBranch')}`;
+  const ref = `refs/remotes/${branch}`;
+  const layers = sectionOf(plan, L.sections[2]);
+  const paths = pathsOf(layers, integrationTree(ref));
+  if (paths.length === 0) return;
+  try {
+    const root = git('rev-parse', '--show-toplevel');
+    let base = git('rev-list', '-1', '--first-parent', `--before=${plan.since}`, ref);
+    if (base === '') {
+      if (git('rev-parse', '--is-shallow-repository') === 'true') {
+        console.log(`issue: what changed on ${branch} since ${plan.since} is not known: the clone is shallow and does not reach that date`);
+        return;
+      }
+      base = git('hash-object', '-t', 'tree', '/dev/null');
+    }
+    for (const name of paths) {
+      if (git('--literal-pathspecs', '-C', root, 'diff', '--name-only', base, ref, '--', name) === '') continue;
+      console.log(`issue: \`${name}\` changed on ${branch} since the plan was written (${plan.since}): git diff ${base.slice(0, 12)} ${branch} -- ${name}`);
+    }
+  } catch {
+    // Without the branch the check has said so.
+  }
 }
 
 /** The files, folders and extensions of origin/<integration>, or null when that branch is not known. */
@@ -289,8 +363,8 @@ function judge(plan, lines) {
     misses.push(`the last line is not \`${L.complexity}: S\`, M or L`);
   }
 
-  const [, , layersName] = L.sections;
-  const layers = plan.sections.find(s => s.name === layersName)?.lines ?? [];
+  const [, , layersName, risksName] = L.sections;
+  const layers = sectionOf(plan, layersName);
   const added = new Set();
   for (const group of labelled(layers, L.newFiles)) {
     for (let i = group.start; i < group.end; i++) added.add(i);
@@ -305,6 +379,9 @@ function judge(plan, lines) {
       if (!tree.entries.has(name)) misses.push(`${layersName}: \`${name}\` is not in ${ref}; a file the change adds goes under ${L.newFiles}`);
     }
   }
+
+  const risks = plan.sections.filter(s => s.name === risksName);
+  if (risks.length === 1 && !isEmpty(risks[0].lines)) misses.push(...judgeGates(plan, pathsOf(layers, tree), tree));
 
   misses.push(...styleMisses(withoutReferences(lines), 'style'));
   return misses;
@@ -322,7 +399,10 @@ if (mode === 'class') console.log(parse(text).complexity);
 if (!['body', 'class'].includes(mode)) {
   const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
   if (plan.note && ['issue', 'print'].includes(mode)) console.error(`issue: ${plan.note}`);
-  if (mode === 'issue') process.exitCode = report(judge(plan, linesOf(render(plan))));
+  if (mode === 'issue') {
+    process.exitCode = report(judge(plan, linesOf(render(plan))));
+    printChanged(plan);
+  }
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));
   if (mode === 'deps') {

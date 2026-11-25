@@ -18,7 +18,11 @@ Fuera de alcance:
 
 ## Riesgos
 
-{{Los gates que toca, el trinquete que afloja, qué se puede romper y por qué se acepta.}}
+Gates: {{ninguno, o los nombres de los [gate] cuyos ficheros toca, separados por comas}}
+
+Necesita: {{lo que una ejecución no puede tomar: una credencial, un paso de una persona; la línea se borra si no hay nada}}
+
+{{El trinquete que afloja, qué se puede romper y por qué se acepta.}}
 
 ## Verificación
 

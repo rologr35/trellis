@@ -210,6 +210,9 @@ test('the issue mould of every locale has the sections of its locale, in order, 
     has(new RegExp(`^${L.outOfScope}:$`));
     has(new RegExp(`^- .*\\b${L.source}: `));
     has(new RegExp(`^- \\*\\*${L.newFiles}\\*\\*: `));
+    const risks = lines.slice(lines.indexOf(`## ${L.sections[3]}`) + 1).filter(Boolean);
+    assert.match(risks[0], new RegExp(`^${L.gates}: \\{\\{${L.noGates}, `), `${locale}/issue.md opens the risks with the gates`);
+    has(new RegExp(`^${L.needs}: `));
     assert.equal(text.trimEnd().split('\n').at(-1), `${L.complexity}: S`, `${locale}/issue.md ends with the complexity line`);
   }
 });

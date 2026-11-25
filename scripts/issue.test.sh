@@ -302,7 +302,7 @@ tl_eq 'a New heading with its list' '0' "$(case_of 's|^- \*\*New\*\*: `lib/b.sh`
 ### New\
 - `lib/b.sh`|; s|^  `scripts/new.sh`|- `scripts/new.sh`|')"
 tl_eq 'a command, a glob and a placeholder are not paths' '0' "$(case_of 's|docs/`|docs/`, `bash lib/nope.sh`, `lib/**`, `templates/<locale>/x.md`, `a/{b,c}.md`, `~/x/y`, `/etc/x`|')"
-tl_eq 'a path of another section is not judged' '0' "$(case_of 's|^Gates: none|`lib/nope.sh`. Gates: none|')"
+tl_eq 'a path of another section is not judged' '0' "$(case_of 's|^Gates: none|Gates: none. `lib/nope.sh`|')"
 echo late > lib/late.sh
 git add -A && git commit -q -m 'chore: late'
 fails 'a path only in the working tree' 's|docs/`|docs/`, `lib/late.sh`|' '`lib/late.sh` is not in origin/develop'
@@ -314,6 +314,41 @@ tl_eq 'a path merged since the last fetch passes' '0' "$(case_of 's|docs/`|docs/
 git config -f trellis.config git.integrationBranch nowhere
 fails 'an integration branch that is not known' 's/x/x/' 'origin/nowhere is not known here'
 git config -f trellis.config git.integrationBranch develop
+
+printf '\ngates\n'
+no_gates='Risks does not open with `Gates: none`'
+fails 'Risks without Gates' 's/^Gates: none\.$/It may break./' "$no_gates"
+fails 'Gates that is not the first line' 's/^Gates: none\.$/It may break.\
+\
+Gates: none./' "$no_gates"
+fails 'Gates that says nothing' 's/^Gates: none\.$/Gates:\
+\
+It may break./' "$no_gates"
+fails 'Gates with the placeholder' 's/^Gates: none\.$/Gates: {{none}}/' "$no_gates"
+tl_eq 'a text after none' '0' "$(case_of 's/^Gates: none\.$/Gates: none. It may break, in lib./')"
+tl_eq 'Gates after a comment' '0' "$(case_of 's/^Gates: none\.$/<!-- a note -->\
+**Gates**: none/')"
+fails 'a gate that does not exist' 's/^Gates: none\.$/Gates: money/' 'Gates: there is no [gate "money"] in trellis.config'
+git config -f trellis.config gate.money.paths 'lib/**'
+git config -f trellis.config --add gate.money.paths 'docs/*.md'
+git config -f trellis.config gate.release-notes.paths 'CHANGES.md'
+fails 'a path of a gate that is not named' 's/x/x/' 'Gates: `lib/a.sh` is of the gate money, which Risks does not name'
+tl_has '  and one under New' 'Gates: `lib/b.sh` is of the gate money' "$(out)"
+tl_has '  and a folder that has one of its files' 'Gates: `docs` is of the gate money' "$(out)"
+tl_lacks '  and no other gate' 'release-notes' "$(out)"
+tl_eq 'the gate named passes' '0' "$(case_of 's/^Gates: none\.$/Gates: money/')"
+tl_eq 'two gates named, with text after' '0' "$(case_of 's/^Gates: none\.$/Gates: `money`, release-notes. It may break./')"
+fails 'one that exists and one that does not' 's/^Gates: none\.$/Gates: money, nothing/' 'there is no [gate "nothing"]'
+fails 'none and a name' 's/^Gates: none\.$/Gates: none, money/' 'there is no [gate "none"]'
+git config -f trellis.config gate.money.paths 'lib/{a,b}.sh' 'lib/'
+fails 'a gate whose glob is not read' 's/x/x/' 'gate.money.paths: glob lib/{a,b}.sh uses syntax trellis does not read'
+git config -f trellis.config --remove-section gate.money
+git config -f trellis.config --remove-section gate.release-notes
+git config -f trellis.config project.locale es
+sed 's/^Gates: ninguno/Gates: none/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
+tl_eq 'es: none is not its word' '1' "$(status_of check --body "$TL_TMP/case.md")"
+tl_has '  it is ninguno' 'there is no [gate "none"]' "$(out)"
+git config -f trellis.config --unset project.locale
 
 printf '\nstyle\n'
 fails 'a long dash' "s/^Gates: none/Gates $(printf '\342\200\224') none/" 'long dash'
@@ -413,8 +448,8 @@ tl_eq 'a comment that is not headed Amendment is ignored' '1' "$(status_of check
 sed 's/^### Risks$/## Risks/' "$TL_TMP/plan.md" > "$TL_TMP/wrong-level.md"
 issue_json 3 "$TL_TMP/symptom.md" OWNER "$TL_TMP/wrong-level.md"
 tl_eq 'a section of an amendment is a ### heading' '1' "$(status_of check 3)"
-{ amendment 'risks'; printf '### Risks\n\nThe first risk.\n'; } > "$TL_TMP/a1.md"
-{ amendment 'risks again'; printf '### Risks\n\nThe second risk.\n\n### Notes\n\nStill risks.\n\n## Other\n\nNot risks.\n\nComplexity: L\n'; } > "$TL_TMP/a2.md"
+{ amendment 'risks'; printf '### Risks\n\nGates: none. The first risk.\n'; } > "$TL_TMP/a1.md"
+{ amendment 'risks again'; printf '### Risks\n\nGates: none. The second risk.\n\n### Notes\n\nStill risks.\n\n## Other\n\nNot risks.\n\nComplexity: L\n'; } > "$TL_TMP/a2.md"
 { amendment 'nothing but words'; printf 'The plan does not change.\n'; } > "$TL_TMP/a3.md"
 { amendment 'a stranger'; printf '### Risks\n\nThe risk of a stranger.\n\nComplexity: S\n'; } > "$TL_TMP/a4.md"
 sed 's/^Gates: none\.$//' "$TL_TMP/good.md" > "$TL_TMP/no-risks.md"
@@ -444,6 +479,56 @@ issue_json 6 "$TL_TMP/good.md" OWNER "$TL_TMP/a6.md"
 tl_eq 'the dependencies are those of the last Context' '1' "$(status_of check 6)"
 tl_has '  named' 'depends on rologr35/x#9, which is open' "$(out)"
 tl_lacks '  and not those of the body' 'the tag v2' "$(out)"
+# commit_at <date> <path>: a commit on the integration branch, with that date.
+commit_at() {
+  mkdir -p "$(dirname "$other/$2")"
+  echo "$1" >> "$other/$2"
+  git -C "$other" add -A
+  GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git -C "$other" commit -q -m "chore: $2"
+  git -C "$other" push -q origin HEAD:develop
+}
+written_at() { { amendment 'a date'; printf 'The plan holds.\n'; } > "$TL_TMP/dated.md"; issue_json 20 "$TL_TMP/good.md" OWNER "$TL_TMP/dated.md"; }
+dated() {
+  node -e '
+    const fs = require("fs");
+    const [dir, created, amended] = process.argv.slice(1);
+    const at = (file, set) => { const v = JSON.parse(fs.readFileSync(`${dir}/${file}`)); set(v); fs.writeFileSync(`${dir}/${file}`, JSON.stringify(v)); };
+    at("issue-20.json", v => { v.created_at = created; });
+    at("comments-20.json", v => { if (amended) v[0].created_at = amended; else v.length = 0; });
+  ' "$here" "$@"
+}
+git -C "$other" pull -q origin develop
+commit_at 2040-01-01T00:00:00Z docs/late.md
+commit_at 2040-03-01T00:00:00Z lib/a.sh
+commit_at 2040-03-02T00:00:00Z lib/not-of-the-plan.sh
+written_at
+dated 2040-01-15T00:00:00Z
+tl_eq 'a path that changed after the plan was written fails nothing' '0' "$(status_of check 20)"
+tl_has '  and is printed' 'issue: `lib/a.sh` changed on origin/develop since the plan was written (2040-01-15T00:00:00Z): git diff ' "$(out)"
+tl_lacks '  one that changed before is not' '`docs` changed' "$(out)"
+tl_lacks '  nor one that is not of the plan' 'not-of-the-plan' "$(out)"
+dated 2039-12-01T00:00:00Z
+tl_has '  a folder changes with its files' '`docs` changed' "$(status_of check 20; out)"
+dated 2039-12-01T00:00:00Z
+written_at
+dated 2039-12-01T00:00:00Z 2040-02-01T00:00:00Z
+status_of check 20 >/dev/null
+tl_lacks 'one that changed before the last amendment is not printed' '`docs` changed' "$(out)"
+tl_has '  one that changed after it is' '`lib/a.sh` changed on origin/develop since the plan was written (2040-02-01T00:00:00Z)' "$(out)"
+dated 2039-12-01T00:00:00Z 2040-04-01T00:00:00Z
+tl_lacks 'nor any when the amendment is the last to change' 'changed on' "$(status_of check 20; out)"
+git -C "$other" switch -q -c side HEAD~2
+GIT_AUTHOR_DATE=2040-01-02T00:00:00Z GIT_COMMITTER_DATE=2040-01-02T00:00:00Z bash -c 'cd "$1" && echo s > lib/b.sh && git add -A && git commit -q -m "chore: side"' _ "$other"
+git -C "$other" switch -q develop
+GIT_AUTHOR_DATE=2040-05-01T00:00:00Z GIT_COMMITTER_DATE=2040-05-01T00:00:00Z git -C "$other" merge -q --no-ff -m 'Merge the side' side
+git -C "$other" push -q origin HEAD:develop
+tl_has 'what was committed before the plan and merged after it is printed' '`lib/b.sh` changed' "$(status_of check 20; out)"
+dated 1990-01-01T00:00:00Z
+tl_has 'every path that is there, when the plan is older than the branch' '`README.md` changed' "$(status_of check 20; out)"
+shallow="$TL_TMP/shallow"
+git clone -q --depth 1 -b develop "file://$remote" "$shallow"
+tl_has 'a shallow clone that does not reach the date says so' 'the clone is shallow' "$(cd "$shallow" && "$TRELLIS" issue check 20 2>&1)"
+
 git config -f trellis.config project.locale es
 sed 's/^## /### /; s/^Depende de: .*//' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
 { printf '## Enmienda (2026-11-24)\n\n'; cat "$TL_TMP/case.md"; } > "$TL_TMP/plan-es.md"

@@ -14,14 +14,18 @@
 # The check: the five sections of project.locale present, once, in order and not empty; each item of
 # Out of scope with its Source; the last line with text `Complexity: S`, M or L; every path in
 # backticks of Layers and files, outside its New list, in origin/<git.integrationBranch>, which is
-# fetched first; and the style of pr-check (no long dash, no attribution, no bare #N, with the
-# references of a Depends on line allowed). The names per locale live in lib/locale.mjs.
+# fetched first; Risks opening with `Gates: none` or the names of the [gate] the plan touches, that exist
+# and are every gate whose paths match one of Layers and files; and the style of pr-check (no long dash,
+# no attribution, no bare #N, with the references of a Depends on line allowed). `Needs:` in Risks is
+# optional: what a run cannot take. The names per locale live in lib/locale.mjs.
 #
 # The plan of an issue is its body, with each section, and the complexity line, of the last comment
 # headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only what an owner, a member
 # or a collaborator wrote counts, the body too: with the body of someone else, which the check says, the
-# plan is what the amendments carry. At pick-up, also: every #n and owner/repo#n of the
-# Depends on line of Context is closed. Other text there is printed for a person.
+# plan is what the amendments carry. At pick-up, also: every #n and owner/repo#n of the Depends on line
+# of Context is closed. Other text there is printed for a person.
+# Each path of Layers and files that changed on the integration branch since the plan, or its last
+# amendment, was written is printed, and fails nothing.
 #
 # The label of the issue created is the class of its complexity line. S, M and L are created when the
 # repository lacks them.
