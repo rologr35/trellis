@@ -417,6 +417,8 @@ test('a manifest at the root, in .trellis/ or in a folder git ignores asks for n
   p.write('.gitignore', 'node_modules/\n');
   p.write('node_modules/x/package.json', '{}\n');
   passes(p);
+  rmSync(path.join(p.root, 'CLAUDE.md'));
+  assert.equal(p.hygiene().stdout.match(/^ {2}FAIL /gmu).length, 1, p.hygiene().stdout);
   const q = withCopy(project());
   q.write('.trellis/x/package.json', '{}\n');
   const r = q.hygiene();

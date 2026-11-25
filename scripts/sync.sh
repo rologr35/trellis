@@ -18,10 +18,11 @@
 #   - .githooks/find-trellis.sh, the copy of lib/find-trellis.sh, when .githooks/ exists;
 #   - in the repository of trellis, which runs from its own tree, .claude/skills/trellis-<name>/SKILL.md
 #     and .claude/agents/trellis-<name>.md, from skills/ and agents/, as a copy holds them. One with no
-#     source is removed. The code of another checkout refuses there, and so does the hygiene's.
+#     source is removed when git can give it back (tracked, and equal to the index); if not, it stays.
+#     The code of another checkout refuses there, and so does the hygiene's.
 #
 # Only blocks already present are rewritten: where a block goes is the template's decision.
-# Prints one line per file it changed or removed.
+# Prints one line per file it changed, removed or kept without a source, with the reason.
 
 set -uo pipefail
 

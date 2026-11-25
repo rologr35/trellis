@@ -134,7 +134,7 @@ Read-only: it never writes or fetches. It exits 1 when there is any FAIL.
 
 It has no copy: it runs from its own tree, in each of its worktrees. It is recognized by `.claude-plugin/plugin.json` with the name `trellis` and `lib/find-trellis.sh` at the top level.
 
-- `bin/trellis sync` writes there its own skills and agents, `.claude/skills/trellis-<name>/SKILL.md` and `.claude/agents/trellis-<name>.md`, with the names and the bytes a copy has them with, and removes the ones with no source. The hygiene fails when one is missing, differs or is left over.
+- `bin/trellis sync` writes there its own skills and agents, `.claude/skills/trellis-<name>/SKILL.md` and `.claude/agents/trellis-<name>.md`, with the names and the bytes a copy has them with, and removes the ones with no source that git can give back (tracked, and equal to the index); it keeps the others, and says which and why. The hygiene fails when one is missing, differs or is left over.
 - `sync` and `hygiene` of another checkout (the one of the main checkout, on the PATH of a session that moved to a worktree) refuse: they would write and judge the worktree by other code. The command is `bin/trellis`.
 - The git hooks look for `bin/trellis` of their top level, so the ones of a worktree run its code, and `trellis setup` puts that `bin/` on the PATH of the session.
 - `trellis doctor` says it runs from its tree, and asks for no plugin.

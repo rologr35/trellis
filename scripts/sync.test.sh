@@ -142,6 +142,20 @@ tl_has 'are removed, and named' 'sync: removed .claude/skills/trellis-gone/SKILL
 tl_eq 'with their folder' 'no no' "$([ -e .claude/skills/trellis-gone ] && echo yes || echo no) $([ -e .claude/agents/trellis-gone.md ] && echo yes || echo no)"
 tl_eq 'one edited by hand is written again' "$(sed -n '3,$p' agents/plan-check.md)" "$(sed -n '3,$p' .claude/agents/trellis-plan-check.md)"
 tl_eq 'the ones without the prefix stay' '# Own# Own' "$(cat .claude/skills/own/SKILL.md)$(cat .claude/agents/own.md)"
+mkdir -p .claude/skills/trellis-draft
+printf '# Draft\n' | tee .claude/skills/trellis-draft/SKILL.md > .claude/agents/trellis-draft.md
+git add .claude/agents/trellis-draft.md && git commit -q --no-verify -m 'chore: a draft (#1)'
+printf 'a line more\n' >> .claude/agents/trellis-draft.md
+tl_eq 'a left over one git cannot give back' '0' "$(sync)"
+tl_eq 'stays when it is untracked' '# Draft' "$(cat .claude/skills/trellis-draft/SKILL.md 2>/dev/null)"
+tl_has 'and says why' 'sync: kept .claude/skills/trellis-draft/SKILL.md, which has no source: it is not tracked' "$(cat "$TL_TMP/out.txt")"
+tl_eq 'and when it is modified' 'a line more' "$(tail -1 .claude/agents/trellis-draft.md 2>/dev/null)"
+tl_has 'and says why, too' 'sync: kept .claude/agents/trellis-draft.md, which has no source: it has changes that are not in the index' "$(cat "$TL_TMP/out.txt")"
+tl_lacks 'and there was something to say' 'nothing to change' "$(cat "$TL_TMP/out.txt")"
+git add -A
+tl_eq 'once git can give them back' '0' "$(sync)"
+tl_eq 'they go' 'no no' "$([ -e .claude/skills/trellis-draft ] && echo yes || echo no) $([ -e .claude/agents/trellis-draft.md ] && echo yes || echo no)"
+git add -A && git commit -q --no-verify -m 'chore: no draft (#1)'
 rm .claude/agents/trellis-plan-check.md && ln -s ../../agents/plan-check.md .claude/agents/trellis-plan-check.md
 tl_eq 'a symbolic link to a source' '0' "$(sync)"
 tl_eq 'is replaced, and the source stays' 'name: plan-check name: trellis-plan-check' "$(sed -n 2p agents/plan-check.md) $(sed -n 2p .claude/agents/trellis-plan-check.md)"

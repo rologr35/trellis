@@ -1,5 +1,6 @@
 // The writing of `trellis sync` (scripts/sync.sh holds the contract).
 
+import {spawnSync} from 'node:child_process';
 import {existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, unlinkSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {BLOCK_FILES, FIND_TRELLIS_COPY, findTrellisSource, generateBlocks, generatedDeny, missingHooks, pushDenyBranch, replaceBlocks} from '../lib/blocks.mjs';
@@ -52,6 +53,13 @@ if (existsSync(path.join(root, '.githooks'))) write(FIND_TRELLIS_COPY, findTrell
 
 // The repository of trellis: its skills and agents, as a copy holds them.
 const removed = [];
+const kept = [];
+// Why git could not give a file back if it were removed, or null.
+const notInGit = file => {
+  const git = (...args) => spawnSync('git', ['--literal-pathspecs', '-C', root, ...args, '--', file], {stdio: 'ignore'}).status;
+  if (git('ls-files', '--error-unmatch') !== 0) return 'it is not tracked';
+  return git('diff', '--quiet', '--no-ext-diff') === 0 ? null : 'it has changes that are not in the index';
+};
 if (isTrellis(tree)) {
   const {expected, leftOver} = generatedFiles(tree);
   const was = tree.bytes([...expected.keys()]);
@@ -67,6 +75,11 @@ if (isTrellis(tree)) {
     changed.push(file);
   }
   for (const file of leftOver) {
+    const why = notInGit(file);
+    if (why !== null) {
+      kept.push(`${file}, which has no source: ${why}`);
+      continue;
+    }
     rmSync(path.join(root, file), {force: true});
     removed.push(file);
     try {
@@ -79,4 +92,5 @@ if (isTrellis(tree)) {
 
 for (const file of changed) console.log(`sync: wrote ${file}`);
 for (const file of removed) console.log(`sync: removed ${file}`);
-if (changed.length + removed.length === 0) console.log('sync: nothing to change');
+for (const line of kept) console.log(`sync: kept ${line}`);
+if (changed.length + removed.length + kept.length === 0) console.log('sync: nothing to change');
