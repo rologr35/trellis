@@ -411,8 +411,8 @@ fails 'none and a name' 's/^Gates: none\.$/Gates: none, money/' 'there is no [ga
 for reason in 'money (it pays)' 'money (it pays, and twice; see a. And b)' '`money` (it pays (twice), yes), release-notes (the notes)' 'money (it pays) and release-notes'; do
   tl_eq "a reason is taken off: $reason" '0' "$(case_of "s/^Gates: none\\.\$/Gates: $reason/")"
 done
-tl_eq 'a name with parentheses of its own is still that name' '0' "$(git config -f trellis.config 'gate.money (old).paths' 'x/**'; case_of 's/^Gates: none\.$/Gates: money (old), money/')"
-git config -f trellis.config --remove-section 'gate.money (old)'
+tl_eq 'a name with parentheses of its own is still that name' '0' "$(git config -f trellis.config 'gate.vault (old).paths' 'x/**'; case_of 's/^Gates: none\.$/Gates: vault (old), money/')"
+git config -f trellis.config --remove-section 'gate.vault (old)'
 fails 'a name in parentheses alone' 's/^Gates: none\.$/Gates: (money)/' 'there is no [gate "(money)"]'
 fails 'and one after a comma' 's/^Gates: none\.$/Gates: release-notes, (money)/' 'there is no [gate "(money)"]'
 fails 'parentheses that do not close' 's/^Gates: none\.$/Gates: money (it pays/' 'there is no [gate "money (it pays"]'
@@ -1245,6 +1245,38 @@ git config -f trellis.config tracker.kind none
 tl_eq 'tracker.kind = none exits 2' '2' "$(close_of 40)"
 tl_eq '  with no gh call' '' "$(calls)"
 git config -f trellis.config --unset tracker.kind
+
+printf '\nthe private names of a public project\n'
+mkdir -p "$HOME/.config/trellis" && printf 'zephyr\n' > "$HOME/.config/trellis/private-names"
+git switch -q -f develop && git config -f trellis.config project.public true
+named="$TL_TMP/named.md"
+sed 's/^## Context$/## Context\
+\
+Of Zephyr./' "$TL_TMP/good.md" > "$named"
+tl_eq 'create refuses a body that has one' '1' "$(create_of --title 'A flag' --body-file "$named")"
+tl_has '  naming it' '"zephyr" is in the list of private names' "$(out)"
+tl_eq '  and a title' '1' "$(create_of --title 'A flag of zephyr' --body-file "$TL_TMP/good.md")"
+tl_has '  naming it' 'the text, line 1: "zephyr"' "$(out)"
+tl_eq '  with no write' '' "$(writes)"
+tl_eq '  and creates one with none' '0' "$(create_of --title 'A flag' --body-file "$TL_TMP/good.md")"
+head_sha="$(git ls-remote origin refs/heads/develop | cut -f1)"
+cp "$TL_TMP/seen.md" "$TL_TMP/seen-was.md"
+tl_eq 'follow-up passes a text with none to its proposal' '4' "$(follow --checked "$head_sha")"
+tl_eq '  and refuses a title that has one' '1' "$(follow --checked "$head_sha" --title 'fix: zephyr')"
+tl_has '  naming it' 'the text, line 1: "zephyr"' "$(out)"
+tl_lacks '  before the search' 'The backlog' "$(out)"
+tl_eq '  and what it waits for' '1' "$(follow --checked "$head_sha" --when 'zephyr moves')"
+printf '\nOf zephyr.\n' >> "$TL_TMP/seen.md"
+tl_eq '  and a body' '1' "$(follow --checked "$head_sha" --approved)"
+tl_eq '  with no write' '' "$(writes)"
+cp "$TL_TMP/seen-was.md" "$TL_TMP/seen.md"
+tl_eq 'stop refuses a text that has one' '1' "$(stop_of 35 "$done_text**Needs**:\n\n- a key of zephyr\n")"
+tl_has '  naming it' '"zephyr" is in the list of private names' "$(out)"
+tl_eq '  with no write' '' "$(writes)"
+tl_eq '  and takes one with none' '0' "$(stop_of 35 "$done_text**Needs**:\n\n- a key\n")"
+git config -f trellis.config --unset project.public
+tl_eq 'a project that is not public publishes it' '0' "$(create_of --title 'A flag of zephyr' --body-file "$named")"
+rm "$HOME/.config/trellis/private-names"
 
 printf '\na directory with no trellis.config (#41)\n'
 bare="$TL_TMP/bare"

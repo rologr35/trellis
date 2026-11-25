@@ -76,6 +76,7 @@ status=0
 node "$TRELLIS_ROOT/scripts/pr-check.mjs" "$mode" "$file" "$setback" "${branch:--}" "${loosened:-false}" "$cycle" "$tmp/message" || status=$?
 [ "$setback" = false ] || exit "$status"
 if [ "$mode" = 'body' ]; then
+  bash "$TRELLIS_ROOT/scripts/private-names.sh" --file "$file" || status=1
   project_check pullRequestCheck pr-check "$file" || status=1
 elif [ -f "$tmp/message" ]; then
   project_check commitCheck pr-check "$tmp/message" || status=1

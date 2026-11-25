@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Exercises templates/githooks/ installed in a project: the release branch, the ratchet, the commit
-# message, the branch name on push, and the pass-through when trellis cannot be found.
+# message, the branch name on push, the private names of a public project, and the pass-through when
+# trellis cannot be found.
 . "$(dirname "$0")/../lib/testlib.sh"
 
 bin="$TL_TMP/bin"
@@ -78,6 +79,49 @@ tl_eq 'an issue branch is pushed' '0' "$(push 1-setup)"
 git branch feature/x
 tl_eq 'a branch out of git.issueBranch is refused' '1' "$(push feature/x)"
 tl_eq 'the release branch is a person'"'"'s to push' '0' "$(push main)"
+
+printf '\na public project\n'
+list="$HOME/.config/trellis/private-names"
+mkdir -p "$(dirname "$list")" && printf 'acme\n' > "$list"
+printf 'an acme\n' > c.txt && git add -A
+tl_eq 'a project that is not one publishes what it wants' '0' "$(commit -m 'feat: the acme (#1)')"
+tl_eq '  its branches too' '0' "$(push 1-setup:refs/heads/1-acme)"
+git config -f trellis.config project.public true
+git add -A && git commit -q --no-verify -m 'chore: public (#1)'
+printf 'the acme\n' >> c.txt && git add -A
+tl_eq 'an added line with a private name is refused' '1' "$(commit -m 'feat: c (#1)')"
+tl_has '  and named' 'private-names: c.txt:2: "acme"' "$(cat "$TL_TMP/out.txt")"
+git reset -q --hard
+git rm -q c.txt
+tl_eq 'a removed one passes' '0' "$(commit -m 'feat: no c (#1)')"
+printf 'x\n' > acme.txt && git add -A
+tl_eq 'a path is refused' '1' "$(commit -m 'feat: path (#1)')"
+tl_has '  and named' 'the path acme.txt' "$(cat "$TL_TMP/out.txt")"
+git reset -q --hard
+printf 'x\n' > d.txt && git add -A
+tl_eq 'a message is refused' '1' "$(commit -m 'feat: the acme (#1)')"
+tl_has '  and named' 'the text, line 1: "acme"' "$(cat "$TL_TMP/out.txt")"
+tl_eq '  its body too' '1' "$(commit -m 'feat: d (#1)' -m 'Of acme.')"
+tl_eq '  and a line of it that starts as a comment' '1' "$(commit -m 'feat: d (#1)' -m '# acme')"
+printf 'acme\n' > d.txt && git add -A && git commit -q --no-verify -m 'chore: d (#1)'
+printf 'x\n' > d.txt && git add -A
+# An editor that writes the subject above what git put in the message, with the diff of --verbose.
+printf '#!/bin/sh\nprintf "feat: d (#1)\\n" | cat - "$1" > "$1.new" && mv "$1.new" "$1"\n' > "$TL_TMP/editor" && chmod +x "$TL_TMP/editor"
+tl_eq 'the diff that --verbose puts under the message is not the message' '0' "$(GIT_EDITOR="$TL_TMP/editor" commit --verbose)"
+git mv d.txt e.txt && printf 'x\n' > acme.txt && git add -A && git commit -q --no-verify -m 'chore: e (#1)'
+git rm -q acme.txt
+tl_eq 'nor are the files git lists in it' '0' "$(GIT_EDITOR="$TL_TMP/editor" commit)"
+tl_eq 'a branch is refused' '1' "$(push HEAD:refs/heads/2-acme)"
+tl_has '  and named' 'private-names: the text, line 1: "acme"' "$(cat "$TL_TMP/out.txt")"
+tl_eq '  by the name it takes' '1' "$(push 1-setup:refs/heads/2-acme)"
+git branch 3-acme
+tl_eq '  and not by the one it has here' '0' "$(push 3-acme:refs/heads/3-thing)"
+tl_eq 'deleting a branch is not judged' '0' "$(push --delete 1-acme)"
+tl_eq 'another branch passes' '0' "$(push 1-setup)"
+rm "$list"
+printf 'an acme\n' > c.txt && git add -A
+tl_eq 'without a list it goes on' '0' "$(commit -m 'feat: the acme (#1)')"
+tl_has '  and says so' 'no list of private names' "$(cat "$TL_TMP/out.txt")"
 
 printf '\nthe repository of trellis\n'
 own="$(tl_upstream)"

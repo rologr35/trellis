@@ -212,6 +212,35 @@ ln -s "$NODE" "$tools/node"
 git reset -q --hard && git clean -qfd
 mv "$TL_TMP/plugins.json" "$plugins"
 
+printf '\nthe private names of a public project\n'
+names="$HOME/.config/trellis/private-names"
+tl_lacks 'a project that is not public has no section' 'private names' "$(doctor; out)"
+git config -f trellis.config project.public true
+tl_eq 'without a list it is a warning' '0' "$(doctor)"
+tl_has '  that names it' "warn  no list of private names ($names)" "$(out)"
+tl_has 'hooks that do not call it are another' 'warn  .githooks/pre-commit, commit-msg, pre-push do not call trellis private-names: take them again from templates/githooks/' "$(out)"
+mkdir -p "$(dirname "$names")" && printf 'acme\n' > "$names"
+mkdir -p .githooks && cp "$TRELLIS_ROOT"/templates/githooks/* .githooks/
+doctor > /dev/null
+tl_has 'with a list it is ok' 'ok    the list of private names is there' "$(out)"
+tl_has '  and the hooks too' 'ok    the git hooks call trellis private-names' "$(out)"
+for hook in pre-commit commit-msg pre-push; do
+  sed 's/^\(.*"$trellis" private-names\)/# \1/' "$TRELLIS_ROOT/templates/githooks/$hook" > ".githooks/$hook"
+  doctor > /dev/null
+  tl_has "$hook with its call commented out is named" "warn  .githooks/$hook do not call trellis private-names" "$(out)"
+  cp "$TRELLIS_ROOT/templates/githooks/$hook" .githooks/
+done
+rm "$names" && mkdir "$names"
+tl_eq 'a list that cannot be read is a warning' '0' "$(doctor)"
+tl_has '  that says so' 'cannot be read' "$(out)"
+rmdir "$names"
+rm "$tools/node"
+doctor > /dev/null
+tl_has 'without node the list is not read' 'info  the list of private names is not read (node not found)' "$(out)"
+ln -s "$NODE" "$tools/node"
+rm .githooks/*
+git config -f trellis.config --unset project.public
+
 printf '\ngit.hooksPath\n'
 git config -f trellis.config git.hooksPath tool/hooks
 tl_eq 'core.hooksPath out of it fails' '1' "$(doctor)"

@@ -13,6 +13,7 @@
 
 project.name|single|
 project.locale|enum:en,es|en
+project.public|enum:true,false|false
 
 trellis.upstream|single|rologr35/trellis
 

@@ -4,6 +4,8 @@
 #   - refuses a commit on git.releaseBranch (the integration branch has no mechanical guard on
 #     purpose: a person may commit a small change there; for Claude the rule is in the method);
 #   - runs [command] secretScan (configured and missing: a warning, and `trellis doctor` FAILs);
+#   - runs `trellis private-names --staged`, which judges the added lines and the paths of a public
+#     project;
 #   - runs `trellis verify --staged`, in a project with a copy of trellis: nobody edits it by hand, and
 #     it is not removed while .claude/settings.json loads its hooks;
 #   - runs `trellis ratchet` on every commit, and `trellis hygiene --staged` when the staged change
@@ -45,6 +47,8 @@ if [ -n "$scan" ]; then
     echo "pre-commit: the secret scanner ${run%% *} is not installed, scan skipped (trellis doctor)" >&2
   fi
 fi
+
+"$trellis" private-names --staged || exit 1
 
 "$trellis" ratchet || exit 1
 

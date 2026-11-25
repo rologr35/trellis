@@ -22,7 +22,8 @@
 # run text, or its ci text when set: a plain substring search, so a folded `run: >-`, a comment or
 # a commented-out step is misjudged, and `npm test` is found inside `pnpm test`; a hint, not a
 # parser); .github/workflows/trellis.yml that does not name consumer-closed.yml, with tracker.kind =
-# github; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
+# github; in a public project, no list of private names, or git hooks that do not call `trellis
+# private-names`; the plugin enabled in a project with a copy; without a copy, the installed plugin is not at the
 # sha the project pins; the repository of trellis judged by another checkout; no secret scanner configured; uncommitted changes, unpushed
 # commits, worktrees of branches missing from origin. info: what the release is waiting for.
 
@@ -306,6 +307,25 @@ else
 fi
 
 # ------------------------------------------------------------------------------------------------
+if [ "$(tc_get project.public)" = 'true' ]; then
+  section 'private names'
+  if ! command -v node >/dev/null 2>&1; then
+    info 'the list of private names is not read (node not found)'
+  else
+    said="$(bash "$TRELLIS_ROOT/scripts/private-names.sh" --text '' 2>&1)"
+    if [ -n "$said" ]; then warn "${said#private-names: }"; else ok 'the list of private names is there'; fi
+  fi
+  lacking=''
+  for hook in pre-commit commit-msg pre-push; do
+    grep -qE '^[^#]*private-names' "$top/$hooks_expected/$hook" 2>/dev/null || lacking="${lacking:+$lacking, }$hook"
+  done
+  if [ -n "$lacking" ]; then
+    warn "$hooks_expected/$lacking do not call trellis private-names: take them again from templates/githooks/"
+  else
+    ok 'the git hooks call trellis private-names'
+  fi
+fi
+
 section 'env files (presence only, no value is read)'
 env_files="$(tc_all toolchain.envFile)"
 if [ -z "$env_files" ]; then

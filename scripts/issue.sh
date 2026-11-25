@@ -79,6 +79,9 @@
 # After the check of a body, and of the plan in force at pick-up as --print gives it, also when it
 # fails, runs the check of the project, command.issueCheck (lib/project-check.sh).
 #
+# In a public project create, follow-up and stop refuse a private name of the machine in what they
+# publish, the title too (scripts/private-names.sh).
+#
 # With tracker.kind = none the module is off and every form exits 2. Otherwise 0 when the check
 # passes, 1 when it does not, with every miss printed, and 2 on a wrong use.
 
@@ -112,6 +115,7 @@ if [ "$(tc_get tracker.kind)" = 'none' ]; then
 fi
 
 judge() { node "$TRELLIS_ROOT/scripts/issue-check.mjs" "$@"; }
+private_names() { bash "$TRELLIS_ROOT/scripts/private-names.sh" "$@"; }
 
 fetch_now() {
   GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
@@ -300,7 +304,7 @@ stop_issue() {
   case "$n" in '' | *[!0-9]*) usage ;; esac
   [ -f "$file" ] || usage
   make_tmp || return 1
-  judge stop "$file" "$ISSUE_TMP/stop" && write_stop "$n"
+  judge stop "$file" "$ISSUE_TMP/stop" && private_names --file "$ISSUE_TMP/stop" && write_stop "$n"
 }
 
 claim_issue() {
@@ -423,6 +427,7 @@ create_issue() {
   case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
   fetch_integration
   judge_body "$file" >&2 || return 1
+  private_names --text "$title" --file "$file" || return 1
   [ -n "$class" ] || class="$(judge class "$file")"
   case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
   ensure_label "$class" "$colour" "Complexity $class" && post_issue "$title" "$file" "$class"
@@ -478,6 +483,7 @@ follow_up() {
   [ -n "$title" ] && [ -f "$file" ] && [ -n "$words" ] && [ -n "$checked" ] || usage
   make_tmp || return 1
   judge follow-up "$file" "$ISSUE_TMP/follow-up" "$reopen" || return 1
+  private_names --text "$title" --file "$ISSUE_TMP/follow-up" || return 1
 
   branch="$(tc_get git.integrationBranch)"
   fetch_now || { refuse_follow_up "origin/$branch could not be fetched"; return 1; }
