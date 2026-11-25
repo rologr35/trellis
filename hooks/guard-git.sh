@@ -12,8 +12,8 @@
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
 #   4. a `gh issue create`, its alias `gh issue new` or a `trellis issue create` when the session's
-#      transcript holds no earlier `gh issue list` with --search: a plan written without reading what was decided around it
-#      repeats a decision;
+#      transcript holds no earlier `gh issue list` with --search, nor a `gh api search/issues`: a plan
+#      written without reading what was decided around it repeats a decision;
 #   5. a `gh pr merge` that names no pull request, whose base cannot be read, that runs in a cloud
 #      session (CLAUDE_CODE_REMOTE), or whose base is not in git.assistantMayMergeInto. Silence is not
 #      a neutral opinion on a merge, unlike on the other guards.
@@ -161,24 +161,24 @@ guard_branch_switch() {
   issue="$(branch_issue "$branch")"
   [ -n "$issue" ] || return 0
   command -v gh >/dev/null 2>&1 || return 0
-  if ! gh_as_owner "$dir" "$(gh_owner "$dir")" issue view "$issue" --json state --jq .state; then
+  if ! gh_api "$dir" '' "issues/$issue" --jq .state; then
     hold_message "trellis guard-git: the state of issue $issue could not be read as $GH_AS_ACCOUNT (${GH_AS_ERR:-gh failed}), so the open-issue check of this switch was skipped."
     return 0
   fi
   state="$GH_AS_OUT"
-  if [ "$state" = 'OPEN' ]; then
+  if [ "$state" = 'open' ]; then
     deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
   fi
 }
 
-# True when the transcript holds, before this call, a `gh issue list` with --search or -S. A
-# transcript that is missing or unreadable answers yes: no opinion.
+# True when the transcript holds, before this call, a `gh issue list` with --search or -S, or a `gh api
+# search/issues`. A transcript that is missing or unreadable answers yes: no opinion.
 session_searched_backlog() {
   [ -n "$TRANSCRIPT" ] && [ -r "$TRANSCRIPT" ] || return 0
   node -e '
     const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
     const current = process.argv[2];
-    const search = /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b/;
+    const search = /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\ssearch\/issues\b/;
     let parsed = 0;
     for (const line of lines) {
       let entry;
@@ -218,7 +218,7 @@ guard_gh_issue() {
   [ "$TRACKER" = 'github' ] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   session_searched_backlog && return 0
-  deny "An issue is created after the backlog was searched by concept, because the closed issues record what was already decided. Search first: gh issue list --state all --limit 60 --search '<concept>', read what is related, then repeat the creation."
+  deny "An issue is created after the backlog was searched by concept, because the closed issues record what was already decided. Search first: gh issue list --state all --limit 60 --search '<concept>' (or gh api -X GET search/issues -f q='repo:<owner>/<repo> <concept>'), read what is related, then repeat the creation."
 }
 
 # Whether a word of `gh pr merge` is the -R / --repo flag, in any form gh reads: -R x/y, -Rx/y, -R=x/y,
@@ -265,10 +265,30 @@ short_group_takes_next() {
   return 1
 }
 
+# The repository gh merges in when none is named and the directory has more remotes than origin: the one
+# `gh repo set-default` marked, else the remote upstream, then github, then origin. Prints nothing when
+# the origin, or gh by itself (GH_REPO), says it.
+gh_merge_remote() {
+  local key value name url
+  [ -z "${GH_REPO:-}" ] || return 0
+  read -r key value <<< "$(git -C "$1" config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null | head -n 1)"
+  if [ -n "$key" ]; then
+    name="${key#remote.}"
+    name="${name%.gh-resolved}"
+    if [ "$value" = 'base' ]; then git -C "$1" remote get-url "$name" 2>/dev/null; else printf '%s' "$value"; fi
+    return 0
+  fi
+  for name in upstream github; do
+    url="$(git -C "$1" remote get-url "$name" 2>/dev/null)" || continue
+    # A remote that is a path of this machine is none of gh's.
+    case "$url" in *://* | *@*:*) printf '%s' "$url"; return 0 ;; esac
+  done
+}
+
 guard_gh_merge() {
   [ "${1:-}" = 'pr' ] && [ "${2:-}" = 'merge' ] || return 0
   fail_closed
-  local dir="$DIR" target='' repo='' word base allowed
+  local dir="$DIR" target='' repo='' word base='' refused='' allowed
   if [ -n "${CLAUDE_CODE_REMOTE:-}" ]; then
     deny 'A cloud session never merges a pull request: the run that writes a change is not the one that merges it. A person merges.'
   fi
@@ -295,20 +315,37 @@ guard_gh_merge() {
   if [ -z "$target" ]; then
     deny "A merge names its pull request (number, URL or branch), so its base can be read first: gh pr merge <n>. The assistant merges only into: ${allowed:-nothing}."
   fi
-  # The account that sees the repository is its owner's: of the URL naming the pull request, of -R,
-  # or of the origin remote.
-  local hint="$repo"
+  # The repository is the one gh merges in: of the URL naming the pull request, of -R, or of the
+  # remote gh takes. Its owner's account is the one that sees it.
+  local hint="$repo" number=''
   case "$target" in http://* | https://*) hint="$target" ;; esac
-  if [ -n "$repo" ]; then
-    gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName --repo "$repo"
-  else
-    gh_as_owner "$dir" "$(gh_owner "$dir" "$hint")" pr view "$target" --json baseRefName --jq .baseRefName
+  [ -n "$hint" ] || hint="$(gh_merge_remote "$dir")"
+  if [[ "$target" =~ ^https?://[^/]+/[^/]+/[^/]+/pull/([0-9]+)([/?#].*)?$ ]] || [[ "$target" =~ ^\#?([0-9]+)$ ]]; then
+    number="${BASH_REMATCH[1]}"
   fi
-  base="${GH_AS_OUT//[[:space:]]/}"
-  if [ -z "$base" ]; then
+  if [ -n "$number" ]; then
+    gh_api "$dir" "$hint" "pulls/$number" --jq .base.ref && base="$GH_AS_OUT"
+  elif [[ "$target" == http://* || "$target" == https://* ]]; then
+    GH_AS_ACCOUNT='the active account'
+    GH_AS_ERR='it names no pull request'
+  else
+    # A branch is looked up in its repository, and <owner>:<branch> in the fork of that owner.
+    local head="$target"
+    if [[ "$head" != *:* ]]; then
+      gh_repo "$dir" "$hint" || true
+      head="${GH_REPO_PATH%%/*}:$head"
+    fi
+    gh_api "$dir" "$hint" pulls -X GET -F "head=$head" -f state=open --jq '.[].base.ref' && base="$GH_AS_OUT"
+  fi
+  if [ -z "${base//[[:space:]]/}" ]; then
     deny "The base branch of pull request $target could not be read as $GH_AS_ACCOUNT (${GH_AS_ERR:-gh failed or answered nothing}), and a merge whose base is unknown is refused. Check the pull request and gh's session, then repeat."
   fi
-  if ! in_list "$base" "$MERGE_INTO"; then
+  # A branch can have more than one open pull request, and each of their bases counts.
+  while IFS= read -r word; do
+    if [ -z "$refused" ] && ! in_list "${word//[[:space:]]/}" "$MERGE_INTO"; then refused="${word:-?}"; fi
+  done <<< "$base"
+  base="$refused"
+  if [ -n "$base" ]; then
     deny "Pull request $target merges into $base, and the assistant merges only into: ${allowed:-nothing}. A merge into $base is a person's."
   fi
 }

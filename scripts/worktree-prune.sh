@@ -35,9 +35,6 @@ cd "$main_worktree" || exit 1
 
 integration="$(tc_get git.integrationBranch)"
 tracker="$(tc_get tracker.kind)"
-# GitHub is asked as the account of the repository's owner, which is not always the active one.
-gh_account_owner=''
-[ "$tracker" = 'github' ] && gh_account_owner="$(gh_owner "$main_worktree")"
 
 if ! GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 \
      fetch --prune --quiet origin 2>/dev/null; then
@@ -118,7 +115,9 @@ while IFS= read -r path; do
       fi
     done <<< "$(git log --first-parent --merges --format='%H %P %s' "origin/$integration")"
     if [ -z "$own_merge" ] && [ "$tracker" = 'github' ]; then
-      if gh_as_owner "$main_worktree" "$gh_account_owner" pr list --head "$branch" --state merged --json headRefOid --jq '.[].headRefOid'; then
+      gh_repo "$main_worktree" || true
+      if gh_api "$main_worktree" '' pulls --paginate -X GET -F "head=${GH_REPO_PATH%%/*}:$branch" -f state=closed -f per_page=100 \
+           --jq '.[] | select(.merged_at != null) | .head.sha'; then
         if [[ $'\n'"$GH_AS_OUT"$'\n' == *$'\n'"$tip"$'\n'* ]]; then
           own_merge="github:$branch"
         fi

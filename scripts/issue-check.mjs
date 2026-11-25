@@ -1,11 +1,12 @@
 // The judgment of `trellis issue` (scripts/issue.sh holds the contract).
 //   node issue-check.mjs body <file>    judges a body before it is published
 //   node issue-check.mjs class <file>   prints S, M or L, the class of a body that passes
-//   node issue-check.mjs issue <json>   judges an issue as `gh issue view --json body,comments` gives it
-//   node issue-check.mjs deps <json>    prints what the plan of an issue depends on, one per line:
-//                                       ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
-//   node issue-check.mjs print <json>   prints the plan of an issue, its amendments resolved
-//   node issue-check.mjs issue-class <json>
+//   node issue-check.mjs issue <json> <comments>   judges an issue as REST gives it, with its comments,
+//                                       one per line
+//   node issue-check.mjs deps <json> <comments>    prints what the plan of an issue depends on, one per
+//                                       line: ref<TAB><owner/repo or -><TAB><n>, or text<TAB><the line>
+//   node issue-check.mjs print <json> <comments>   prints the plan of an issue, its amendments resolved
+//   node issue-check.mjs issue-class <json> <comments>
 // The text is data: nothing in it is run.
 
 import {execFileSync} from 'node:child_process';
@@ -13,8 +14,9 @@ import {readFileSync} from 'node:fs';
 import {loadConfig} from '../lib/config.mjs';
 import {ISSUE, localeOf} from '../lib/locale.mjs';
 import {styleMisses} from '../lib/style.mjs';
+import {commentsOf, mayWrite} from './issue-close.mjs';
 
-const [, , mode, file] = process.argv;
+const [, , mode, file, commentsFile] = process.argv;
 const config = loadConfig();
 const L = ISSUE[localeOf(config)];
 const CLASSES = ['S', 'M', 'L'];
@@ -78,12 +80,9 @@ function parse(text) {
   return {sections: sectionsOf(rest), complexity: value};
 }
 
-// Whoever may write in the repository. Anyone may comment on an issue of a public one.
-const TRUSTED = ['OWNER', 'MEMBER', 'COLLABORATOR'];
-
 /** What a comment amends, when it is an amendment: its `###` sections of the mould, and its class. */
 function amendmentOf(comment) {
-  if (!TRUSTED.includes(comment.authorAssociation)) return null;
+  if (!mayWrite(comment)) return null;
   const {value, rest} = complexityOf(linesOf(comment.body));
   const first = rest.find(l => l.text.trim() !== '');
   if (!first || first.code || !new RegExp(`^##\\s+${escape(L.amendment)}\\s+\\([^)]+\\)`).test(first.text)) return null;
@@ -104,10 +103,9 @@ function amendmentOf(comment) {
 }
 
 /** The plan of an issue: the body, with each section and the class of the last amendment that has it. */
-function resolve(issue) {
+function resolve(issue, comments) {
   const plan = parse(issue.body);
-  const comments = [...(issue.comments ?? [])].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  for (const comment of comments) {
+  for (const comment of [...comments].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))) {
     const amendment = amendmentOf(comment);
     if (!amendment) continue;
     plan.sections = [...plan.sections.filter(s => !amendment.sections.has(s.name)), ...amendment.sections.values()];
@@ -316,7 +314,7 @@ const text = readFileSync(file, 'utf8');
 if (mode === 'body') process.exitCode = report(judge(parse(text), linesOf(text)));
 if (mode === 'class') console.log(parse(text).complexity);
 if (!['body', 'class'].includes(mode)) {
-  const plan = resolve(JSON.parse(text));
+  const plan = resolve(JSON.parse(text), commentsOf(commentsFile));
   if (mode === 'issue') process.exitCode = report(judge(plan, linesOf(render(plan))));
   if (mode === 'issue-class') console.log(plan.complexity);
   if (mode === 'print') console.log(render(plan));

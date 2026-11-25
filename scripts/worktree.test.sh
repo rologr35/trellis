@@ -92,17 +92,20 @@ case " $* " in
 esac
 exec "$REAL_GIT" "$@"
 SHIM
-# gh lists the merged pull request only to the owner's token (fake), and logs each call.
+# gh answers only `api`, as in a cloud session, where the rest is refused with the text below. It lists the
+# merged pull requests of a branch only to the owner's token (fake), and logs each call.
 cat > "$shim/gh" <<'GH'
 #!/bin/sh
 printf '%s %s token=%s\n' "$1" "$2" "${GH_TOKEN:-none}" >> "$GH_CALLS"
 case "$1 $2" in
   'auth token') cat "$GH_TOKEN_FILE" 2>/dev/null || exit 1 ;;
-  'pr list')
+  'api repos/acme/thing/pulls')
+    case " $* " in *' --paginate '*'-F head=acme:9-ghmerge -f state=closed '* | *' --paginate '*'-F head=acme:10-ghmerge-again -f state=closed '*) ;;
+      *) echo "unexpected call: $*" >&2; exit 1 ;; esac
     [ -f "$GH_FAIL" ] && { echo 'HTTP 401: Bad credentials' >&2; exit 1; }
-    [ "${GH_TOKEN:-none}" = 'tok-acme' ] || { echo 'GraphQL: Could not resolve to a Repository' >&2; exit 1; }
+    [ "${GH_TOKEN:-none}" = 'tok-acme' ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }
     cat "$GH_HEADS" ;;
-  *) exit 0 ;;
+  *) echo 'GitHub GraphQL is not available from Claude Code sessions; use the REST API' >&2; exit 1 ;;
 esac
 GH
 chmod +x "$shim/git" "$shim/gh"
@@ -120,10 +123,10 @@ rm "$GH_FAIL"
 : > "$GH_CALLS"
 out="$(PATH="$shim:$PATH" "$TRELLIS" worktree prune 2>&1)"
 tl_has 'a merged pull request is seen and the worktree removed' "removed $gpath (9-ghmerge)" "$out"
-tl_has 'with the owner token' 'pr list token=tok-acme' "$(cat "$GH_CALLS")"
+tl_has 'with the owner token' 'repos/acme/thing/pulls token=tok-acme' "$(cat "$GH_CALLS")"
 tl_has 'and the second one too' "removed $gpath2 (10-ghmerge-again)" "$out"
 tl_eq 'two reads, one lookup of the token' '1' "$(grep -c 'auth token' "$GH_CALLS")"
-tl_eq 'for two reads' '2' "$(grep -c 'pr list' "$GH_CALLS")"
+tl_eq 'for two reads' '2' "$(grep -c '/pulls' "$GH_CALLS")"
 tl_lacks 'the token is not printed either' 'tok-acme' "$out"
 
 tl_done

@@ -5,30 +5,43 @@
 HOOK="$TRELLIS_ROOT/hooks/guard-git.sh"
 stubs="$TL_TMP/stubs"
 mkdir -p "$stubs"
-# gh answers from files: issue state and pull request base. Each call is logged with the token it
-# ran with (fake values), `need-<n>` makes a pull request visible to that token only, and `auth
-# token -u <user>` prints token-<user> or fails, as gh does for an account that is not signed in.
+# gh answers only `api`, as in a cloud session, where the rest is refused with the text below. It answers
+# from files: the state of an issue, the base of a pull request, and the bases of the open ones of a
+# branch. Each call is logged with the token it ran with (fake values), `need-<n>` makes a pull request
+# visible to that token only, `where-<n>` is the only repository that has it, and `auth token -u <user>`
+# prints token-<user> or fails, as gh does for an account that is not signed in. An error has its body on
+# stdout, as that of gh api has.
 cat > "$stubs/gh" <<'GH'
 #!/bin/sh
 tok="${GH_TOKEN:-none}"
-printf '%s %s %s token=%s\n' "$1" "$2" "$3" "$tok" >> "$GH_FIXTURES/calls.log"
-fail() { echo "$1" >&2; exit 1; }
-case "$1 $2" in
-  'auth token')
-    user=''; prev=''
-    for a in "$@"; do [ "$prev" = -u ] && user="$a"; prev="$a"; done
-    cat "$GH_FIXTURES/token-$user" 2>/dev/null || exit 1 ;;
-  'issue view')
-    [ -f "$GH_FIXTURES/issue-$3" ] || fail "HTTP 502: bad gateway (issue $3)"
-    cat "$GH_FIXTURES/issue-$3" ;;
-  'pr view')
-    n="${3##*/}"
+printf '%s %s token=%s\n' "$1" "$2" "$tok" >> "$GH_FIXTURES/calls.log"
+fail() { echo '{"message":"Not Found"}'; echo "$1" >&2; exit 1; }
+if [ "$1 $2" = 'auth token' ]; then
+  user=''; prev=''
+  for a in "$@"; do [ "$prev" = -u ] && user="$a"; prev="$a"; done
+  cat "$GH_FIXTURES/token-$user" 2>/dev/null || exit 1
+  exit 0
+fi
+[ "$1" = 'api' ] || { echo 'GitHub GraphQL is not available from Claude Code sessions; use the REST API' >&2; exit 1; }
+n="${2##*/}"
+repo="${2#repos/}"
+case "$2" in
+  repos/*/*/issues/[0-9]*)
+    [ -f "$GH_FIXTURES/issue-$n" ] || fail "HTTP 502: bad gateway (issue $n)"
+    cat "$GH_FIXTURES/issue-$n" ;;
+  repos/*/*/pulls/[0-9]*)
     if [ -f "$GH_FIXTURES/need-$n" ] && [ "$tok" != "$(cat "$GH_FIXTURES/need-$n")" ]; then
-      fail "GraphQL: Could not resolve to a PullRequest with the number of $n."
+      fail "gh: Not Found (HTTP 404) (pull request $n)"
+    fi
+    if [ -f "$GH_FIXTURES/where-$n" ] && [ "${repo%/pulls/*}" != "$(cat "$GH_FIXTURES/where-$n")" ]; then
+      fail "gh: Not Found (HTTP 404) (${repo%/pulls/*})"
     fi
     [ -f "$GH_FIXTURES/leak-$n" ] && fail "auth failed for token $tok"
     cat "$GH_FIXTURES/pr-$n" 2>/dev/null || fail "no pull request $n" ;;
-  *) exit 0 ;;
+  repos/*/*/pulls)
+    for a in "$@"; do case "$a" in head=*) cat "$GH_FIXTURES/$a" 2>/dev/null ;; esac; done
+    exit 0 ;;
+  *) fail "gh: Not Found (HTTP 404)" ;;
 esac
 GH
 chmod +x "$stubs/gh"
@@ -324,9 +337,9 @@ tl_eq 'a quoted issue branch' 'deny' "$(verdict 'git switch -c "12-foo"')"
 tl_eq 'a path restore is not a switch' 'allow' "$(verdict 'git checkout -- file.txt')"
 git branch 4-thing
 git switch -q 4-thing
-printf 'OPEN\n' > "$GH_FIXTURES/issue-4"
+printf 'open\n' > "$GH_FIXTURES/issue-4"
 tl_eq 'away from a branch whose issue is open' 'deny' "$(verdict 'git switch develop')"
-printf 'CLOSED\n' > "$GH_FIXTURES/issue-4"
+printf 'closed\n' > "$GH_FIXTURES/issue-4"
 tl_eq 'away from a branch whose issue is closed' 'allow' "$(verdict 'git switch develop')"
 rm "$GH_FIXTURES/issue-4"
 tl_eq 'gh failing is no opinion' 'allow' "$(verdict 'git switch develop')"
@@ -359,6 +372,12 @@ tl_eq 'the words of its title are data, as those of gh issue create are' 'allow'
 tl_eq 'a push in a substitution of its title is judged' 'deny' "$(verdict 'trellis issue create --title "$(git push origin main)" --body-file b.md' "$repo" "$transcript")"
 tl_eq 'another trellis subcommand with those words is not judged' 'deny' "$(verdict "trellis other 'push main'" "$repo" "$transcript")"
 tl_eq 'a wrapper in front of it is not judged either' 'deny' "$(verdict "env trellis issue create --title 'never push to main'" "$repo" "$transcript")"
+for search in "gh api search/issues -X GET -f q='repo:a/b login'" "GH_TOKEN=x gh api -X GET search/issues -f q=login"; do
+  node -e 'console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command: process.argv[1]}}]}}))' "$search" > "$transcript"
+  tl_eq "after $search" 'allow' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
+done
+printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "gh api repos/a/b/issues"}}]}}\n' > "$transcript"
+tl_eq 'a read of the issues is not a search' 'deny' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
 tl_eq 'no transcript is no opinion' 'allow' "$(verdict 'gh issue create --title x')"
 
 printf '\nmerge\n'
@@ -375,6 +394,20 @@ for form in '-sb 12 13' '-mF 12 13' '-dt 12 13' '-rsA 12 13' '-bs 13' '-sbtext 1
 done
 tl_eq 'a group ending in a value flag, then an allowed pull request' 'allow' "$(verdict 'gh pr merge -sb 13 12')"
 tl_eq 'a group with a letter gh refuses keeps today'"'"'s reading' 'allow' "$(verdict 'gh pr merge -xb 12 13')"
+printf 'develop\n' > "$GH_FIXTURES/head={owner}:20-thing"
+printf 'main\n' > "$GH_FIXTURES/head={owner}:21-thing"
+printf 'develop\nmain\n' > "$GH_FIXTURES/head={owner}:22-thing"
+printf 'develop\n' > "$GH_FIXTURES/head=fork:20-thing"
+tl_eq 'a branch whose pull request goes into an allowed base' 'allow' "$(verdict 'gh pr merge 20-thing --merge')"
+tl_eq 'a branch whose pull request does not' 'deny' "$(verdict 'gh pr merge 21-thing --merge')"
+tl_eq 'a branch with two pull requests, one of them not' 'deny' "$(verdict 'gh pr merge 22-thing --merge')"
+tl_eq 'a branch with no open pull request' 'deny' "$(verdict 'gh pr merge 23-thing --merge')"
+tl_eq 'the branch of a fork' 'allow' "$(verdict 'gh pr merge fork:20-thing --merge')"
+tl_eq 'a number written with #' 'allow' "$(verdict "gh pr merge '#12' --merge")"
+tl_eq 'a URL that is not of a pull request' 'deny' "$(verdict 'gh pr merge https://github.com/acme/thing/issues/12')"
+tl_eq 'a URL of one of its tabs' 'allow' "$(verdict 'gh pr merge https://github.com/acme/thing/pull/12/files')"
+tl_eq 'a repository that does not parse is not read as the one of origin' 'deny' "$(verdict 'gh pr merge 12 -R nothing')"
+tl_eq 'nor is a variable the shell would fill in' 'deny' "$(verdict 'gh pr merge 12 -R "$OTHER/thing"')"
 tl_eq 'from a cloud session' 'deny' "$(CLAUDE_CODE_REMOTE=1 verdict 'gh pr merge 12')"
 
 printf '\na config that does not parse\n'
@@ -408,90 +441,109 @@ set_origin() { git remote remove origin 2>/dev/null; [ -z "${1:-}" ] || git remo
 set_origin https://github.com/acme/thing.git
 reset
 tl_eq 'a pull request only the owner sees is read, and judged by its base' 'allow' "$(verdict 'gh pr merge 12 --merge')"
-tl_has 'the merge guard asks with the owner token' 'pr view 12 token=tok-acme' "$(calls)"
+tl_has 'the merge guard asks with the owner token' 'repos/acme/thing/pulls/12 token=tok-acme' "$(calls)"
 tl_eq 'a base not allowed is denied with the owner token' 'deny' "$(verdict 'gh pr merge 13 --merge')"
-tl_has 'also read with the owner token' 'pr view 13 token=tok-acme' "$(calls)"
+tl_has 'also read with the owner token' 'repos/acme/thing/pulls/13 token=tok-acme' "$(calls)"
 git switch -q 4-thing
-printf 'OPEN\n' > "$GH_FIXTURES/issue-4"
+printf 'open\n' > "$GH_FIXTURES/issue-4"
 reset
 tl_eq 'the open-issue guard reads with the owner token' 'deny' "$(verdict 'git switch develop')"
-tl_has 'the issue view' 'issue view 4 token=tok-acme' "$(calls)"
-printf 'CLOSED\n' > "$GH_FIXTURES/issue-4"
+tl_has 'the issue view' 'repos/acme/thing/issues/4 token=tok-acme' "$(calls)"
+printf 'closed\n' > "$GH_FIXTURES/issue-4"
 git switch -q develop
 
 printf '\nwhich owner is asked\n'
 reset
 tl_eq 'by -R' 'allow' "$(verdict 'gh pr merge 14 --merge -R other/thing')"
-tl_has 'the -R owner token' 'pr view 14 token=tok-other' "$(calls)"
+tl_has 'the -R owner token' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge 14 --repo github.com/other/thing' >/dev/null
-tl_has 'by --repo with a host' 'pr view 14 token=tok-other' "$(calls)"
+tl_has 'by --repo with a host' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge 14 --repo=https://github.com/other/thing' >/dev/null
-tl_has 'by --repo= with a URL' 'pr view 14 token=tok-other' "$(calls)"
+tl_has 'by --repo= with a URL' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge https://github.com/other/thing/pull/14' >/dev/null
-tl_has 'by the URL of the pull request' 'pr view https://github.com/other/thing/pull/14 token=tok-other' "$(calls)"
+tl_has 'by the URL of the pull request' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge 14 --merge -Rother/thing' >/dev/null
-tl_has 'by -R with the value attached' 'pr view 14 token=tok-other' "$(calls)"
+tl_has 'by -R with the value attached' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 for form in '-R=other/thing' '-dR other/thing' '-dRother/thing'; do
   reset
   verdict "gh pr merge 14 --merge $form" >/dev/null
-  tl_has "by $form" 'pr view 14 token=tok-other' "$(calls)"
+  tl_has "by $form" 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 done
 reset
 verdict 'gh pr merge 12 && gh pr merge 14 -R other/thing' >/dev/null
-tl_has 'two owners in one command: the first keeps its token' 'pr view 12 token=tok-acme' "$(calls)"
-tl_has 'and the second gets its own' 'pr view 14 token=tok-other' "$(calls)"
+tl_has 'two owners in one command: the first keeps its token' 'repos/acme/thing/pulls/12 token=tok-acme' "$(calls)"
+tl_has 'and the second gets its own' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 reset
 verdict 'gh pr merge https://github.com/other/thing/pull/14 -R acme/thing' >/dev/null
-tl_has 'the URL of the pull request wins over -R' 'pr view https://github.com/other/thing/pull/14 token=tok-other' "$(calls)"
+tl_has 'the URL of the pull request wins over -R' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
 for form in 'https://github.com:443/acme/thing.git' 'https://github.com/acme/thing' 'https://someone@github.com/acme/thing.git' 'git@github.com:acme/thing.git' \
             'ssh://git@github.com/acme/thing.git' 'ssh://git@github.com:22/acme/thing.git'; do
   set_origin "$form"
   reset
   verdict 'gh pr merge 12' >/dev/null
-  tl_has "by the origin $form" 'pr view 12 token=tok-acme' "$(calls)"
+  tl_has "by the origin $form" 'repos/acme/thing/pulls/12 token=tok-acme' "$(calls)"
 done
 set_origin https://github.com/ghost/thing.git
 reset
 tl_eq 'an owner that is not signed in is asked as the active account' 'deny' "$(verdict 'gh pr merge 12')"
-tl_has 'with no token' 'pr view 12 token=none' "$(calls)"
+tl_has 'with no token' 'repos/ghost/thing/pulls/12 token=none' "$(calls)"
 set_origin https://gitlab.com/acme/thing.git
 reset
 verdict 'gh pr merge 12' >/dev/null
-tl_has 'another host is asked as the active account' 'pr view 12 token=none' "$(calls)"
+tl_has 'another host is asked as the active account' 'repos/acme/thing/pulls/12 token=none' "$(calls)"
 tl_lacks 'and no token is looked up' 'auth token' "$(calls)"
 set_origin ''
 reset
 verdict 'gh pr merge 12' >/dev/null
-tl_has 'no origin is asked as the active account' 'pr view 12 token=none' "$(calls)"
+tl_has 'no origin is asked as the active account' 'repos/{owner}/{repo}/pulls/12 token=none' "$(calls)"
 set_origin 'git@github.com:'
 reset
 verdict 'gh pr merge 12' >/dev/null
-tl_has 'an origin that does not parse is asked as the active account' 'pr view 12 token=none' "$(calls)"
+tl_has 'an origin that does not parse is asked as the active account' 'repos/{owner}/{repo}/pulls/12 token=none' "$(calls)"
 printf 'tok-victim\n' > "$GH_FIXTURES/token-victim"
 set_origin 'https://acme.ghe.com/x@github.com/victim/r'
 reset
 verdict 'gh pr merge 12' >/dev/null
-tl_has 'a host hidden after an @ in the path is not github.com' 'pr view 12 token=none' "$(calls)"
+tl_has 'a host hidden after an @ in the path is not github.com' 'repos/{owner}/{repo}/pulls/12 token=none' "$(calls)"
 tl_lacks 'and its token is not looked up' 'auth token' "$(calls)"
 set_origin 'git@github-work:acme/thing.git'
 reset
 verdict 'gh pr merge 12' >/dev/null
-tl_has 'an ssh host alias gives no owner' 'pr view 12 token=none' "$(calls)"
+tl_has 'an ssh host alias gives no owner' 'repos/{owner}/{repo}/pulls/12 token=none' "$(calls)"
 set_origin https://github.com/acme/thing.git
+
+printf '\nthe repository gh merges in\n'
+printf 'acme/thing\n' > "$GH_FIXTURES/where-12"
+tl_eq 'the one of origin' 'allow' "$(verdict 'gh pr merge 12')"
+git remote add upstream https://github.com/up/thing.git
+tl_eq 'the one of upstream, when there is one' 'deny' "$(verdict 'gh pr merge 12')"
+reset
+verdict 'gh pr merge 12' >/dev/null
+tl_has '  which is read' 'repos/up/thing/pulls/12 ' "$(calls)"
+tl_eq '-R says it' 'allow' "$(verdict 'gh pr merge 12 -R acme/thing')"
+git config remote.origin.gh-resolved base
+tl_eq 'the one gh repo set-default marked' 'allow' "$(verdict 'gh pr merge 12')"
+git config remote.origin.gh-resolved up/thing
+tl_eq 'the one it names' 'deny' "$(verdict 'gh pr merge 12')"
+git config --unset remote.origin.gh-resolved
+git remote set-url upstream "$TL_TMP/nowhere"
+tl_eq 'a path of this machine is not a repository of GitHub' 'allow' "$(verdict 'gh pr merge 12')"
+git remote remove upstream
+rm "$GH_FIXTURES/where-12"
 
 printf '\nan environment gh already reads is left alone\n'
 reset
 GH_TOKEN=preset verdict 'gh pr merge 12' >/dev/null
-tl_has 'GH_TOKEN set' 'pr view 12 token=preset' "$(calls)"
+tl_has 'GH_TOKEN set' 'repos/acme/thing/pulls/12 token=preset' "$(calls)"
 tl_lacks 'no lookup' 'auth token' "$(calls)"
 for var in GITHUB_TOKEN GH_HOST GH_REPO; do
   reset
   (export "$var=x"; verdict 'gh pr merge 12' >/dev/null)
-  tl_has "$var set: asked as the active account" 'pr view 12 token=none' "$(calls)"
+  tl_has "$var set: asked as the active account" '/pulls/12 token=none' "$(calls)"
   tl_lacks "$var set: no lookup" 'auth token' "$(calls)"
 done
 reset
@@ -530,11 +582,11 @@ out="$(rawout 'git switch develop && git push origin main')"
 tl_eq 'a deny after it is one object holding the message' 'yes' "$(printf '%s' "$out" | node -e 'const o = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(o.hookSpecificOutput.permissionDecision === "deny" && /issue 4/.test(o.systemMessage) ? "yes" : "no")' 2>/dev/null)"
 out="$(rawout 'git switch develop && git status')"
 tl_eq 'no deny after it is still one object' 'yes' "$(printf '%s' "$out" | node -e 'const o = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(!o.hookSpecificOutput && /issue 4/.test(o.systemMessage) ? "yes" : "no")' 2>/dev/null)"
-printf 'CLOSED\n' > "$GH_FIXTURES/issue-4"
+printf 'closed\n' > "$GH_FIXTURES/issue-4"
 reset
 rawout 'git switch develop && git switch develop' >/dev/null
 tl_eq 'two reads for one owner, one lookup of the token' '1' "$(calls | grep -c 'auth token')"
-tl_eq 'for two reads' '2' "$(calls | grep -c 'issue view')"
+tl_eq 'for two reads' '2' "$(calls | grep -c 'issues/4')"
 git switch -q develop
 
 tl_done
