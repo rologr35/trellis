@@ -87,6 +87,26 @@ tl_has 'with locale es, the es method' '## Método de trabajo' "$claude_md"
 tl_has 'and the es labels' '| `app/CLAUDE.md` | al leer un fichero de `app/` | App package |' "$claude_md"
 tl_has 'and the es rungs table' '| Escalón | Comando | Lo corre Claude |' "$(cat TESTING.md)"
 
+printf '\nthe command of a worktree: git.worktreeAdd\n'
+# method: the method block.
+method() { sed -n '/<!-- trellis:method -->/,/<!-- \/trellis:method -->/p' CLAUDE.md; }
+for locale in es en; do
+  git config -f trellis.config project.locale "$locale"
+  "$TRELLIS" sync >/dev/null 2>&1
+  method > "$TL_TMP/method.txt"
+  tl_eq "$locale: the method names trellis worktree add, twice" '2' "$(grep -c 'trellis worktree add' "$TL_TMP/method.txt")"
+  tl_eq '  as the source does' "$(grep 'trellis worktree add' "$TRELLIS_ROOT/method/$locale.md" | sed 's/ <!-- p:.*//')" "$(grep 'trellis worktree add' "$TL_TMP/method.txt")"
+  git config -f trellis.config git.worktreeAdd 'trellis worktree add'
+  "$TRELLIS" sync >/dev/null 2>&1
+  tl_eq '  and with the default written' "$(cat "$TL_TMP/method.txt")" "$(method)"
+  git config -f trellis.config git.worktreeAdd 'bin/tree $& new'
+  "$TRELLIS" sync >/dev/null 2>&1
+  tl_eq '  with another it is that one, as it is written, and nothing else changes' "$(sed 's|trellis worktree add|bin/tree $\& new|' "$TL_TMP/method.txt")" "$(method)"
+  git config -f trellis.config --unset git.worktreeAdd
+done
+git config -f trellis.config project.locale es
+"$TRELLIS" sync >/dev/null 2>&1
+
 printf '\nwith a copy\n'
 node -e '
   const fs = require("fs");

@@ -87,6 +87,38 @@ rm .trellis/MANIFEST
 tl_eq 'a copy without its manifest fails' '1' "$(verify)"
 restore
 
+printf '\nwhat the project does without: copy.without (#48)\n'
+left='.claude/skills/trellis-work/SKILL.md: is in the manifest, and copy.without leaves it out: trellis update'
+git config -f trellis.config --add copy.without trellis-work
+git config -f trellis.config --add copy.without trellis-plan-check
+tl_eq 'a manifest that lists what is left out fails' '1' "$(verify)"
+tl_has 'naming the skill, and trellis update with the sha of VERSION' "$left $sha" "$(out)"
+tl_has 'and the agent' '.claude/agents/trellis-plan-check.md: is in the manifest, and copy.without' "$(out)"
+tl_has 'and nothing else' 'verify: 2 finding(s)' "$(out)"
+tl_eq 'the index without the key passes' '0' "$(verify --staged)"
+tl_lacks 'and the hygiene says nothing of it' 'copy.without' "$(bash "$TRELLIS" hygiene 2>&1)"
+git add trellis.config && git show HEAD:trellis.config > trellis.config
+tl_eq 'the index with the key and the working tree without it: staged fails' '1' "$(verify --staged)"
+tl_has 'naming the skill' "$left" "$(out)"
+tl_eq 'and the working tree passes' '0' "$(verify)"
+git rm -qf --cached trellis.config
+git config -f trellis.config copy.without trellis-work
+tl_eq 'an index without a config has no key' '0' "$(verify --staged)"
+restore
+git config -f trellis.config copy.without trellis-nope
+tl_eq 'a name nothing has passes without the upstream' '0' "$(verify)"
+tl_eq 'and fails against it' '1' "$(verify --upstream)"
+tl_has 'naming it' 'copy.without names trellis-nope, which is no skill or agent' "$(out)"
+tl_has 'and the ones there are' 'trellis-scaffold, trellis-work' "$(out)"
+restore
+git config -f trellis.config copy.without trellis-work
+rm -r .claude/skills/trellis-work; grep -v '/trellis-work/' .trellis/MANIFEST > "$TL_TMP/m"; cp "$TL_TMP/m" .trellis/MANIFEST
+tl_eq 'a copy without what is left out passes' '0' "$(verify --upstream)"
+git config -f trellis.config --unset copy.without
+tl_eq 'and fails against the upstream without the key' '1' "$(verify --upstream)"
+tl_has 'naming it' '.claude/skills/trellis-work/SKILL.md: is not the one of' "$(out)"
+restore
+
 printf '\nagainst the upstream\n'
 printf '# x\n' >> .trellis/hooks/guard-git.sh; rehash .trellis/hooks/guard-git.sh
 tl_eq 'a file and its line of the manifest pass locally' '0' "$(verify)"

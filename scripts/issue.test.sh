@@ -782,6 +782,11 @@ tl_eq '--resume of a branch that is nobody'"'"'s is refused too' '1' "$(claim_of
 facts 30 'i.assignees = [{login: "RoloGR35"}]'
 tl_eq '--resume accepts the branch of its own issue, whatever the case of the account' '0' "$(claim_of 30 --resume)"
 tl_has '  and says how it is checked out' 'its branch on origin: 30-thing (trellis worktree add 30 <slug> --resume)' "$(out)"
+cp trellis.config "$TL_TMP/worktree.keep"
+git config -f trellis.config git.worktreeAdd 'bin/tree new'
+claim_of 30 --resume > /dev/null
+tl_has '  by the command of git.worktreeAdd, when there is one' 'its branch on origin: 30-thing (bin/tree new 30 <slug> --resume)' "$(out)"
+cp "$TL_TMP/worktree.keep" trellis.config
 facts 30 'i.labels = [{name: "stopped"}]'
 tl_eq 'a stopped issue is refused' '1' "$(claim_of 30)"
 tl_has '  naming --resume' 'it is stopped: --resume takes it' "$(out)"

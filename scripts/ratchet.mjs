@@ -252,6 +252,17 @@ if (configWas !== null) {
   if (out.length > 0) {
     add(`trellis.config: workspace.notPackage adds ${out.join(', ')}`, 'a folder it matches is not asked for its CLAUDE.md', 'write the CLAUDE.md of the package');
   }
+  // By its value: one changed for another is as many entries.
+  for (const [key, cost, alternative] of [
+    ['tracker.search', 'a command it matches counts as a search of the backlog before an issue is created', 'search with gh issue list --search, or narrow the expression'],
+    ['copy.without', 'what it names is neither written nor verified', 'keep the one of trellis'],
+  ]) {
+    const was = new Set(oldConfig.all(key));
+    const more = newConfig.all(key).filter(v => v && !was.has(v));
+    if (more.length > 0) {
+      add(`trellis.config: ${key} adds ${more.join(', ')}`, cost, alternative);
+    }
+  }
   // A value that is none of the levels is the lowest, as `trellis issue follow-up` reads it.
   const LEVELS = ['careful', 'balanced', 'autonomous'];
   const rank = cfg => Math.max(0, LEVELS.indexOf(cfg.get('autonomy.level')));

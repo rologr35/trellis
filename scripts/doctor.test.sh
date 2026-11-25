@@ -60,6 +60,45 @@ git config -f trellis.config tracker.kind gitlab
 tl_eq 'tracker.kind outside the schema fails' '1' "$(doctor)"
 tl_has 'naming the value and the accepted ones' 'tracker.kind = gitlab is not one of github, none' "$(out)"
 git config -f trellis.config --unset tracker.kind
+git config -f trellis.config tracker.search 'bin/backlog search'
+tl_eq 'a value of tracker.search that is a search passes' '0' "$(doctor)"
+tl_has 'and is said' 'ok    every value of tracker.search is a search of the backlog' "$(out)"
+rm "$tools/node"
+doctor > /dev/null
+tl_has 'without node it is not judged, which is said' 'info  the values of tracker.search are not judged (node not found)' "$(out)"
+stub node 'v0'; printf '#!/bin/sh\nexit 1\n' > "$tools/node"
+doctor > /dev/null
+tl_has 'a judgment that fails is a FAIL' 'FAIL  the values of tracker.search could not be judged' "$(out)"
+rm "$tools/node"
+ln -s "$NODE" "$tools/node"
+# bad_search <value> <why>: that value beside a good one.
+bad_search() {
+  git config -f trellis.config --replace-all tracker.search "$1"
+  git config -f trellis.config --add tracker.search 'bin/backlog search'
+  tl_eq "tracker.search = $1 fails" '1' "$(doctor)"
+  tl_has 'naming it and why' "FAIL  trellis.config: tracker.search = $1 $2" "$(out)"
+  tl_lacks 'and not the other' 'bin/backlog' "$(out)"
+}
+bad_search '(' 'does not compile: '
+bad_search 'x*' 'matches the empty string, which is no search of the backlog'
+bad_search '^.s' 'matches the command ls, which is no search of the backlog'
+bad_search 'git +st' 'matches the command git status, which is no search of the backlog'
+bad_search '' 'matches the empty string'
+bad_search 'issue' 'matches the command gh issue create, which is no search of the backlog'
+bad_search 'issue new' 'matches the command gh issue new, which is no search of the backlog'
+bad_search 'trellis issue' 'matches the command trellis issue create, which is no search of the backlog'
+git config -f trellis.config --unset-all tracker.search
+tl_eq 'with no value the doctor passes' '0' "$(doctor)"
+tl_lacks 'and says nothing of it' 'tracker.search' "$(out)"
+git config -f trellis.config git.worktreeAdd ''
+tl_eq 'an empty git.worktreeAdd fails' '1' "$(doctor)"
+tl_has 'saying it names no command' 'FAIL  trellis.config: git.worktreeAdd names no command' "$(out)"
+git config -f trellis.config git.worktreeAdd ' '
+tl_eq '  and one of blanks' '1' "$(doctor)"
+git config -f trellis.config git.worktreeAdd 'bin/tree new'
+tl_eq 'a command passes' '0' "$(doctor)"
+tl_lacks '  and is not named' 'git.worktreeAdd' "$(out)"
+git config -f trellis.config --unset git.worktreeAdd
 git config -f trellis.config workspace.kind python
 tl_eq 'workspace.kind outside the schema fails' '1' "$(doctor)"
 tl_has 'naming the value and the accepted ones' 'workspace.kind = python is not one of flutter, dart, node' "$(out)"

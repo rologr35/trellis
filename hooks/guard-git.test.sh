@@ -348,6 +348,79 @@ wt="$TL_TMP/wt"
 git worktree add -q "$wt" -b 5-other
 tl_eq 'a worktree is the session'"'"'s own' 'allow' "$(verdict 'git switch -c 6-more' "$wt")"
 
+printf '\na branch switch outside the project of the session (#47)\n'
+clone="$TL_TMP/a clone"
+git clone -q "$repo" "$clone"
+git -C "$clone" switch -q develop
+git -C "$clone" branch 8-done
+mkdir -p "$clone/sub"
+# A project with a repository of its own, whose main checkout is nothing of the session.
+zephyr="$(tl_repo)"
+cp trellis.config "$zephyr/"
+ln -s "$repo" "$TL_TMP/link"
+# at <command> [<directory of the session>]: the session as the project (the payload is then the
+# clone) or as the directory of the payload.
+at() {
+  if [ "$as" = project ]; then
+    CLAUDE_PROJECT_DIR="${2:-$repo}" verdict "$1" "$clone"
+  else
+    verdict "$1" "${2:-$repo}"
+  fi
+}
+for as in project payload; do
+  tl_eq "$as: a clone creates an issue branch" 'allow' "$(at "cd '$clone' && git switch -c 7-thing")"
+  tl_eq "$as: and switches to one" 'allow' "$(at "cd '$clone' && git checkout 8-done")"
+  tl_eq "$as: by git -C too" 'allow' "$(at "git -C '$clone' switch -c 7-thing")"
+  tl_eq "$as: another project too" 'allow' "$(at "cd '$zephyr' && git switch -c 7-thing")"
+  git -C "$clone" switch -q 8-done
+  printf 'open\n' > "$GH_FIXTURES/issue-8"
+  tl_eq "$as: a clone leaves a branch whose issue is open" 'allow' "$(at "cd '$clone' && git switch develop")"
+  rm "$GH_FIXTURES/issue-8"
+  git -C "$clone" switch -q develop
+  tl_eq "$as: the main checkout of the session refuses to create one" 'deny' "$(at "cd '$repo' && git switch -c 7-thing")"
+  tl_eq "$as: and to switch to one" 'deny' "$(at "cd '$repo' && git checkout 4-thing")"
+  tl_eq "$as: from one of its worktrees" 'deny' "$(at "git -C '$repo' switch -c 7-thing" "$wt")"
+  tl_eq "$as: by a path with a symbolic link" 'deny' "$(at "git -C '$TL_TMP/link' switch -c 7-thing")"
+  tl_eq "$as: with the session on that path" 'deny' "$(at "git -C '$repo' switch -c 7-thing" "$TL_TMP/link")"
+  tl_eq "$as: after a cd out and back" 'deny' "$(at "cd '$clone' && cd '$repo' && git switch -c 7-thing")"
+  tl_eq "$as: a push to a protected branch of the clone is refused" 'deny' "$(at "cd '$clone' && git push origin main")"
+  tl_eq "$as: and a merge" 'deny' "$(at "cd '$clone' && gh pr merge")"
+  git switch -q 4-thing
+  printf 'open\n' > "$GH_FIXTURES/issue-4"
+  tl_eq "$as: the main checkout does not leave a branch whose issue is open" 'deny' "$(at "git -C '$repo' switch develop")"
+  rm "$GH_FIXTURES/issue-4"
+  git switch -q develop
+done
+tl_eq 'a session inside the clone, of another project' 'allow' "$(CLAUDE_PROJECT_DIR="$repo" verdict 'git switch -c 7-thing' "$clone/sub")"
+tl_eq 'a session inside the clone, with no project, is judged as today' 'deny' "$(verdict 'git switch -c 7-thing' "$clone/sub")"
+tl_eq 'a project in no repository is the directory of the payload' 'deny' "$(CLAUDE_PROJECT_DIR="$plain" verdict 'git switch -c 7-thing' "$clone")"
+tl_eq '  which leaves the clone to itself' 'allow' "$(CLAUDE_PROJECT_DIR="$plain" verdict "cd '$clone' && git switch -c 7-thing" "$repo")"
+tl_eq 'a project that is empty too' 'deny' "$(CLAUDE_PROJECT_DIR='' verdict 'git switch -c 7-thing' "$clone")"
+tl_eq 'a session in no repository is judged as today' 'deny' "$(verdict "cd '$clone' && git switch -c 7-thing" "$plain")"
+tl_eq '  with a project in none' 'deny' "$(CLAUDE_PROJECT_DIR="$plain" verdict "cd '$repo' && git switch -c 7-thing" "$plain")"
+
+printf '\nthe command of a worktree: git.worktreeAdd (#48)\n'
+# reason <command>: what the refusal says.
+reason() {
+  node -e 'console.log(JSON.stringify({tool_input: {command: process.argv[1]}, cwd: process.argv[2]}))' "$1" "$repo" | bash "$HOOK" |
+    node -e 'const out = require("fs").readFileSync(0, "utf8"); process.stdout.write(out ? JSON.parse(out).hookSpecificOutput.permissionDecisionReason : "")'
+}
+printf 'open\n' > "$GH_FIXTURES/issue-4"
+# away: the second refusal, from the branch of an open issue.
+away() { git switch -q 4-thing; reason 'git switch develop'; git switch -q develop; }
+cp trellis.config "$TL_TMP/config.keep"
+to_default='The main checkout stays on develop: every issue is worked in its own worktree. Run trellis worktree add <n> <slug> (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path), then EnterWorktree with that path.'
+away_default='The main checkout is on 4-thing and issue 4 is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout develop.'
+tl_eq 'with no key, the refusal of a switch to an issue branch is the one of before' "$to_default" "$(reason 'git switch -c 7-thing')"
+tl_eq '  and so is the one of a switch away' "$away_default" "$(away)"
+git config -f trellis.config git.worktreeAdd 'trellis worktree add'
+tl_eq 'with the default written, too' "$to_default" "$(reason 'git switch -c 7-thing')"
+git config -f trellis.config git.worktreeAdd 'bin/tree new'
+tl_eq 'with another, the refusal names it, without what trellis worktree add does' 'The main checkout stays on develop: every issue is worked in its own worktree. Run bin/tree new <n> <slug>, then EnterWorktree with that path.' "$(reason 'git switch -c 7-thing')"
+tl_eq '  and so does the one of a switch away' "${away_default/trellis worktree add/bin/tree new}" "$(away)"
+cp "$TL_TMP/config.keep" trellis.config
+rm "$GH_FIXTURES/issue-4"
+
 printf '\nissue creation\n'
 transcript="$TL_TMP/transcript.jsonl"
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "ls"}}]}}\n' > "$transcript"
@@ -385,6 +458,54 @@ done
 printf '{"message": {"content": [{"type": "tool_use", "input": {"command": "gh api repos/a/b/issues"}}]}}\n' > "$transcript"
 tl_eq 'a read of the issues is not a search' 'deny' "$(verdict 'gh issue create --title x' "$repo" "$transcript")"
 tl_eq 'no transcript is no opinion' 'allow' "$(verdict 'gh issue create --title x')"
+
+printf '\nthe searches of a project: tracker.search (#48)\n'
+# said <command>: a transcript where the session ran that command, and the creation.
+said() {
+  node -e 'for (const command of process.argv.slice(1)) console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command}}]}}))' "$1" 'gh issue create --title x' > "$transcript"
+}
+# The verdict of a creation after it.
+created() { verdict 'gh issue create --title x' "$repo" "$transcript"; }
+cp trellis.config "$TL_TMP/config.keep"
+said 'bin/backlog find "login"'
+tl_eq 'a search of the project does not count without the key' 'deny' "$(created)"
+git config -f trellis.config tracker.search '(^|\s)bin/backlog (find|search) '
+tl_eq 'with the key it does' 'allow' "$(created)"
+tl_eq '  from the directory a cd names, whose config it is' 'allow' "$(verdict "cd '$repo' && gh issue create --title x" "$zephyr" "$transcript")"
+tl_eq '  and not in a project without the key' 'deny' "$(verdict "cd '$zephyr' && gh issue create --title x" "$repo" "$transcript")"
+tl_eq '  nor after a command in the one that has it' 'deny' "$(verdict "git push origin 5-x && cd '$zephyr' && gh issue create --title x" "$repo" "$transcript")"
+said 'bin/backlog list'
+tl_eq 'a command it does not match is no search' 'deny' "$(created)"
+node -e 'console.log(JSON.stringify({message: {content: [{type: "tool_use", input: {command: process.argv[1]}}]}}))' 'gh issue create --title "a bin/backlog find x"' > "$transcript"
+tl_eq 'nor is the creation itself' 'deny' "$(verdict 'gh issue create --title "a bin/backlog find x"' "$repo" "$transcript")"
+git config -f trellis.config --add tracker.search 'issues-db\b'
+said 'issues-db login'
+tl_eq 'the second value counts' 'allow' "$(created)"
+said 'cd x && bin/backlog find login'
+tl_eq '  and the first still does' 'allow' "$(created)"
+said 'gh issue list --state all --search login'
+tl_eq 'a search by gh issue list counts with the key' 'allow' "$(created)"
+said "gh api -X GET search/issues -f q='repo:a/b login'"
+tl_eq '  and one by gh api' 'allow' "$(created)"
+said 'ls'
+tl_eq 'and what is neither does not' 'deny' "$(created)"
+# A value that is none, for what the session says and for a command it would match.
+for value in '(' 'x*' '' '^$|find' '^ls|find' 'git +st|find' '.'; do
+  git config -f trellis.config --replace-all tracker.search "$value"
+  said 'bin/backlog find ( x git status'
+  tl_eq "a value that is none: '$value'" 'deny' "$(created)"
+  git config -f trellis.config --add tracker.search 'backlog find'
+  tl_eq '  and a good one beside it counts' 'allow' "$(created)"
+done
+# A value that matches a creation is none: a creation refused before is no search for the next one.
+for value in 'issue' 'gh issue c' 'issue new' 'trellis issue'; do
+  git config -f trellis.config --replace-all tracker.search "$value"
+  for creation in 'gh issue create --title a' 'gh issue new --title a' 'trellis issue create --title a'; do
+    said "$creation"
+    tl_eq "a value that matches a creation: '$value', after $creation" 'deny' "$(created)"
+  done
+done
+cp "$TL_TMP/config.keep" trellis.config
 
 printf '\nmerge\n'
 printf 'develop\n' > "$GH_FIXTURES/pr-12"

@@ -395,7 +395,7 @@ claim_issue() {
     issue_write 'taking the label stopped off' "$n" "issues/$n/labels/stopped" -X DELETE || return 1
   fi
   printf 'issue claim: #%s is assigned to %s\n' "$n" "$ISSUE_ME"
-  [ -z "$branches" ] || printf 'issue claim: its branch on origin: %s (trellis worktree add %s <slug> --resume)\n' "$branches" "$n"
+  [ -z "$branches" ] || printf 'issue claim: its branch on origin: %s (%s %s <slug> --resume)\n' "$branches" "$(tc_get git.worktreeAdd)" "$n"
 }
 
 # ensure_label <name> <colour> <description>: gh_label, saying a failure.

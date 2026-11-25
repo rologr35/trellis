@@ -28,7 +28,8 @@
 # After it, also when it fails, the check of the project (lib/project-check.sh): command.pullRequestCheck
 # on a body, command.commitCheck on a commit whose shape is judged, with the message as git will write it.
 #
-# Read-only. On failure every miss is printed and the exit is 1.
+# Read-only. On failure every miss is printed and the exit is 1. A body that passes everything, the
+# private names and the check of the project included, is said on the standard output: `pr-check: ok`.
 
 set -uo pipefail
 
@@ -78,6 +79,7 @@ node "$TRELLIS_ROOT/scripts/pr-check.mjs" "$mode" "$file" "$setback" "${branch:-
 if [ "$mode" = 'body' ]; then
   bash "$TRELLIS_ROOT/scripts/private-names.sh" --file "$file" || status=1
   project_check pullRequestCheck pr-check "$file" || status=1
+  [ "$status" -ne 0 ] || printf 'pr-check: ok\n'
 elif [ -f "$tmp/message" ]; then
   project_check commitCheck pr-check "$tmp/message" || status=1
 fi

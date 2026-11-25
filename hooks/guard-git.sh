@@ -5,15 +5,16 @@
 #   1. a push to a branch of git.protected: by refspec (quotes, a leading +, refs/heads/, and HEAD
 #      or @ as the checked-out branch are normalized), or, without a refspec, by the checked-out
 #      branch and its upstream;
-#   2. on the main checkout, a checkout or switch to an issue branch (git.issueBranch), created with
-#      -b/-c/-C or by -t/--track from a remote branch: every issue is worked in its own worktree,
-#      and the main checkout stays on the integration branch;
-#   3. on the main checkout, a checkout or switch while the current branch is <n>-... and issue n is
+#   2. on the main checkout of the project of the session, a checkout or switch to an issue branch
+#      (git.issueBranch), created with -b/-c/-C or by -t/--track from a remote branch: every issue is
+#      worked in its own worktree, and the main checkout stays on the integration branch;
+#   3. on that main checkout, a checkout or switch while the current branch is <n>-... and issue n is
 #      still open: another session may be working there, and its next commit would land on the
 #      wrong branch;
 #   4. a `gh issue create`, its alias `gh issue new` or a `trellis issue create` when the session's
-#      transcript holds no earlier `gh issue list` with --search, nor a `gh api search/issues`: a plan
-#      written without reading what was decided around it repeats a decision;
+#      transcript holds no earlier `gh issue list` with --search, nor a `gh api search/issues`, nor a
+#      command that a value of tracker.search matches: a plan written without reading what was decided
+#      around it repeats a decision. A value that lib/search.mjs says is none does not count;
 #   5. a `gh pr merge` that names no pull request, whose base cannot be read, that runs in a cloud
 #      session (CLAUDE_CODE_REMOTE), or whose base is not in git.assistantMayMergeInto. Silence is not
 #      a neutral opinion on a merge, unlike on the other guards;
@@ -22,6 +23,10 @@
 #      `merges`, `git/refs` and a `PUT` or `DELETE` of `contents` with a protected branch, with none, or
 #      with one that cannot be read; `pulls/<n>/merge`; a write in an endpoint that cannot be read. A
 #      read (GET, HEAD) and any other write have no opinion.
+#
+# The project of the session is the repository of CLAUDE_PROJECT_DIR, or of the directory of the payload
+# when that is unset or in no repository; a main checkout is the one of it when both have the same common
+# git directory. With neither in a repository, guards 2 and 3 judge every main checkout.
 #
 # Guards 3 and 4 have no opinion with tracker.kind = none or without a working gh. A person pushes or
 # switches from their own terminal, or with `!` in the session, which does not go through this hook.
@@ -94,6 +99,8 @@ load_config() {
     ISSUE_REGEX="$(tc_get git.issueBranch)"
     INTEGRATION="$(tc_get git.integrationBranch)"
     TRACKER="$(tc_get tracker.kind)"
+    SEARCHES="$(tc_all tracker.search)"
+    WORKTREE_ADD="$(tc_get git.worktreeAdd)"
   fi
   [ "$HAS_CONFIG" = true ]
 }
@@ -151,15 +158,30 @@ is_main_checkout() {
   [ "$git_dir" = "$common_dir" ]
 }
 
+# Whether the repository of $1 is the one of the project of the session, or there is none of the session.
+of_the_session() {
+  local from session common_dir
+  for from in "${CLAUDE_PROJECT_DIR:-}" "$CWD"; do
+    [ -n "$from" ] || continue
+    session="$(git -C "$from" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || continue
+    common_dir="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+    [ "$common_dir" -ef "$session" ]
+    return
+  done
+  return 0
+}
+
 branch_issue() {
   if [[ "$1" =~ ^([0-9]+)- ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
 }
 
 guard_branch_switch() {
-  local dir="$1" target="$2" branch issue state
+  local dir="$1" target="$2" branch issue state does=''
   is_main_checkout "$dir" || return 0
+  of_the_session "$dir" || return 0
   if [ -n "$target" ] && [[ "$target" =~ $ISSUE_REGEX ]]; then
-    deny "The main checkout stays on $INTEGRATION: every issue is worked in its own worktree. Run trellis worktree add <n> <slug> (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path), then EnterWorktree with that path."
+    [ "$WORKTREE_ADD" != 'trellis worktree add' ] || does=' (fetches, creates .claude/worktrees/<n>-<slug>, installs, prints the path)'
+    deny "The main checkout stays on $INTEGRATION: every issue is worked in its own worktree. Run $WORKTREE_ADD <n> <slug>$does, then EnterWorktree with that path."
   fi
   [ "$TRACKER" = 'github' ] || return 0
   branch="$(git -C "$dir" branch --show-current 2>/dev/null)" || return 0
@@ -172,18 +194,25 @@ guard_branch_switch() {
   fi
   state="$GH_AS_OUT"
   if [ "$state" = 'open' ]; then
-    deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: trellis worktree add <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
+    deny "The main checkout is on $branch and issue $issue is still open: another session may be working there, and a switch puts its next commit on the wrong branch. Take the new work in a worktree: $WORKTREE_ADD <m> <slug>, then EnterWorktree. A person frees the checkout with !git checkout $INTEGRATION."
   fi
 }
 
-# True when the transcript holds, before this call, a `gh issue list` with --search or -S, or a `gh api
-# search/issues`. A transcript that is missing or unreadable answers yes: no opinion.
+# True when the transcript holds, before this call, a `gh issue list` with --search or -S, a `gh api
+# search/issues`, or a command a value of tracker.search matches. A transcript that is missing or
+# unreadable answers yes: no opinion.
 session_searched_backlog() {
   [ -n "$TRANSCRIPT" ] && [ -r "$TRANSCRIPT" ] || return 0
-  node -e '
-    const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
-    const current = process.argv[2];
-    const search = /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\s\\?["\x27]?\/?search\/issues\b/;
+  node --input-type=module -e '
+    import {readFileSync} from "node:fs";
+    import {pathToFileURL} from "node:url";
+    const [transcript, current, searches, lib] = process.argv.slice(1);
+    const {searchOf} = await import(pathToFileURL(lib).href);
+    const lines = readFileSync(transcript, "utf8").split("\n");
+    const all = [
+      /gh\s+issue\s+list\b[^\n]*\s(--search|-S)\b|gh\s+api\b[^\n]*\s\\?["\x27]?\/?search\/issues\b/,
+      ...searches.split("\n").map(value => searchOf(value).expression).filter(Boolean),
+    ];
     let parsed = 0;
     for (const line of lines) {
       let entry;
@@ -193,11 +222,11 @@ session_searched_backlog() {
       if (!Array.isArray(content)) continue;
       for (const part of content) {
         const command = part && part.type === "tool_use" && part.input ? part.input.command : undefined;
-        if (typeof command === "string" && command !== current && search.test(command)) process.exit(0);
+        if (typeof command === "string" && command !== current && all.some(search => search.test(command))) process.exit(0);
       }
     }
     process.exit(parsed === 0 ? 2 : 1);
-  ' "$TRANSCRIPT" "$COMMAND" 2>/dev/null
+  ' "$TRANSCRIPT" "$COMMAND" "$SEARCHES" "$TRELLIS_ROOT/lib/search.mjs" 2>/dev/null
   [ $? -ne 1 ]
 }
 

@@ -360,6 +360,39 @@ body 'Closes #12' "${GOOD[@]}" 'nope' "${EN[@]}"
 tl_eq 'a body is not of the check of a commit' '0' "$(status_of --body body.md)"
 rm -f trellis.config own-check.sh seen.txt
 
+printf '\nthe line of a body that passes\n'
+# said <argument>...: what it prints on the standard output.
+said() { "$TRELLIS" pr-check "$@" 2>err.txt; }
+body 'Closes #12' "${GOOD[@]}" "${EN[@]}"
+tl_eq 'a body that passes is said, in one line' 'pr-check: ok' "$(said --body body.md)"
+tl_eq '  and nothing on the standard error' '' "$(cat err.txt)"
+body 'Closes #12' "${EN[@]}"
+tl_eq 'one that does not pass is not' '' "$(said --body body.md)"
+tl_has '  and its misses are said as before' 'Summary' "$(cat err.txt)"
+git config -f trellis.config project.public true
+mkdir -p "$TL_TMP/xdg/trellis"
+printf 'zephyr\n' > "$TL_TMP/xdg/trellis/private-names"
+body 'Closes #12' "${GOOD[@]}" "${EN[@]}"
+tl_eq 'a body with no private name is' 'pr-check: ok' "$(XDG_CONFIG_HOME="$TL_TMP/xdg" said --body body.md)"
+body 'Closes #12' "${GOOD[@]}" 'Of zephyr.' "${EN[@]}"
+tl_eq 'one with a private name is not' '1' "$(XDG_CONFIG_HOME="$TL_TMP/xdg" status_of --body body.md)"
+tl_lacks '  by any line' 'pr-check: ok' "$(cat out.txt)"
+rm trellis.config
+own pullRequestCheck 'grep -c nope "$TRELLIS_FILE" && exit 7; exit 0'
+body 'Closes #12' "${GOOD[@]}" "${EN[@]}"
+tl_eq 'it comes after what the check of the project prints' '0
+pr-check: ok' "$(said --body body.md)"
+body 'Closes #12' "${GOOD[@]}" 'nope' "${EN[@]}"
+tl_eq 'one the check of the project refuses is not' '1' "$(status_of --body body.md)"
+tl_lacks '  by any line' 'pr-check: ok' "$(cat out.txt)"
+rm trellis.config
+body 'Closes #12' "${GOOD[@]}" '' '**Setback**' '- An ignore; cost: a warning; accepted for the SDK.' "${EN[@]}"
+tl_eq '--has-setback says nothing' '0' "$(status_of --has-setback --body body.md)"
+tl_eq '  on either output' '' "$(cat out.txt)"
+commit 'feat: a thing (#12)'
+tl_eq 'nor does a commit' '0' "$(status_of --commit msg.txt)"
+tl_eq '  on either output' '' "$(cat out.txt)"
+
 printf '\nthe workflow of the check\n'
 # The job that runs the check of a project, up to the next one.
 job="$(awk '/^  check:/{on=1; print; next} on && /^  [a-z]/{exit} on' "$TRELLIS_ROOT/.github/workflows/consumer-check.yml" | grep -v '^ *#')"
