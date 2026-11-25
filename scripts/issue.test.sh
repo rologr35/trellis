@@ -290,12 +290,54 @@ fails 'written on the label line, without Source' 's/^Out of scope:$/Out of scop
 fails 'as a heading, without Source' 's/^Out of scope:$/### Out of scope/; s/ Source: rologr35.*//' 'Out of scope: "The other flag."'
 fails 'bold, without Source' 's/^Out of scope:$/**Out of scope**:/; s/ Source: rologr35.*//' 'Out of scope: "The other flag."'
 
+tl_eq 'a list whose only item is none needs none' '0' "$(case_of 's/^- The other flag.*/- None./; /^- A third one/d; /^  on two lines/d')"
+tl_eq 'none on the label line too' '0' "$(case_of 's/^Out of scope:$/**Out of scope**: none/; /^- The other flag/d; /^- A third one/d; /^  on two lines/d')"
+fails 'none beside another item' 's/^- The other flag.*/- none/' 'Out of scope: "none" has no Source'
+fails 'an item that only starts as none' 's/^- The other flag.*/- none of it/; /^- A third one/d; /^  on two lines/d' 'Out of scope: "none of it" has no Source'
+git config -f trellis.config project.locale es
+sed 's/^- La otra opción.*/- ninguna/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
+tl_eq 'es: its word' '0' "$(status_of check --body "$TL_TMP/case.md")"
+sed 's/^- La otra opción.*/- none/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
+tl_eq 'es: none is not' '1' "$(status_of check --body "$TL_TMP/case.md")"
+git config -f trellis.config --unset project.locale
+
 printf '\ncomplexity\n'
 fails 'no complexity line' '/^Complexity/d' 'last line is not `Complexity: S`, M or L'
 fails 'a wrong class' 's/^Complexity: M/Complexity: XL/' 'last line is not `Complexity: S`, M or L'
 fails 'a lower-case class' 's/^Complexity: M/Complexity: m/' 'last line is not `Complexity: S`, M or L'
 fails 'a line after it' 's/^Complexity: M/Complexity: M\
 One more thing./' 'last line is not `Complexity: S`, M or L'
+
+printf '\nthe class by label\n'
+git config -f trellis.config issue.class label
+tl_eq 'no complexity line is asked for' '0' "$(case_of '/^Complexity/d')"
+tl_eq '  and the check says that a body has no label' 'issue check: ok (the class is the label of the issue, which a body does not have)' "$(out)"
+tl_eq 'a body that has the line passes' '0' "$(case_of 's/x/x/')"
+tl_eq '  and it is not its class' 'issue check: ok (the class is the label of the issue, which a body does not have)' "$(out)"
+sed '/^Complexity/d; s/^Depends on: .*//' "$TL_TMP/good.md" > "$TL_TMP/classless.md"
+# labelled <label>...: the check of issue 40, with those labels.
+labelled() {
+  issue_json 40 "$TL_TMP/classless.md" ${AMENDED:+OWNER} ${AMENDED:+"$AMENDED"}
+  node -e 'const fs = require("fs"); const [f, ...names] = process.argv.slice(1); const i = JSON.parse(fs.readFileSync(f)); i.labels = names.map(name => ({name})); fs.writeFileSync(f, JSON.stringify(i));' "$here/issue-40.json" "$@"
+  status_of check 40
+}
+tl_eq 'an issue with none fails' '1' "$(labelled bug)"
+tl_has '  which it says' 'the issue has no label S, M or L' "$(out)"
+tl_eq 'with one passes' '0' "$(labelled bug M)"
+tl_has '  and it is the class' 'issue check: ok (M)' "$(out)"
+tl_eq 'in another case too' '0' "$(labelled l)"
+tl_has '  as GitHub reads it' 'issue check: ok (L)' "$(out)"
+tl_eq 'with two fails' '1' "$(labelled S L)"
+tl_has '  naming them' 'the issue has the labels S and L, and its class is one' "$(out)"
+printf '## Amendment (2026-11-25)\n\n### Verification\n\nRun it.\n\nComplexity: L\n' > "$TL_TMP/class-amended.md"
+tl_eq 'an amendment with a class' '0' "$(AMENDED="$TL_TMP/class-amended.md" labelled S)"
+tl_has '  does not change it' 'issue check: ok (S)' "$(out)"
+status_of check 40 --print > /dev/null
+tl_eq '--print gives the class of the label' 'Complexity: S' "$(tail -n 1 "$TL_TMP/out.txt")"
+git config -f trellis.config issue.class line
+tl_eq 'issue.class = line reads the line' '1' "$(labelled M)"
+tl_has '  as without the key' 'last line is not `Complexity: S`, M or L' "$(out)"
+git config -f trellis.config --remove-section issue
 
 printf '\npaths\n'
 fails 'a path that does not exist' 's|docs/`|docs/`, `lib/nope.sh`|' 'Layers and files: `lib/nope.sh` is not in origin/develop'
@@ -364,10 +406,25 @@ tl_eq 'the gate named passes' '0' "$(case_of 's/^Gates: none\.$/Gates: money/')"
 tl_eq 'two gates named, with text after' '0' "$(case_of 's/^Gates: none\.$/Gates: `money`, release-notes. It may break./')"
 fails 'one that exists and one that does not' 's/^Gates: none\.$/Gates: money, nothing/' 'there is no [gate "nothing"]'
 fails 'none and a name' 's/^Gates: none\.$/Gates: none, money/' 'there is no [gate "none"]'
+for reason in 'money (it pays)' 'money (it pays, and twice; see a. And b)' '`money` (it pays (twice), yes), release-notes (the notes)' 'money (it pays) and release-notes'; do
+  tl_eq "a reason is taken off: $reason" '0' "$(case_of "s/^Gates: none\\.\$/Gates: $reason/")"
+done
+tl_eq 'a name with parentheses of its own is still that name' '0' "$(git config -f trellis.config 'gate.money (old).paths' 'x/**'; case_of 's/^Gates: none\.$/Gates: money (old), money/')"
+git config -f trellis.config --remove-section 'gate.money (old)'
+fails 'a name in parentheses alone' 's/^Gates: none\.$/Gates: (money)/' 'there is no [gate "(money)"]'
+fails 'and one after a comma' 's/^Gates: none\.$/Gates: release-notes, (money)/' 'there is no [gate "(money)"]'
+fails 'parentheses that do not close' 's/^Gates: none\.$/Gates: money (it pays/' 'there is no [gate "money (it pays"]'
+fails 'parentheses with nothing in them' 's/^Gates: none\.$/Gates: money ()/' 'there is no [gate "money ()"]'
+fails 'a text after the reason' 's/^Gates: none\.$/Gates: money (it pays) twice/' 'there is no [gate "money '
+fails 'a gate that does not exist, with its reason' 's/^Gates: none\.$/Gates: money, nothing (it pays)/' 'there is no [gate "nothing"]'
+fails 'a reason names no gate' 's/^Gates: none\.$/Gates: none (money)/' 'is of the gate money, which Risks does not name'
 git config -f trellis.config gate.money.paths 'lib/{a,b}.sh' 'lib/'
 fails 'a gate whose glob is not read' 's/x/x/' 'gate.money.paths: glob lib/{a,b}.sh uses syntax trellis does not read'
 git config -f trellis.config --remove-section gate.money
 git config -f trellis.config --remove-section gate.release-notes
+tl_eq 'none with its reason' '0' "$(case_of 's/^Gates: none\.$/Gates: none (nothing is paid, nor sent)/')"
+tl_eq 'and text after it' '0' "$(case_of 's/^Gates: none\.$/Gates: none (nothing is paid). It may break (a bit)./')"
+fails 'none and a name, with reasons' 's/^Gates: none\.$/Gates: none (x), money (y)/' 'there is no [gate "none"]'
 git config -f trellis.config project.locale es
 sed 's/^Gates: ninguno/Gates: none/' "$TL_TMP/good-es.md" > "$TL_TMP/case.md"
 tl_eq 'es: none is not its word' '1' "$(status_of check --body "$TL_TMP/case.md")"
@@ -898,6 +955,21 @@ done
 printf 'm\n' > "$GH_FIXTURES/labels"
 tl_eq 'a label in lower case is the same label' '0' "$(create_of --title x --body-file "$TL_TMP/good.md")"
 tl_lacks '  and is not created again' 'POST labels' "$(writes)"
+printf 'bug\n' > "$GH_FIXTURES/labels"
+tl_eq 'without issue.class = label, --class is a wrong use' '2' "$(create_of --title x --body-file "$TL_TMP/good.md" --class S)"
+git config -f trellis.config issue.class label
+tl_eq 'with it, its class is asked for' '2' "$(create_of --title x --body-file "$TL_TMP/classless.md")"
+tl_has '  by its name' '--class S, M or L' "$(out)"
+tl_eq '  and nothing is written' '' "$(writes)"
+for class in XL m ''; do
+  tl_eq "and it is one of the three ('$class' is not)" '2' "$(create_of --title x --body-file "$TL_TMP/classless.md" --class "$class")"
+done
+tl_eq 'with its class it is created' '0' "$(create_of --title x --body-file "$TL_TMP/classless.md" --class L)"
+tl_has '  its label is created first' 'POST labels name=L color=' "$(head -n 1 "$GH_FIXTURES/writes.log")"
+tl_has '  and used' 'labels=L' "$(tail -n 1 "$GH_FIXTURES/writes.log")"
+tl_eq 'the line of a body is not its class' '0' "$(create_of --title x --body-file "$TL_TMP/good.md" --class=S)"
+tl_has '  which is the one of the flag' 'labels=S' "$(tail -n 1 "$GH_FIXTURES/writes.log")"
+git config -f trellis.config --remove-section issue
 printf 'bug\n' > "$GH_FIXTURES/labels"
 (cd "$TL_TMP" && cp good.md "$repo/relative.md")
 tl_eq 'a relative body file, the flags with = and in another order' '0' "$(create_of --body-file=relative.md --title='With = sign')"

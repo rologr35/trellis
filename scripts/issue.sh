@@ -12,7 +12,7 @@
 #                                        takes the issue for this session
 #   trellis issue stop <n> --body-file <file>
 #                                        leaves the issue stopped, with what it needs in a comment
-#   trellis issue create --title <t> --body-file <file>
+#   trellis issue create --title <t> --body-file <file> [--class S|M|L]
 #                                        checks the body, creates the issue, prints its URL
 #   trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>
 #                           [--reopen <date> | --when <fact>] [--approved]
@@ -21,12 +21,15 @@
 #                                        pending actions are done
 #
 # The check: the five sections of project.locale present, once, in order and not empty; each item of
-# Out of scope with its Source; the last line with text `Complexity: S`, M or L; every path in
+# Out of scope with its Source, unless the list is only `none`; the last line with text `Complexity: S`, M or L; every path in
 # backticks of Layers and files, outside its New list, in origin/<git.integrationBranch>, which is
 # fetched first; Risks opening with `Gates: none` or the names of the [gate] the plan touches, that exist
-# and are every gate whose paths match one of Layers and files; and the style of pr-check (no long dash,
+# and are every gate whose paths match one of Layers and files, each with its reason in parentheses after
+# it, or none; and the style of pr-check (no long dash,
 # no attribution, no bare #N, with the references of a Depends on line allowed). `Needs:` in Risks is
 # optional: what a run cannot take. The names per locale live in lib/locale.mjs.
+# With issue.class = label the complexity line is not asked for nor read, in an amendment either: the
+# class is the one label S, M or L of the issue, and none or two is a miss. A body has no label.
 #
 # The plan of an issue is its body, with each section, and the complexity line, of the last comment
 # headed `## Amendment (<date>)` that has it (a section as a `###` heading). Only what an owner, a member
@@ -53,7 +56,8 @@
 # the file, none of them empty (`none` counts), and the label stopped, created when the repository lacks
 # it. The assignee, when there is one, stays.
 #
-# The label of the issue created is the class of its complexity line. S, M and L are created when the
+# The label of the issue created is the class of its complexity line, or of --class, which
+# issue.class = label asks for and any other value refuses. S, M and L are created when the
 # repository lacks them.
 #
 # The follow-up is refused unless --checked is the head of origin/<git.integrationBranch> after a fetch,
@@ -89,7 +93,7 @@ usage() {
     printf '       trellis issue gates <n>\n'
     printf '       trellis issue claim <n> [--unattended] [--resume]\n'
     printf '       trellis issue stop <n> --body-file <file>\n'
-    printf '       trellis issue create --title <t> --body-file <file>\n'
+    printf '       trellis issue create --title <t> --body-file <file> [--class S|M|L]\n'
     printf '       trellis issue follow-up --title <t> --body-file <file> --search <words> --checked <sha>\n'
     printf '                               [--reopen <date> | --when <fact>] [--approved]\n'
     printf '       trellis issue close <pr> [--done]\n'
@@ -124,7 +128,11 @@ check_body() {
   fi
   fetch_integration
   judge body "$1" || return 1
-  printf 'issue check: ok (%s)\n' "$(judge class "$1")"
+  if [ "$(tc_get issue.class)" = 'label' ]; then
+    printf 'issue check: ok (the class is the label of the issue, which a body does not have)\n'
+  else
+    printf 'issue check: ok (%s)\n' "$(judge class "$1")"
+  fi
 }
 
 # One dependency: prints the miss when the issue is open or cannot be read, and then returns 2.
@@ -375,22 +383,32 @@ ensure_label() {
 }
 
 create_issue() {
-  local title='' file='' class colour
+  local title='' file='' class='' colour asked=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --title) [ $# -gt 1 ] || usage; title="$2"; shift ;;
       --title=*) title="${1#*=}" ;;
       --body-file) [ $# -gt 1 ] || usage; file="$2"; shift ;;
       --body-file=*) file="${1#*=}" ;;
+      --class) [ $# -gt 1 ] || usage; class="$2"; asked=true; shift ;;
+      --class=*) class="${1#*=}"; asked=true ;;
       *) usage ;;
     esac
     shift
   done
   [ -n "$title" ] && [ -f "$file" ] || usage
+  if [ "$(tc_get issue.class)" = 'label' ]; then
+    case "$class" in
+      S | M | L) ;;
+      *) printf 'issue create: with issue.class = label it takes --class S, M or L\n' >&2; usage ;;
+    esac
+  elif [ "$asked" = true ]; then
+    usage
+  fi
   case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
   fetch_integration
   judge body "$file" || return 1
-  class="$(judge class "$file")"
+  [ -n "$class" ] || class="$(judge class "$file")"
   case "$class" in S) colour=0E8A16 ;; M) colour=FBCA04 ;; *) colour=B60205 ;; esac
   ensure_label "$class" "$colour" "Complexity $class" && post_issue "$title" "$file" "$class"
 }

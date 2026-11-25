@@ -31,6 +31,8 @@ pr.action|multi|
 
 style.bareReference|enum:refuse,allow|refuse
 
+issue.class|enum:line,label|line
+
 autonomy.level|enum:careful,balanced,autonomous|careful
 
 workspace.kind|enum:flutter,dart,node,other|flutter
