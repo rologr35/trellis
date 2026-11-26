@@ -23,6 +23,7 @@
 #   trellis lesson --title <t> --body-file <file> --search <words> [--issue <n> [--reopen]]
 #                  [--approved <digest>]
 #   trellis private-names (--staged | --file <file> | --text <text>)...
+#   trellis waiting [--follow]              the sessions of this clone that wait for a person
 #   trellis check                           runs [command] check in order, fail-fast
 #
 # The plugin's bin/ is on the PATH of Claude's Bash tool only; a person, a git hook or a hook of the
@@ -40,7 +41,7 @@ TRELLIS_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
 export TRELLIS_ROOT
 
 usage() {
-  sed -n '3,26p' "$self" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,27p' "$self" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -92,6 +93,7 @@ case "$sub" in
   pr-check) exec bash "$TRELLIS_ROOT/scripts/pr-check.sh" "$@" ;;
   lesson) exec bash "$TRELLIS_ROOT/scripts/lesson.sh" "$@" ;;
   private-names) exec bash "$TRELLIS_ROOT/scripts/private-names.sh" "$@" ;;
+  waiting) exec bash "$TRELLIS_ROOT/scripts/waiting.sh" "$@" ;;
   issue) exec bash "$TRELLIS_ROOT/scripts/issue.sh" "$@" ;;
   check) exec bash "$TRELLIS_ROOT/scripts/check.sh" "$@" ;;
   -h | --help | help) usage ;;
