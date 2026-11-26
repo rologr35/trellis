@@ -1,6 +1,6 @@
 {
   "name": "trellis",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "A replicable agentic harness for Claude Code: always-loaded method, git guards, instruction hygiene, ratchets and project templates.",
   "repository": "https://github.com/rologr35/trellis",
   "license": "MIT"
