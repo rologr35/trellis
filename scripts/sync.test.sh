@@ -121,7 +121,9 @@ tl_eq 'without one no hook is written' "$before" "$(cat .claude/settings.json)"
 mkdir -p .trellis && printf '0.6.0 0123456789012345678901234567890123456789\n' > .trellis/VERSION
 "$TRELLIS" sync >/dev/null 2>&1
 at() { node -p "const s = require('$repo/.claude/settings.json'); JSON.stringify($1)"; }
-tl_eq 'the guard is a hook of Bash' '[{"matcher":"Bash","hooks":[{"type":"command","command":"own"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/hooks/guard-git.sh"}]}]' "$(at s.hooks.PreToolUse)"
+tl_eq 'the guard is a hook of Bash, and unattended one of AskUserQuestion' '[{"matcher":"Bash","hooks":[{"type":"command","command":"own"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/hooks/guard-git.sh"}]},{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/hooks/unattended.sh"}]}]' "$(at s.hooks.PreToolUse)"
+tl_eq 'unattended is the one of a permission request' '[{"hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/hooks/unattended.sh"}]}]' "$(at s.hooks.PermissionRequest)"
+tl_eq 'waiting is the one of a notification' '[{"hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/hooks/waiting.sh"}]}]' "$(at s.hooks.Notification)"
 tl_eq 'setup is the one of the session start' '[{"hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR\"/.trellis/bin/trellis setup --quiet"}]}]' "$(at s.hooks.SessionStart)"
 tl_eq 'another hook of the project stays' '[{"matcher":"Edit","hooks":[{"type":"command","command":"fmt"}]}]' "$(at s.hooks.PostToolUse)"
 tl_eq 'and another key' '"sonnet"' "$(at s.model)"
@@ -134,10 +136,19 @@ node -e '
   fs.writeFileSync(".claude/settings.json", JSON.stringify(s, null, 2) + "\n");
 '
 "$TRELLIS" sync >/dev/null 2>&1
-tl_eq 'a guard that does not wait does not stand for the guard' '3' "$(at s.hooks.PreToolUse.length)"
+tl_eq 'a guard that does not wait does not stand for the guard' '4' "$(at s.hooks.PreToolUse.length)"
+node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+  delete s.hooks.Notification;
+  s.hooks.PermissionRequest = [];
+  fs.writeFileSync(".claude/settings.json", JSON.stringify(s, null, 2) + "\n");
+'
+"$TRELLIS" sync >/dev/null 2>&1
+tl_eq 'a lost hook is written again, once' '"1|1|4"' "$(at "[s.hooks.Notification.length, s.hooks.PermissionRequest.length, s.hooks.PreToolUse.length].join('|')")"
 rm .claude/settings.json
 "$TRELLIS" sync >/dev/null 2>&1
-tl_eq 'the settings are written when there are none' '1' "$(at s.hooks.PreToolUse.length)"
+tl_eq 'the settings are written when there are none' '"2|1|1|1"' "$(at "[s.hooks.PreToolUse.length, s.hooks.PermissionRequest.length, s.hooks.Notification.length, s.hooks.SessionStart.length].join('|')")"
 
 printf '\nthe repository of trellis\n'
 own="$(tl_upstream)"
