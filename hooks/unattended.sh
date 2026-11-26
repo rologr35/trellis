@@ -7,8 +7,9 @@
 #     reads the message and goes on;
 #
 # with one reason for both, in the locale of the project (lib/locale.mjs, UNATTENDED): no person answers,
-# what needs one is a stop (`trellis issue stop <n> --body-file <file>` with Done, Missing and Needs), and
-# the run ends, as skills/work/SKILL.md says. Without CLAUDE_CODE_REMOTE it prints nothing: a local session
+# what needs one is a stop, the one the instructions of the run name when they name their own (a project's
+# routine with its own stop comment), else `trellis issue stop <n> --body-file <file>` with Done, Missing
+# and Needs, and the run ends, as skills/work/SKILL.md says. Without CLAUDE_CODE_REMOTE it prints nothing: a local session
 # asks as it always did.
 #
 # The project is the one of CLAUDE_PROJECT_DIR, or of the directory of the payload; its trellis.config gives
