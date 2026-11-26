@@ -42,7 +42,7 @@ tl_eq 'another type appends nothing' 4 "$(lines)"
 payload permission_prompt "$TL_TMP/wt" s2 | bash "$HOOK"
 tl_eq 'a worktree appends to the same file' 5 "$(lines)"
 tl_has 'with its branch' '"branch":"8-other"' "$(tail -n 1 "$log")"
-tl_eq 'no log in the worktree' no "$([ -e "$TL_TMP/wt/.git/trellis" ] && echo yes || echo no)"
+tl_eq 'no log under the git directory of the worktree' no "$([ -e "$(git -C "$TL_TMP/wt" rev-parse --path-format=absolute --git-dir)/trellis" ] && echo yes || echo no)"
 ro="$(tl_repo)"
 mkdir -p "$ro/.git/trellis" && chmod 500 "$ro/.git/trellis"
 payload permission_prompt "$ro" | bash "$HOOK"; code=$?

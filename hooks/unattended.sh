@@ -42,8 +42,8 @@ locale="$(tc_get project.locale 2>/dev/null)"
 
 node --input-type=module -e '
   const [root, event, locale] = process.argv.slice(1);
-  const {UNATTENDED} = await import(`${root}/lib/locale.mjs`);
-  const reason = (UNATTENDED[locale] ?? UNATTENDED.en).reason;
+  const {UNATTENDED, localeNamed} = await import(`${root}/lib/locale.mjs`);
+  const reason = UNATTENDED[localeNamed(locale)].reason;
   const out = event === "PreToolUse"
     ? {hookEventName: event, permissionDecision: "deny", permissionDecisionReason: reason}
     : {hookEventName: event, decision: {behavior: "deny", message: reason}};

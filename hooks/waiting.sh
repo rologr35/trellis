@@ -79,8 +79,8 @@ mkdir "$common/trellis/stopped/$session" || exit 0
 body="$(mktemp)" || exit 0
 node --input-type=module -e '
   const [root, locale, type, message] = process.argv.slice(1);
-  const {PR_SECTIONS, STOP, UNATTENDED} = await import(`${root}/lib/locale.mjs`);
-  const l = locale === "es" ? "es" : "en";
+  const {PR_SECTIONS, STOP, UNATTENDED, localeNamed} = await import(`${root}/lib/locale.mjs`);
+  const l = localeNamed(locale);
   const [done, missing, needs] = STOP[l].sections;
   const asks = message.trim() || type;
   process.stdout.write(`**${done}**: ${PR_SECTIONS[l].noneWord}\n\n**${missing}**: ${UNATTENDED[l].waiting(type)}\n\n**${needs}**: ${asks}\n`);

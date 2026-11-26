@@ -23,7 +23,7 @@
 #   trellis lesson --title <t> --body-file <file> --search <words> [--issue <n> [--reopen]]
 #                  [--approved <digest>]
 #   trellis private-names (--staged | --file <file> | --text <text>)...
-#   trellis waiting [--follow]              the sessions of this clone that wait for a person
+#   trellis waiting [--follow]              the last wait of each session of this clone, 24 hours
 #   trellis check                           runs [command] check in order, fail-fast
 #
 # The plugin's bin/ is on the PATH of Claude's Bash tool only; a person, a git hook or a hook of the

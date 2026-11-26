@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# waiting: the sessions of this clone that wait for a person, from the log hooks/waiting.sh writes
-# (trellis/waiting.log under the common git directory, which every worktree shares).
+# waiting: the last time each session of this clone waited for a person, from the log hooks/waiting.sh
+# writes (trellis/waiting.log under the common git directory, which every worktree shares). The log holds
+# waits, not answers: a session listed may have been answered since, or closed.
 #
 #   trellis waiting            the sessions whose last line is less than 24 hours old, one per session,
 #                              newest first: time, branch, notification_type, message and directory
