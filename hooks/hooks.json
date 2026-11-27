@@ -9,25 +9,6 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-git.sh\""
           }
         ]
-      },
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unattended.sh\""
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/unattended.sh\""
-          }
-        ]
       }
     ],
     "Notification": [

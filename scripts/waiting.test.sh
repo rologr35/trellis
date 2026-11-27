@@ -40,6 +40,13 @@ out="$(cat "$TL_TMP/follow")"
 tl_has 'a line appended after it starts is printed' '10-live  permission_prompt  Claude needs your permission to use Write' "$out"
 tl_lacks 'the lines before it are not' '7-one' "$out"
 
+echo 'waiting: the log the hook writes'
+other="$(tl_repo)"
+git -C "$other" checkout -q -b 11-hooked
+printf '{"session_id":"e","cwd":"%s","notification_type":"idle_prompt","message":"Claude is waiting for your input"}' "$other" \
+  | bash "$TRELLIS_ROOT/hooks/waiting.sh"
+tl_has 'a wait the hook wrote is listed' '11-hooked  idle_prompt  Claude is waiting for your input' "$(cd "$other" && bash "$TRELLIS" waiting)"
+
 out="$(bash "$TRELLIS" waiting --bogus 2>&1)"; code=$?
 tl_eq 'a usage error exits 2' 2 "$code"
 

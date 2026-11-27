@@ -56,6 +56,8 @@ toolchain.envFile|multi|
 command.check|multi|
 command.secretScan|single|
 command.install|single|
+# The command hooks/waiting.sh runs when a session waits for a person, with the wait in TRELLIS_WAIT_*.
+command.notify|single|
 command.pullRequestCheck|single|
 command.issueCheck|single|
 command.commitCheck|single|

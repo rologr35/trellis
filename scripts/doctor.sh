@@ -114,7 +114,7 @@ else
     fail 'trellis.config: git.worktreeAdd names no command'
   fi
   missing_commands=''
-  for name in $(tc_all command.check) $(tc_get command.secretScan) $(tc_get command.install) \
+  for name in $(tc_all command.check) $(tc_get command.secretScan) $(tc_get command.install) $(tc_get command.notify) \
     $(tc_get command.pullRequestCheck) $(tc_get command.issueCheck) $(tc_get command.commitCheck); do
     [ -n "$(tc_get "command.$name.run")" ] || missing_commands="$missing_commands $name"
   done

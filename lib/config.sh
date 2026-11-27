@@ -16,6 +16,7 @@
 #                           of an enum key of the schema (the defaults are always accepted)
 #   tc_check                exit status 3 and the parse error on stderr when the file exists and
 #                           does not parse; bin/trellis runs it before every subcommand but doctor
+#   tc_branch_issue <b>     the number of the issue a branch <n>-<slug> names, or nothing
 #
 # A config that does not parse fails closed: every reader but the doctor stops on tc_check instead
 # of answering the schema's defaults, which would quietly unprotect the branches the file names.
@@ -140,6 +141,10 @@ tc_all() {
 
 tc_get() {
   tc_all "$1" | tail -n 1
+}
+
+tc_branch_issue() {
+  if [[ "$1" =~ ^([0-9]+)- ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
 }
 
 tc_subsections() {

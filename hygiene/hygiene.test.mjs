@@ -166,13 +166,11 @@ test('settings that lost a hook of the copy, or its deny, fail', () => {
   const settings = p.read('.claude/settings.json');
   for (const [lost, needle] of [
     ['guard-git.sh', 'hooks.PreToolUse lacks bash "$CLAUDE_PROJECT_DIR"/.trellis/hooks/guard-git.sh'],
-    ['"AskUserQuestion"', 'hooks.PreToolUse lacks bash "$CLAUDE_PROJECT_DIR"/.trellis/hooks/unattended.sh'],
-    ['"PermissionRequest"', 'hooks.PermissionRequest lacks bash "$CLAUDE_PROJECT_DIR"/.trellis/hooks/unattended.sh'],
     ['waiting.sh', 'hooks.Notification lacks bash "$CLAUDE_PROJECT_DIR"/.trellis/hooks/waiting.sh'],
     ['setup --quiet', 'hooks.SessionStart lacks'],
     ['Edit(/.trellis/**)', 'permissions.deny lacks Edit(/.trellis/**)'],
   ]) {
-    p.write('.claude/settings.json', settings.replace(lost, lost.startsWith('"') ? '"x"' : 'x'));
+    p.write('.claude/settings.json', settings.replace(lost, 'x'));
     fails(p, needle);
   }
   const own = JSON.parse(settings);

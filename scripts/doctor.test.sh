@@ -43,7 +43,7 @@ git config -f trellis.config --remove-section bogus
 git config -f trellis.config --add command.check missing
 tl_eq 'a command name without run fails' '1' "$(doctor)"
 git config -f trellis.config --unset-all command.check
-for key in pullRequestCheck issueCheck commitCheck; do
+for key in pullRequestCheck issueCheck commitCheck notify; do
   git config -f trellis.config "command.$key" missing
   tl_eq "command.$key without run fails" '1' "$(doctor)"
   tl_has 'naming it' 'named but without [command "<name>"] run: missing' "$(out)"
