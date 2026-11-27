@@ -171,10 +171,6 @@ of_the_session() {
   return 0
 }
 
-branch_issue() {
-  if [[ "$1" =~ ^([0-9]+)- ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
-}
-
 guard_branch_switch() {
   local dir="$1" target="$2" branch issue state does=''
   is_main_checkout "$dir" || return 0
@@ -185,7 +181,7 @@ guard_branch_switch() {
   fi
   [ "$TRACKER" = 'github' ] || return 0
   branch="$(git -C "$dir" branch --show-current 2>/dev/null)" || return 0
-  issue="$(branch_issue "$branch")"
+  issue="$(tc_branch_issue "$branch")"
   [ -n "$issue" ] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   if ! gh_api "$dir" '' "issues/$issue" --jq .state; then

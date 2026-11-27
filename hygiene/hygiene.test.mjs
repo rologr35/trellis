@@ -164,10 +164,19 @@ test('a copy that is not whole fails', () => {
 test('settings that lost a hook of the copy, or its deny, fail', () => {
   const p = withCopy(project());
   const settings = p.read('.claude/settings.json');
-  for (const [lost, needle] of [['guard-git.sh', 'hooks.PreToolUse lacks'], ['setup --quiet', 'hooks.SessionStart lacks'], ['Edit(/.trellis/**)', 'permissions.deny lacks Edit(/.trellis/**)']]) {
+  for (const [lost, needle] of [
+    ['guard-git.sh', 'hooks.PreToolUse lacks bash "$CLAUDE_PROJECT_DIR"/.trellis/hooks/guard-git.sh'],
+    ['waiting.sh', 'hooks.Notification lacks bash "$CLAUDE_PROJECT_DIR"/.trellis/hooks/waiting.sh'],
+    ['setup --quiet', 'hooks.SessionStart lacks'],
+    ['Edit(/.trellis/**)', 'permissions.deny lacks Edit(/.trellis/**)'],
+  ]) {
     p.write('.claude/settings.json', settings.replace(lost, 'x'));
     fails(p, needle);
   }
+  const own = JSON.parse(settings);
+  own.hooks.PostToolUse = [{matcher: 'Edit', hooks: [{type: 'command', command: 'fmt'}]}];
+  p.write('.claude/settings.json', JSON.stringify(own, null, 2) + '\n');
+  passes(p);
   rmSync(path.join(p.root, '.claude/settings.json'));
   fails(p, '.claude/settings.json: is not there');
 });
