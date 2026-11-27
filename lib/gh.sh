@@ -33,7 +33,7 @@
 #                  (<owner>)", "the signed-in account (<name>)" or "the active account"
 # and return gh's exit status. gh api prints the body of an error on stdout, so GH_AS_OUT is an answer
 # only when the status is 0. The result of each lookup is kept for the run: a token per account, and
-# the account of step 3 per owner.
+# the account of step 3 per repository.
 #
 # Works with bash 3.2.
 
@@ -42,9 +42,9 @@ command -v tc_get >/dev/null 2>&1 || . "$(dirname "${BASH_SOURCE[0]}")/config.sh
 GH_AS_OUT=''
 GH_AS_ERR=''
 GH_AS_ACCOUNT=''
-# One record per owner looked up: "<owner>\001<token or empty>\n".
+# One record per account looked up: "<account>\001<token or empty>\n".
 GH_TOKEN_CACHE=$'\n'
-# One record per owner whose accounts were tried: "<owner>\001<account or empty>\n".
+# One record per repository the accounts were tried on: "<owner>/<name>\001<account or empty>\n".
 GH_FOUND_CACHE=$'\n'
 
 # gh_split <text>: the host, owner and name of a repository named as owner/repo, host/owner/repo, an
@@ -196,28 +196,37 @@ gh_accounts() {
 }
 
 # gh_find_account <owner>: the first signed-in account that the repository of GH_REPO_PATH (gh_repo, which
-# every caller runs first) answers, in GH_FOUND (empty with none), kept per owner. Nothing is tried
-# when that path is not one of <owner>.
+# every caller runs first) answers, in GH_FOUND (empty with none), kept per repository: two of one owner
+# may be seen by different accounts. Nothing is tried when that path is not one of <owner>. A try refused
+# with HTTP 401, 403 or 404 goes on to the next account. Any other failure, a rate limit too, does not
+# say what that account sees: no other is tried, so that none answers in its place, and nothing is kept.
 gh_find_account() {
-  local owner="$1" account
+  local owner="$1" account key refusal
   GH_FOUND=''
-  if gh_cached "$GH_FOUND_CACHE" "$owner"; then
+  [ "$(gh_lower "${GH_REPO_PATH%%/*}")" = "$(gh_lower "$owner")" ] || return 0
+  key="$(gh_lower "$GH_REPO_PATH")"
+  if gh_cached "$GH_FOUND_CACHE" "$key"; then
     GH_FOUND="$GH_HIT"
     return 0
   fi
-  [ "$(gh_lower "${GH_REPO_PATH%%/*}")" = "$(gh_lower "$owner")" ] || return 0
   # The list is read on its own descriptor, so that no gh call can read it.
   while IFS= read -r account <&3; do
     [ -n "$account" ] || continue
     gh_token_of "$account"
     [ -n "$GH_TOK" ] || continue
-    if GH_TOKEN="$GH_TOK" GH_PROMPT_DISABLED=1 gh api "repos/$GH_REPO_PATH" \
-         ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} >/dev/null 2>&1 </dev/null; then
+    # What the try says is only matched here, never printed: it may hold the token.
+    if refusal="$(GH_TOKEN="$GH_TOK" GH_PROMPT_DISABLED=1 gh api "repos/$GH_REPO_PATH" \
+         ${GH_REPO_HOST:+--hostname "$GH_REPO_HOST"} 2>&1 >/dev/null </dev/null)"; then
       GH_FOUND="$account"
       break
     fi
+    case "$refusal" in
+      *'rate limit'*) return 0 ;;
+      *'HTTP 401'* | *'HTTP 403'* | *'HTTP 404'*) ;;
+      *) return 0 ;;
+    esac
   done 3<<< "$(gh_accounts)"
-  GH_FOUND_CACHE="$GH_FOUND_CACHE$owner"$'\001'"$GH_FOUND"$'\n'
+  GH_FOUND_CACHE="$GH_FOUND_CACHE$key"$'\001'"$GH_FOUND"$'\n'
 }
 
 # gh_account_for <dir> <owner>: the account a call about a repository of <owner> borrows (the head of

@@ -12,7 +12,7 @@ mkdir -p "$stubs"
 # prints token-<user> or fails, as gh does for an account that is not signed in. `auth status` lists the
 # accounts of `accounts` (a name per line, `active` or `broken` after it) in the shape of gh's, or fails
 # without it. A repository answers the tokens of `sees-<owner>_<name>`, and `probe-leaks` makes a refusal
-# of one print the token. An error has its body on stdout, as that of gh api has.
+# of one print the token; `probe-error-<token>` is what a try of that token fails with. An error has its body on stdout, as that of gh api has.
 cat > "$stubs/gh" <<'GH'
 #!/bin/sh
 tok="${GH_TOKEN:-none}"
@@ -59,7 +59,8 @@ case "$2" in
   repos/*/*/*) fail "gh: Not Found (HTTP 404)" ;;
   repos/*/*)
     grep -qx -- "$tok" "$GH_FIXTURES/sees-$(printf '%s' "$repo" | tr / _)" 2>/dev/null && { echo '{}'; exit 0; }
-    [ -f "$GH_FIXTURES/probe-leaks" ] && fail "auth failed for token $tok"
+    [ -f "$GH_FIXTURES/probe-error-$tok" ] && fail "$(cat "$GH_FIXTURES/probe-error-$tok")"
+    [ -f "$GH_FIXTURES/probe-leaks" ] && fail "gh: no access for token $tok (HTTP 404)"
     fail "gh: Not Found (HTTP 404)" ;;
   *) fail "gh: Not Found (HTTP 404)" ;;
 esac
@@ -972,6 +973,8 @@ printf 'tok-gone\n' > "$GH_FIXTURES/token-gone"
 printf 'tok-side\ntok-later\n' > "$GH_FIXTURES/sees-bigorg_thing"
 for n in 21 22; do printf 'tok-side\n' > "$GH_FIXTURES/need-$n"; done
 printf 'develop\n' > "$GH_FIXTURES/pr-21"
+# One that any token reads, the active account's too.
+printf 'develop\n' > "$GH_FIXTURES/pr-24"
 set_origin https://github.com/bigorg/thing.git
 probes() { calls | sed -n 's|^api repos/bigorg/thing token=||p' | tr '\n' ' '; }
 git config -f trellis.config tracker.account side
@@ -1001,11 +1004,41 @@ verdict 'gh pr merge 21 && gh pr merge 21' >/dev/null
 tl_eq '  once for the run: one list' '1' "$(calls | grep -c 'auth status')"
 tl_eq '  and one probe of each account' 'tok-main tok-side ' "$(probes)"
 tl_eq '  for two reads' '2' "$(calls | grep -c 'pulls/21 token=tok-side')"
+printf 'tok-later\n' > "$GH_FIXTURES/sees-bigorg_lib"
+printf 'tok-later\n' > "$GH_FIXTURES/need-23"
+printf 'develop\n' > "$GH_FIXTURES/pr-23"
+reset
+tl_eq 'two repositories of one owner that different accounts see' 'allow' "$(verdict 'gh pr merge 21 && gh pr merge 23 -R bigorg/lib')"
+tl_has '  the first is read by its own' 'repos/bigorg/thing/pulls/21 token=tok-side' "$(calls)"
+tl_has '  and so is the second' 'repos/bigorg/lib/pulls/23 token=tok-later' "$(calls)"
+reset
+verdict 'gh pr merge 24 -R bigorg/unseen ; gh pr merge 21' >/dev/null
+tl_has '  one that no account sees keeps none from the next' 'repos/bigorg/thing/pulls/21 token=tok-side' "$(calls)"
+reset
+verdict 'gh pr merge 21 && gh pr merge 21 -R BigOrg/Thing' >/dev/null
+tl_eq '  and the case of a name makes no other repository' '1' "$(calls | grep -c 'auth status')"
+rm "$GH_FIXTURES/sees-bigorg_lib"
 touch "$GH_FIXTURES/probe-leaks"
 out="$(rawout 'gh pr merge 22' 2>&1)"
 tl_has '  the account used is named' 'the signed-in account (side)' "$out"
 tl_lacks '  no token is printed, of a probe either' 'tok-' "$out"
 rm "$GH_FIXTURES/probe-leaks"
+for refusal in 'gh: Bad credentials (HTTP 401)' 'gh: Resource protected by organization SAML enforcement. (HTTP 403)'; do
+  printf '%s\n' "$refusal" > "$GH_FIXTURES/probe-error-tok-main"
+  reset
+  tl_eq "a try refused with \"$refusal\" goes on to the next" 'allow' "$(verdict 'gh pr merge 21')"
+done
+for failure in 'error connecting to api.github.com' 'gh: Server Error (HTTP 502)' 'gh: API rate limit exceeded for user ID 1. (HTTP 403)'; do
+  printf '%s\n' "$failure" > "$GH_FIXTURES/probe-error-tok-main"
+  reset
+  verdict 'gh pr merge 21' >/dev/null
+  tl_eq "a try that fails with \"$failure\" says nothing of the account: no other is tried" 'tok-main ' "$(probes)"
+  tl_has '  and the active account is asked' 'repos/bigorg/thing/pulls/21 token=none' "$(calls)"
+done
+reset
+verdict 'gh pr merge 24 && gh pr merge 24' >/dev/null
+tl_eq '  nor is that kept: the next call tries again' 'tok-main tok-main ' "$(probes)"
+rm "$GH_FIXTURES/probe-error-tok-main"
 : > "$GH_FIXTURES/sees-bigorg_thing"
 reset
 out="$(rawout 'gh pr merge 22' 2>&1)"

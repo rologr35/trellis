@@ -74,7 +74,7 @@
 # writes neither the comment nor the label again. --done only takes the label off. A failure on one
 # issue leaves it open and goes on with the next.
 #
-# GitHub is asked through REST, as the account of the repository's owner (lib/gh.sh).
+# GitHub is asked through REST, as an account that sees the repository (lib/gh.sh).
 #
 # After the check of a body, and of the plan in force at pick-up as --print gives it, also when it
 # fails, runs the check of the project, command.issueCheck (lib/project-check.sh).

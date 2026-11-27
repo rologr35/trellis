@@ -158,7 +158,7 @@ The copy of a project holds `bin/`, `hooks/`, `lib/`, `scripts/`, `hygiene/`, `m
 - Every script runs with `/bin/bash` 3.2 and with the tools of macOS and of Linux.
 - Node has no dependencies: there is no `package.json`.
 - A new case is seen red before it is green, and the report says so. A mutation of a guard turns a case red: a guard whose suite passes without it is not tested.
-- GitHub is asked through `lib/gh.sh`, as the account of the owner of the repository, with the REST interface.
+- GitHub is asked through `lib/gh.sh`, as an account that sees the repository, with the REST interface.
 - In a worktree the command is `bin/trellis` of that worktree. `sync` and `hygiene` of another checkout refuse.
 - `.trellis/` in the method is the root of this repository: `.trellis/templates/en/issue.md` is `templates/en/issue.md`.
 
