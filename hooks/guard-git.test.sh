@@ -9,8 +9,10 @@ mkdir -p "$stubs"
 # from files: the state of an issue, the base of a pull request, and the bases of the open ones of a
 # branch. Each call is logged with the token it ran with (fake values), `need-<n>` makes a pull request
 # visible to that token only, `where-<n>` is the only repository that has it, and `auth token -u <user>`
-# prints token-<user> or fails, as gh does for an account that is not signed in. An error has its body on
-# stdout, as that of gh api has.
+# prints token-<user> or fails, as gh does for an account that is not signed in. `auth status` lists the
+# accounts of `accounts` (a name per line, `active` or `broken` after it) in the shape of gh's, or fails
+# without it. A repository answers the tokens of `sees-<owner>_<name>`, and `probe-leaks` makes a refusal
+# of one print the token. An error has its body on stdout, as that of gh api has.
 cat > "$stubs/gh" <<'GH'
 #!/bin/sh
 tok="${GH_TOKEN:-none}"
@@ -20,6 +22,19 @@ if [ "$1 $2" = 'auth token' ]; then
   user=''; prev=''
   for a in "$@"; do [ "$prev" = -u ] && user="$a"; prev="$a"; done
   cat "$GH_FIXTURES/token-$user" 2>/dev/null || exit 1
+  exit 0
+fi
+if [ "$1 $2" = 'auth status' ]; then
+  [ -f "$GH_FIXTURES/accounts" ] || exit 1
+  echo 'github.com'
+  while read -r name state; do
+    if [ "$state" = broken ]; then
+      printf '  X Failed to log in to github.com account %s (keyring)\n  - Active account: false\n\n' "$name"
+      continue
+    fi
+    active=false; [ "$state" = active ] && active=true
+    printf '  ✓ Logged in to github.com account %s (keyring)\n  - Active account: %s\n  - Token: gho_****\n\n' "$name" "$active"
+  done < "$GH_FIXTURES/accounts"
   exit 0
 fi
 [ "$1" = 'api' ] || { echo 'GitHub GraphQL is not available from Claude Code sessions; use the REST API' >&2; exit 1; }
@@ -41,6 +56,11 @@ case "$2" in
   repos/*/*/pulls)
     for a in "$@"; do case "$a" in head=*) cat "$GH_FIXTURES/$a" 2>/dev/null ;; esac; done
     exit 0 ;;
+  repos/*/*/*) fail "gh: Not Found (HTTP 404)" ;;
+  repos/*/*)
+    grep -qx -- "$tok" "$GH_FIXTURES/sees-$(printf '%s' "$repo" | tr / _)" 2>/dev/null && { echo '{}'; exit 0; }
+    [ -f "$GH_FIXTURES/probe-leaks" ] && fail "auth failed for token $tok"
+    fail "gh: Not Found (HTTP 404)" ;;
   *) fail "gh: Not Found (HTTP 404)" ;;
 esac
 GH
@@ -944,6 +964,61 @@ verdict 'gh pr merge 12' >/dev/null
 tl_has 'an ssh host alias gives no owner' 'repos/{owner}/{repo}/pulls/12 token=none' "$(calls)"
 set_origin https://github.com/acme/thing.git
 
+printf '\nan owner that is no account: an organization (#54)\n'
+for who in main side later; do printf 'tok-%s\n' "$who" > "$GH_FIXTURES/token-$who"; done
+# The active one is listed last: it is asked first all the same.
+printf 'gone broken\nside\nlater\nmain active\n' > "$GH_FIXTURES/accounts"
+printf 'tok-gone\n' > "$GH_FIXTURES/token-gone"
+printf 'tok-side\ntok-later\n' > "$GH_FIXTURES/sees-bigorg_thing"
+for n in 21 22; do printf 'tok-side\n' > "$GH_FIXTURES/need-$n"; done
+printf 'develop\n' > "$GH_FIXTURES/pr-21"
+set_origin https://github.com/bigorg/thing.git
+probes() { calls | sed -n 's|^api repos/bigorg/thing token=||p' | tr '\n' ' '; }
+git config -f trellis.config tracker.account side
+reset
+tl_eq 'tracker.account names the account that sees the repository' 'allow' "$(verdict 'gh pr merge 21')"
+tl_has '  whose token reads it' 'repos/bigorg/thing/pulls/21 token=tok-side' "$(calls)"
+tl_lacks '  with no list of accounts' 'auth status' "$(calls)"
+tl_eq '  and no probe' '' "$(probes)"
+out="$(rawout 'gh pr merge 22')"
+tl_has '  and is named' 'the account of tracker.account (side)' "$out"
+tl_lacks '  the token is not in the denial' 'tok-side' "$out"
+reset
+verdict 'gh pr merge 14 -R other/thing' >/dev/null
+tl_has '  it is not the account of another owner' 'repos/other/thing/pulls/14 token=tok-other' "$(calls)"
+git config -f trellis.config tracker.account nobody
+reset
+tl_eq 'a tracker.account gh is not signed in to leaves the search' 'allow' "$(verdict 'gh pr merge 21')"
+tl_has '  which finds the one that sees it' 'repos/bigorg/thing/pulls/21 token=tok-side' "$(calls)"
+git config -f trellis.config --unset tracker.account
+reset
+tl_eq 'without it, the accounts gh is signed in to are tried' 'allow' "$(verdict 'gh pr merge 21')"
+tl_has '  as gh lists them for the host' 'auth status token=none' "$(calls)"
+tl_eq '  the active one first, up to the first that answers' 'tok-main tok-side ' "$(probes)"
+tl_has '  whose token reads it' 'repos/bigorg/thing/pulls/21 token=tok-side' "$(calls)"
+reset
+verdict 'gh pr merge 21 && gh pr merge 21' >/dev/null
+tl_eq '  once for the run: one list' '1' "$(calls | grep -c 'auth status')"
+tl_eq '  and one probe of each account' 'tok-main tok-side ' "$(probes)"
+tl_eq '  for two reads' '2' "$(calls | grep -c 'pulls/21 token=tok-side')"
+touch "$GH_FIXTURES/probe-leaks"
+out="$(rawout 'gh pr merge 22' 2>&1)"
+tl_has '  the account used is named' 'the signed-in account (side)' "$out"
+tl_lacks '  no token is printed, of a probe either' 'tok-' "$out"
+rm "$GH_FIXTURES/probe-leaks"
+: > "$GH_FIXTURES/sees-bigorg_thing"
+reset
+out="$(rawout 'gh pr merge 22' 2>&1)"
+tl_has 'with none answering, the active account' 'the active account' "$out"
+tl_has '  with no token' 'repos/bigorg/thing/pulls/22 token=none' "$(calls)"
+tl_eq '  after each one was tried' 'tok-main tok-side tok-later ' "$(probes)"
+tl_lacks '  and no token printed' 'tok-' "$out"
+set_origin https://github.com/acme/thing.git
+reset
+verdict 'gh pr merge 12' >/dev/null
+tl_lacks 'an owner with its account needs no list' 'auth status' "$(calls)"
+rm "$GH_FIXTURES/accounts" "$GH_FIXTURES/sees-bigorg_thing"
+
 printf '\nthe repository gh merges in\n'
 printf 'acme/thing\n' > "$GH_FIXTURES/where-12"
 tl_eq 'the one of origin' 'allow' "$(verdict 'gh pr merge 12')"
@@ -973,6 +1048,7 @@ for var in GITHUB_TOKEN GH_HOST GH_REPO; do
   (export "$var=x"; verdict 'gh pr merge 12' >/dev/null)
   tl_has "$var set: asked as the active account" '/pulls/12 token=none' "$(calls)"
   tl_lacks "$var set: no lookup" 'auth token' "$(calls)"
+  tl_lacks "$var set: no list of accounts" 'auth status' "$(calls)"
 done
 reset
 tl_eq 'a token assigned in the command, base allowed' 'allow' "$(verdict 'GH_TOKEN=$(gh auth token -u x) gh pr merge 12')"
