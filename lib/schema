@@ -34,6 +34,8 @@ tracker.kind|enum:github,none|github
 # Regular expressions of JavaScript: a command of the session one of them matches is a search of the
 # backlog, besides the two of the guard. lib/search.mjs says which value is none.
 tracker.search|multi|
+# The gh account that sees the repository of origin, when its owner is no account (an organization).
+tracker.account|single|
 
 pr.section|multi|
 pr.action|multi|

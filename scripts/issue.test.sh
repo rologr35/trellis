@@ -7,8 +7,9 @@
 # GitHub in files: <owner>_<repo>/issue-<n>.json, comments-<n>.json and pr-<n>.json, in the shape of REST,
 # and `labels`. {owner}/{repo} is rologr35/fixture. Each call is logged with the token it ran with (fake
 # values), each write with its fields, and `auth token -u <user>` prints token-<user> or fails, as gh does
-# for an account not signed in. A file <what>-fails makes that write fail, and `race` holds who else is
-# assigned at the same time.
+# for an account not signed in. `auth status` lists the accounts of `accounts` (a name per line, the first
+# one active), and a repository with a file `sees` answers only the tokens it lists. A file <what>-fails
+# makes that write fail, and `race` holds who else is assigned at the same time.
 stubs="$TL_TMP/stubs"
 mkdir -p "$stubs"
 cat > "$stubs/gh" <<'GH'
@@ -19,6 +20,13 @@ const args = process.argv.slice(2);
 fs.appendFileSync(`${dir}/calls.log`, `${args.join('|')}| token=${process.env.GH_TOKEN || 'none'}\n`);
 const stop = text => { console.error(text); process.exit(1); };
 const read = file => fs.existsSync(`${dir}/${file}`) ? fs.readFileSync(`${dir}/${file}`, 'utf8') : null;
+if (args[0] === 'auth' && args[1] === 'status') {
+  const accounts = read('accounts');
+  if (accounts === null) process.exit(1);
+  console.log('github.com');
+  accounts.split('\n').filter(Boolean).forEach((name, i) => console.log(`  ✓ Logged in to github.com account ${name} (keyring)\n  - Active account: ${i === 0}\n`));
+  process.exit(0);
+}
 if (args[0] === 'auth') {
   const token = read(`token-${args[args.indexOf('-u') + 1]}`);
   if (token === null) process.exit(1);
@@ -54,6 +62,14 @@ const answer = value => {
   process.exit(0);
 };
 const [path] = endpoint.split('?');
+const [, owned, below] = /^repos\/([^/]+\/[^/]+)(\/.*)?$/.exec(path) || [];
+const sees = owned ? read(`${owned.replace('/', '_')}/sees`) : null;
+if (sees !== null && !sees.split('\n').includes(process.env.GH_TOKEN || 'none')) { console.error('gh: Not Found (HTTP 404)'); process.exit(1); }
+if (owned && below === undefined) {
+  if (sees === null) stop('gh: Not Found (HTTP 404)');
+  console.log('{}');
+  process.exit(0);
+}
 const [, named, rest] = /^repos\/([^/]+\/[^/]+)\/(.*)$/.exec(path) || [];
 const repo = named === '{owner}/{repo}' ? 'rologr35/fixture' : named;
 const at = file => `${(repo || '').replace('/', '_')}/${file}`;
@@ -467,6 +483,42 @@ rm "$here/issue-8.json"
 tl_eq 'a dependency that cannot be read fails' '1' "$(status_of check 1)"
 tl_has '  with the error of gh' 'depends on #8, whose state could not be read as the active account: gh: Not Found (HTTP 404)' "$(out)"
 state_of rologr35_fixture 8 closed
+printf '\na repository of an organization (#54)\n'
+printf 'main\nside\n' > "$GH_FIXTURES/accounts"
+for who in main side; do printf 'token-of-%s' "$who" > "$GH_FIXTURES/token-$who"; done
+state_of bigorg_x 3 closed
+printf 'token-of-side\n' > "$GH_FIXTURES/bigorg_x/sees"
+sed 's|^Depends on: .*|Depends on: bigorg/x#3|' "$TL_TMP/good.md" > "$TL_TMP/case.md"
+issue_json 60 "$TL_TMP/case.md"
+rm -f "$GH_FIXTURES/calls.log"
+tl_eq 'a dependency in it is read by the signed-in account that sees it' '0' "$(status_of check 60)"
+tl_has '  with its token' 'api|repos/bigorg/x/issues/3|--jq|.state| token=token-of-side' "$(cat "$GH_FIXTURES/calls.log")"
+tl_lacks '  which is not printed' 'token-of-' "$(out)"
+rm "$GH_FIXTURES/bigorg_x/issue-3.json"
+tl_eq 'one that cannot be read fails' '1' "$(status_of check 60)"
+tl_has '  naming the account asked' 'could not be read as the signed-in account (side)' "$(out)"
+tl_lacks '  and no token' 'token-of-' "$(out)"
+printf 'token-of-nobody\n' > "$GH_FIXTURES/bigorg_x/sees"
+tl_eq 'with no account that sees it, it fails too' '1' "$(status_of check 60)"
+tl_has '  asked as the active one' 'could not be read as the active account' "$(out)"
+tl_lacks '  with no token printed' 'token-of-' "$(out)"
+# The repository of the project itself, which tracker.account names the account of.
+git remote set-url origin https://github.com/bigorg/thing.git
+cp trellis.config "$TL_TMP/account.keep"
+git config -f trellis.config tracker.account side
+mkdir -p "$GH_FIXTURES/bigorg_thing"
+printf 'token-of-side\n' > "$GH_FIXTURES/bigorg_thing/sees"
+state_of bigorg_thing 3 closed
+printf '[]' > "$GH_FIXTURES/bigorg_thing/comments-3.json"
+rm -f "$GH_FIXTURES/calls.log"
+status_of claim 3 > /dev/null
+tl_has 'the project is read as the account of tracker.account' 'api|repos/bigorg/thing/issues/3| token=token-of-side' "$(cat "$GH_FIXTURES/calls.log")"
+tl_lacks '  with no list of accounts' 'auth|status' "$(cat "$GH_FIXTURES/calls.log")"
+tl_lacks '  and no token printed' 'token-of-' "$(out)"
+cp "$TL_TMP/account.keep" trellis.config
+git remote set-url origin "$remote"
+rm "$GH_FIXTURES/accounts" "$GH_FIXTURES/token-main" "$GH_FIXTURES/token-side"
+
 tl_eq 'a body does not ask for its dependencies' '0' "$(rm -f "$GH_FIXTURES/calls.log"; status_of check --body "$TL_TMP/good.md")"
 tl_eq '  no gh call' 'none' "$([ -f "$GH_FIXTURES/calls.log" ] && echo some || echo none)"
 sed 's/^Depends on: .*/Depends on:\

@@ -346,7 +346,7 @@ guard_gh_merge() {
     deny "A merge names its pull request (number, URL or branch), so its base can be read first: gh pr merge <n>. The assistant merges only into: ${allowed:-nothing}."
   fi
   # The repository is the one gh merges in: of the URL naming the pull request, of -R, or of the
-  # remote gh takes. Its owner's account is the one that sees it.
+  # remote gh takes. lib/gh.sh picks the account that asks it.
   local hint="$repo" number=''
   case "$target" in http://* | https://*) hint="$target" ;; esac
   [ -n "$hint" ] || hint="$(gh_merge_remote "$dir")"
