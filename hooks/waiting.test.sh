@@ -76,14 +76,19 @@ tl_eq 'idle_prompt: a line' "$((before + 1))" "$(lines)"
 tl_eq 'idle_prompt: no command' 3 "$(calls_n)"
 
 payload permission_prompt "$repo" n1 'Claude needs your input' | bash "$HOOK"
-tl_eq 'the same wait again, within 10 minutes: no command' 3 "$(calls_n)"
-tl_eq '  but its line' "$((before + 2))" "$(lines)"
-for m in "$repo"/.git/trellis/notified/n1-*; do touch -t 202001010000 "$m"; done
+tl_eq 'the same wait again, within 30 seconds: no command' 3 "$(calls_n)"
+tl_eq '  and no second line' "$((before + 1))" "$(lines)"
+for m in "$repo"/.git/trellis/notified/n1-*; do printf '%s' "$(($(date +%s) - 31))" > "$m"; done
 payload permission_prompt "$repo" n1 'Claude needs your input' | bash "$HOOK"
-tl_eq 'the same wait after 10 minutes: announced again' 4 "$(calls_n)"
+tl_eq 'the same wait after 30 seconds: announced again' 4 "$(calls_n)"
+tl_eq '  with its line' "$((before + 2))" "$(lines)"
 
+before="$(lines)"
 ( payload permission_prompt "$repo" n2 | bash "$HOOK" ) & ( payload permission_prompt "$repo" n2 | bash "$HOOK" ) & wait
 tl_eq 'two runs together: one command' 5 "$(calls_n)"
+tl_eq '  and one line' "$((before + 1))" "$(lines)"
+# What a red case leaves, so a run on another system can be read without a rerun.
+[ "$(calls_n)" = 5 ] || { ls -la --full-time "$repo/.git/trellis/notified" 2>/dev/null || ls -laT "$repo/.git/trellis/notified"; tail -n 3 "$calls"; date; }
 
 cp "$repo/trellis.config" "$TL_TMP/wt/trellis.config"
 payload permission_prompt "$TL_TMP/wt" n3 | bash "$HOOK"
@@ -125,12 +130,20 @@ mkdir "$old" && touch -t 202001010000 "$old"
 payload permission_prompt "$repo" p1 | bash "$HOOK"
 tl_eq 'a marker older than 10 minutes is removed' no "$([ -e "$old" ] && echo yes || echo no)"
 tl_eq 'and the lock with it' no "$([ -e "$repo/.git/trellis/notified/.lock" ] && echo yes || echo no)"
+mkdir "$repo/.git/trellis/notified/.lock" && printf '%s' "$(($(date +%s) - 10))" > "$repo/.git/trellis/notified/.lock/at"
+payload permission_prompt "$repo" p2 | bash "$HOOK"
+tl_eq 'a lock older than 5 seconds is of a dead run: the wait is announced' 13 "$(calls_n)"
+i=0
+while [ "$i" -lt 1001 ]; do echo '{}'; i=$((i + 1)); done >> "$log"
+payload permission_prompt "$repo" p3 | bash "$HOOK"
+tl_eq 'a log past 1000 lines keeps its last 500' 500 "$(lines)"
+tl_eq '  the last one the new wait' '"session_id":"p3"' "$(tail -n 1 "$log" | grep -o '"session_id":"p3"')"
 
 git config -f "$repo/trellis.config" command.notify ''
 git config -f "$repo/trellis.config" --remove-section command.ping
 git config -f "$repo/trellis.config" command.notify missing
 out="$(payload permission_prompt "$repo" m1 | bash "$HOOK")"; code=$?
 tl_eq 'a command name without run: no output, exit 0' '|0' "$out|$code"
-tl_eq '  nothing runs' 12 "$(calls_n)"
+tl_eq '  nothing runs' 14 "$(calls_n)"
 
 tl_done
